@@ -2,7 +2,6 @@ import React, { useState } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { Plus, Edit2, Trash2, TruckIcon, X } from 'lucide-react';
 import { useForm } from 'react-hook-form';
-import { zodResolver } from '@hookform/resolvers/zod';
 import { z } from 'zod';
 import { stockPurchasesApi, vendorsApi, productsApi } from '../services/inventory.service';
 import { useAccountStore } from '../store/accountStore';
@@ -13,18 +12,10 @@ import { EmptyState, LoadingSpinner, ConfirmDialog } from '../components/ui/Feed
 import toast from 'react-hot-toast';
 import type { DateRange, StockPurchase, Vendor, Product } from '../types';
 
-const itemSchema = z.object({
-  product: z.string().min(1, 'Required'),
-  quantityPurchased: z.number().int().positive(),
-  purchasePricePerUnit: z.number().positive(),
-  totalAmount: z.number().positive(),
-});
-
 const schema = z.object({
   purchaseDate: z.string().min(1, 'Required'),
   vendor: z.string().min(1, 'Required'),
   vendorInvoiceNumber: z.string().optional(),
-  items: z.array(itemSchema).min(1, 'At least one item is required'),
   discount: z.number().min(0).default(0),
   additionalCosts: z.number().min(0).default(0),
   taxAmount: z.number().min(0).default(0),
@@ -41,8 +32,8 @@ const StockPurchasesPage: React.FC = () => {
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [editingPurchase, setEditingPurchase] = useState<StockPurchase | null>(null);
   const [deleteId, setDeleteId] = useState<string | null>(null);
-  const [items, setItems] = useState<Array<{ product: string; quantityPurchased: number; purchasePricePerUnit: number; totalAmount: number }>>([
-    { product: '', quantityPurchased: 1, purchasePricePerUnit: 0, totalAmount: 0 }
+  const [items, setItems] = useState<Array<{ id: string; product: string; quantityPurchased: number; purchasePricePerUnit: number; totalAmount: number }>>([
+    { id: Date.now().toString(), product: '', quantityPurchased: 1, purchasePricePerUnit: 0, totalAmount: 0 }
   ]);
 
   const params = {
@@ -64,9 +55,8 @@ const StockPurchasesPage: React.FC = () => {
   const products: Product[] = productsData?.data?.data || [];
   const totalCost = purchases.reduce((s, p) => s + p.totalAmount, 0);
 
-  const { register, handleSubmit, watch, reset, formState: { errors } } = useForm<FormData>({
-    resolver: zodResolver(schema),
-    defaultValues: { purchaseDate: new Date().toISOString().split('T')[0], paymentStatus: 'paid', discount: 0, additionalCosts: 0, taxAmount: 0, items },
+  const { register, handleSubmit, watch, reset } = useForm<FormData>({
+    defaultValues: { purchaseDate: new Date().toISOString().split('T')[0], paymentStatus: 'paid', discount: 0, additionalCosts: 0, taxAmount: 0 },
   });
 
   const disc = watch('discount') || 0;
@@ -76,7 +66,7 @@ const StockPurchasesPage: React.FC = () => {
   const total = itemsSubtotal - disc + addCosts + tax;
 
   const addItem = () => {
-    setItems([...items, { product: '', quantityPurchased: 1, purchasePricePerUnit: 0, totalAmount: 0 }]);
+    setItems([...items, { id: Date.now().toString(), product: '', quantityPurchased: 1, purchasePricePerUnit: 0, totalAmount: 0 }]);
   };
 
   const removeItem = (index: number) => {
@@ -115,9 +105,16 @@ const StockPurchasesPage: React.FC = () => {
   });
 
   const onSubmit = (d: FormData) => {
+    // Validate items manually
+    const invalidItem = items.find(item => !item.product || item.quantityPurchased <= 0 || item.purchasePricePerUnit <= 0);
+    if (invalidItem) {
+      toast.error('Please fill in all item fields correctly');
+      return;
+    }
+
     const payload = {
       ...d,
-      items: items.map(item => ({
+      items: items.map(({ id, ...item }) => ({
         ...item,
         purchasePricePerUnit: rupeesToPaise(item.purchasePricePerUnit),
         totalAmount: rupeesToPaise(item.totalAmount),
@@ -136,17 +133,17 @@ const StockPurchasesPage: React.FC = () => {
     setEditingPurchase(p);
     const purchaseItems = Array.isArray(p.items) ? p.items : [];
     const formattedItems = purchaseItems.map((item: any) => ({
+      id: Date.now().toString() + Math.random(),
       product: typeof item.product === 'string' ? item.product : item.product._id,
       quantityPurchased: item.quantityPurchased,
       purchasePricePerUnit: paiseToRupees(item.purchasePricePerUnit),
       totalAmount: paiseToRupees(item.totalAmount),
     }));
-    setItems(formattedItems.length > 0 ? formattedItems : [{ product: '', quantityPurchased: 1, purchasePricePerUnit: 0, totalAmount: 0 }]);
+    setItems(formattedItems.length > 0 ? formattedItems : [{ id: Date.now().toString(), product: '', quantityPurchased: 1, purchasePricePerUnit: 0, totalAmount: 0 }]);
     reset({
       purchaseDate: p.purchaseDate.split('T')[0],
       vendor: typeof p.vendor === 'string' ? p.vendor : (p.vendor as Vendor)._id,
       vendorInvoiceNumber: p.vendorInvoiceNumber,
-      items: formattedItems,
       discount: paiseToRupees(p.discount),
       additionalCosts: paiseToRupees(p.additionalCosts),
       taxAmount: paiseToRupees(p.taxAmount),
@@ -165,7 +162,7 @@ const StockPurchasesPage: React.FC = () => {
           <h1 className="text-xl font-bold text-gray-900">Stock Purchases</h1>
           <p className="text-sm text-gray-500">Total: <strong>{formatCurrency(totalCost)}</strong> · {purchases.length} purchases</p>
         </div>
-        <button onClick={() => { setEditingPurchase(null); setItems([{ product: '', quantityPurchased: 1, purchasePricePerUnit: 0, totalAmount: 0 }]); reset({ purchaseDate: new Date().toISOString().split('T')[0], paymentStatus: 'paid', discount: 0, additionalCosts: 0, taxAmount: 0, items: [{ product: '', quantityPurchased: 1, purchasePricePerUnit: 0, totalAmount: 0 }] }); setIsModalOpen(true); }} className="btn-primary">
+        <button onClick={() => { setEditingPurchase(null); setItems([{ id: Date.now().toString(), product: '', quantityPurchased: 1, purchasePricePerUnit: 0, totalAmount: 0 }]); reset({ purchaseDate: new Date().toISOString().split('T')[0], paymentStatus: 'paid', discount: 0, additionalCosts: 0, taxAmount: 0 }); setIsModalOpen(true); }} className="btn-primary">
           <Plus className="w-4 h-4" /> Add Purchase
         </button>
       </div>
@@ -219,18 +216,17 @@ const StockPurchasesPage: React.FC = () => {
         )}
       </div>
 
-      <Modal isOpen={isModalOpen} onClose={() => { setIsModalOpen(false); setEditingPurchase(null); setItems([{ product: '', quantityPurchased: 1, purchasePricePerUnit: 0, totalAmount: 0 }]); }} title={editingPurchase ? 'Edit Purchase' : 'Add Stock Purchase'} size="lg"
-        footer={<div className="flex gap-2 justify-end"><button onClick={() => { setIsModalOpen(false); setEditingPurchase(null); setItems([{ product: '', quantityPurchased: 1, purchasePricePerUnit: 0, totalAmount: 0 }]); }} className="btn-secondary">Cancel</button><button form="purchase-form" type="submit" className="btn-primary">{editingPurchase ? 'Update' : 'Save'}</button></div>}>
+      <Modal isOpen={isModalOpen} onClose={() => { setIsModalOpen(false); setEditingPurchase(null); setItems([{ id: Date.now().toString(), product: '', quantityPurchased: 1, purchasePricePerUnit: 0, totalAmount: 0 }]); }} title={editingPurchase ? 'Edit Purchase' : 'Add Stock Purchase'} size="lg"
+        footer={<div className="flex gap-2 justify-end"><button onClick={() => { setIsModalOpen(false); setEditingPurchase(null); setItems([{ id: Date.now().toString(), product: '', quantityPurchased: 1, purchasePricePerUnit: 0, totalAmount: 0 }]); }} className="btn-secondary">Cancel</button><button form="purchase-form" type="submit" className="btn-primary">{editingPurchase ? 'Update' : 'Save'}</button></div>}>
         <form id="purchase-form" onSubmit={handleSubmit(onSubmit)} className="space-y-4">
           <div className="grid grid-cols-2 gap-4">
-            <div><label className="label">Purchase Date *</label><input type="date" {...register('purchaseDate')} className="input" />{errors.purchaseDate && <p className="text-xs text-red-500 mt-1">{errors.purchaseDate.message}</p>}</div>
+            <div><label className="label">Purchase Date *</label><input type="date" {...register('purchaseDate')} className="input" /></div>
             <div>
               <label className="label">Vendor *</label>
               <select {...register('vendor')} className="select">
                 <option value="">Select vendor</option>
                 {vendors.map(v => <option key={v._id} value={v._id}>{v.name}</option>)}
               </select>
-              {errors.vendor && <p className="text-xs text-red-500 mt-1">{errors.vendor.message}</p>}
             </div>
           </div>
           <div><label className="label">Invoice Number</label><input {...register('vendorInvoiceNumber')} className="input" placeholder="Optional" /></div>
@@ -297,7 +293,6 @@ const StockPurchasesPage: React.FC = () => {
                 </div>
               ))}
             </div>
-            {errors.items && <p className="text-xs text-red-500 mt-1">{errors.items.message}</p>}
           </div>
 
           <div className="grid grid-cols-3 gap-4">
