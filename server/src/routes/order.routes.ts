@@ -1,0 +1,184 @@
+import { Router, Response } from 'express';
+import mongoose from 'mongoose';
+import { Order } from '../models/Order';
+import { Product } from '../models/Product';
+import { authenticate, requireManagerOrAdmin, enforceAccountAccess, AuthRequest } from '../middleware/auth';
+import { createAuditLog } from '../services/audit.service';
+
+const router = Router();
+router.use(authenticate);
+
+// Helper: build account filter
+const accountFilter = (accountId?: string): Record<string, unknown> =>
+  accountId && accountId !== 'all' ? { businessAccount: new mongoose.Types.ObjectId(accountId) } : {};
+
+// GET /api/orders
+router.get('/', enforceAccountAccess, async (req: AuthRequest, res: Response): Promise<void> => {
+  try {
+    const { accountId, startDate, endDate, search, page = '1', limit = '100', productId } = req.query as Record<string, string>;
+    const filter: Record<string, unknown> = { isDeleted: false, ...accountFilter(accountId) };
+
+    if (startDate || endDate) {
+      filter.orderDate = {};
+      if (startDate) (filter.orderDate as Record<string, unknown>)['$gte'] = new Date(startDate);
+      if (endDate) (filter.orderDate as Record<string, unknown>)['$lte'] = new Date(endDate + 'T23:59:59.999Z');
+    }
+    if (productId) filter.product = productId;
+    if (search) {
+      filter.$or = [
+        { meeshoOrderId: { $regex: search, $options: 'i' } },
+      ];
+    }
+
+    const skip = (parseInt(page) - 1) * parseInt(limit);
+    const [orders, total] = await Promise.all([
+      Order.find(filter).populate('product', 'name sku sellingPrice category').populate('businessAccount', 'name tradeName gstin').sort({ orderDate: -1 }).skip(skip).limit(parseInt(limit)),
+      Order.countDocuments(filter),
+    ]);
+
+    res.json({ success: true, data: orders, total, page: parseInt(page), limit: parseInt(limit) });
+  } catch (err) {
+    res.status(500).json({ success: false, message: (err as Error).message });
+  }
+});
+
+// GET /api/orders/:id
+router.get('/:id', async (req, res: Response): Promise<void> => {
+  try {
+    const order = await Order.findById(req.params.id).populate('product').populate('businessAccount');
+    if (!order || order.isDeleted) { res.status(404).json({ success: false, message: 'Order not found' }); return; }
+    res.json({ success: true, data: order });
+  } catch (err) {
+    res.status(500).json({ success: false, message: (err as Error).message });
+  }
+});
+
+// POST /api/orders
+router.post('/', requireManagerOrAdmin, enforceAccountAccess, async (req: AuthRequest, res: Response): Promise<void> => {
+  try {
+    const { businessAccount, orderDate, meeshoOrderId, product: productId, sellingPrice, quantity, notes, status } = req.body;
+
+    if (!businessAccount) { res.status(400).json({ success: false, message: 'businessAccount is required' }); return; }
+
+    const product = await Product.findById(productId);
+    if (!product) { res.status(404).json({ success: false, message: 'Product not found' }); return; }
+
+    const grossAmount = sellingPrice * quantity;
+
+    const order = await Order.create({
+      businessAccount, orderDate, meeshoOrderId: meeshoOrderId || undefined,
+      product: productId, sku: product.sku, sellingPrice, quantity, grossAmount,
+      status: status || 'pending', notes, createdBy: req.user?._id,
+    });
+
+    await createAuditLog({ action: 'CREATE', resource: 'Order', resourceId: order._id.toString(), userId: req.user?._id, details: `Order ${meeshoOrderId || order._id}` });
+
+    const populated = await Order.findById(order._id).populate('product', 'name sku').populate('businessAccount', 'name gstin');
+    res.status(201).json({ success: true, data: populated });
+  } catch (err) {
+    const msg = (err as Error).message;
+    if (msg.includes('duplicate') || msg.includes('11000')) {
+      res.status(400).json({ success: false, message: 'This Meesho order ID already exists for this account' });
+    } else {
+      res.status(400).json({ success: false, message: msg });
+    }
+  }
+});
+
+// PUT /api/orders/:id
+router.put('/:id', requireManagerOrAdmin, enforceAccountAccess, async (req: AuthRequest, res: Response): Promise<void> => {
+  try {
+    const existing = await Order.findById(req.params.id);
+    if (!existing || existing.isDeleted) { res.status(404).json({ success: false, message: 'Order not found' }); return; }
+
+    const { sellingPrice, quantity } = req.body;
+    if (sellingPrice && quantity) {
+      req.body.grossAmount = sellingPrice * quantity;
+    }
+
+    const order = await Order.findByIdAndUpdate(req.params.id, req.body, { new: true, runValidators: true })
+      .populate('product', 'name sku').populate('businessAccount', 'name gstin');
+
+    await createAuditLog({
+      action: 'UPDATE', resource: 'Order', resourceId: req.params.id, userId: req.user?._id,
+      changes: { before: { sellingPrice: existing.sellingPrice, quantity: existing.quantity }, after: { sellingPrice, quantity } },
+    });
+
+    res.json({ success: true, data: order });
+  } catch (err) {
+    res.status(400).json({ success: false, message: (err as Error).message });
+  }
+});
+
+// DELETE /api/orders/:id (soft delete)
+router.delete('/:id', requireManagerOrAdmin, async (req: AuthRequest, res: Response): Promise<void> => {
+  try {
+    const order = await Order.findById(req.params.id);
+    if (!order || order.isDeleted) { res.status(404).json({ success: false, message: 'Order not found' }); return; }
+
+    await Order.findByIdAndUpdate(req.params.id, { isDeleted: true, deletedAt: new Date() });
+    await createAuditLog({ action: 'DELETE', resource: 'Order', resourceId: req.params.id, userId: req.user?._id, details: `Soft deleted order ${order.meeshoOrderId || order._id}` });
+
+    res.json({ success: true, message: 'Order deleted' });
+  } catch (err) {
+    res.status(500).json({ success: false, message: (err as Error).message });
+  }
+});
+
+// GET /api/orders/summary/daily
+router.get('/summary/daily', enforceAccountAccess, async (req: AuthRequest, res: Response): Promise<void> => {
+  try {
+    const { accountId, date } = req.query as Record<string, string>;
+    const targetDate = date ? new Date(date) : new Date();
+    const start = new Date(targetDate.setHours(0, 0, 0, 0));
+    const end = new Date(targetDate.setHours(23, 59, 59, 999));
+
+    const filter: Record<string, unknown> = { isDeleted: false, orderDate: { $gte: start, $lte: end }, ...accountFilter(accountId) };
+
+    const result = await Order.aggregate([
+      { $match: filter },
+      { $group: { _id: null, totalOrders: { $sum: 1 }, totalQty: { $sum: '$quantity' }, totalAmount: { $sum: '$grossAmount' } } },
+    ]);
+
+    res.json({ success: true, data: result[0] || { totalOrders: 0, totalQty: 0, totalAmount: 0 } });
+  } catch (err) {
+    res.status(500).json({ success: false, message: (err as Error).message });
+  }
+});
+
+// GET /api/orders/summary/category
+router.get('/summary/category', enforceAccountAccess, async (req: AuthRequest, res: Response): Promise<void> => {
+  try {
+    const { accountId, startDate, endDate } = req.query as Record<string, string>;
+    const filter: Record<string, unknown> = { isDeleted: false, ...accountFilter(accountId) };
+    if (startDate || endDate) {
+      filter.orderDate = {};
+      if (startDate) (filter.orderDate as Record<string, unknown>)['$gte'] = new Date(startDate);
+      if (endDate) (filter.orderDate as Record<string, unknown>)['$lte'] = new Date(endDate + 'T23:59:59.999Z');
+    }
+
+    const result = await Order.aggregate([
+      { $match: filter },
+      { $lookup: { from: 'products', localField: 'product', foreignField: '_id', as: 'productDoc' } },
+      { $unwind: '$productDoc' },
+      { $lookup: { from: 'categories', localField: 'productDoc.category', foreignField: '_id', as: 'categoryDoc' } },
+      { $unwind: { path: '$categoryDoc', preserveNullAndEmptyArrays: true } },
+      {
+        $group: {
+          _id: '$categoryDoc._id',
+          category: { $first: '$categoryDoc.name' },
+          orders: { $sum: 1 },
+          qty: { $sum: '$quantity' },
+          sales: { $sum: '$grossAmount' },
+        }
+      },
+      { $sort: { sales: -1 } }
+    ]);
+
+    res.json({ success: true, data: result });
+  } catch (err) {
+    res.status(500).json({ success: false, message: (err as Error).message });
+  }
+});
+
+export default router;
