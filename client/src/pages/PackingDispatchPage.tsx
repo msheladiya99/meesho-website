@@ -3,19 +3,22 @@ import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import {
   QrCode, Camera, CheckCircle2, AlertCircle, PackageCheck, Truck,
   Printer, Search, RotateCcw, Clock, Layers, ArrowRight, ShieldAlert,
-  ChevronRight, Sparkles, Filter
+  ChevronRight, Sparkles, Filter, Plus, Package, Tag, Building2
 } from 'lucide-react';
 import { packingApi, type PackingLookupResult } from '../services/packing.service';
+import { productsApi } from '../services/inventory.service';
+import { ordersApi } from '../services/orders.service';
 import { useAccountStore } from '../store/accountStore';
-import { formatCurrency, formatDate } from '../lib/utils';
+import { formatCurrency, formatDate, paiseToRupees, rupeesToPaise } from '../lib/utils';
 import { CameraScannerModal } from '../components/ui/CameraScannerModal';
 import { PrintableQrLabel } from '../components/ui/PrintableQrLabel';
 import { LoadingSpinner, EmptyState } from '../components/ui/Feedback';
+import Modal from '../components/ui/Modal';
 import toast from 'react-hot-toast';
-import type { Order, PackingRecord } from '../types';
+import type { Order, PackingRecord, Product } from '../types';
 
 export const PackingDispatchPage: React.FC = () => {
-  const { activeAccountId, getActiveAccount } = useAccountStore();
+  const { activeAccountId, accounts, getActiveAccount } = useAccountStore();
   const qc = useQueryClient();
   const activeAccount = getActiveAccount();
 
@@ -27,6 +30,17 @@ export const PackingDispatchPage: React.FC = () => {
   const [packQuantity, setPackQuantity] = useState<number>(1);
   const [packingNotes, setPackingNotes] = useState('');
   const [labelModalOrder, setLabelModalOrder] = useState<Order | null>(null);
+
+  // Quick Add Order from Scan state
+  const [isQuickOrderOpen, setIsQuickOrderOpen] = useState(false);
+  const [newOrderCode, setNewOrderCode] = useState('');
+  const [newOrderAccountId, setNewOrderAccountId] = useState('');
+  const [newOrderProductId, setNewOrderProductId] = useState('');
+  const [newOrderQty, setNewOrderQty] = useState(1);
+  const [newOrderPriceRupees, setNewOrderPriceRupees] = useState(0);
+  const [newOrderCarrier, setNewOrderCarrier] = useState('Shadowfax');
+  const [newOrderNotes, setNewOrderNotes] = useState('');
+  const [newOrderAutoPack, setNewOrderAutoPack] = useState(true);
 
   // Dispatch modal state
   const [dispatchOrder, setDispatchOrder] = useState<Order | null>(null);
@@ -69,6 +83,96 @@ export const PackingDispatchPage: React.FC = () => {
     }),
   });
   const filteredOrders: Order[] = ordersData?.data?.data || [];
+
+  // Fetch products for quick order creation
+  const { data: productsData } = useQuery({
+    queryKey: ['products'],
+    queryFn: () => productsApi.list({ limit: 100 }),
+  });
+  const products: Product[] = productsData?.data?.data || [];
+
+  const handleOpenQuickOrder = (code?: string) => {
+    const raw = code !== undefined ? code : scanInput;
+    const defaultAcc = activeAccountId !== 'all' ? activeAccountId : (accounts[0]?._id || '');
+    setNewOrderCode(raw || '');
+    setNewOrderAccountId(defaultAcc);
+    const firstProd = products[0];
+    if (firstProd) {
+      setNewOrderProductId(firstProd._id);
+      setNewOrderPriceRupees(paiseToRupees(firstProd.sellingPrice || 0));
+    }
+    setNewOrderQty(1);
+    setNewOrderCarrier('Shadowfax');
+    setNewOrderNotes('');
+    setNewOrderAutoPack(true);
+    setIsQuickOrderOpen(true);
+  };
+
+  const handleProductSelect = (prodId: string) => {
+    setNewOrderProductId(prodId);
+    const prod = products.find((p) => p._id === prodId);
+    if (prod) {
+      setNewOrderPriceRupees(paiseToRupees(prod.sellingPrice || 0));
+    }
+  };
+
+  const createOrderMutation = useMutation({
+    mutationFn: (data: any) => ordersApi.create(data),
+    onSuccess: (res) => {
+      qc.invalidateQueries({ queryKey: ['packing-summary'] });
+      qc.invalidateQueries({ queryKey: ['packing-records'] });
+      qc.invalidateQueries({ queryKey: ['packing-orders'] });
+      qc.invalidateQueries({ queryKey: ['orders'] });
+      qc.invalidateQueries({ queryKey: ['dashboard'] });
+      qc.invalidateQueries({ queryKey: ['products'] });
+
+      const created = res.data.data;
+      toast.success(newOrderAutoPack ? '🎉 Order created & marked as PACKED!' : 'Order created successfully!');
+      setIsQuickOrderOpen(false);
+      setScanInput('');
+      setLookupError(null);
+
+      // Automatically look up the newly created order
+      const codeToLookup = newOrderCode || created.meeshoOrderId || created.shippingLabelId || created._id;
+      if (codeToLookup) {
+        lookupMutation.mutate(codeToLookup);
+      }
+    },
+    onError: (err: any) => {
+      toast.error(err?.response?.data?.message || 'Failed to create order');
+    },
+  });
+
+  const handleCreateQuickOrderSubmit = (e?: React.FormEvent) => {
+    if (e) e.preventDefault();
+    if (!newOrderAccountId) {
+      toast.error('Please select a GSTIN account');
+      return;
+    }
+    if (!newOrderProductId) {
+      toast.error('Please select a product');
+      return;
+    }
+    if (newOrderQty <= 0) {
+      toast.error('Quantity must be greater than 0');
+      return;
+    }
+
+    const payload: any = {
+      businessAccount: newOrderAccountId,
+      orderDate: new Date(),
+      meeshoOrderId: newOrderCode.trim() || undefined,
+      shippingLabelId: newOrderCode.trim() || undefined,
+      carrierName: newOrderCarrier,
+      product: newOrderProductId,
+      sellingPrice: rupeesToPaise(newOrderPriceRupees),
+      quantity: newOrderQty,
+      notes: newOrderNotes.trim() || undefined,
+      status: newOrderAutoPack ? 'packed' : 'pending',
+    };
+
+    createOrderMutation.mutate(payload);
+  };
 
   // Lookup mutation
   const lookupMutation = useMutation({
@@ -161,13 +265,22 @@ export const PackingDispatchPage: React.FC = () => {
           </p>
         </div>
 
-        {activeAccount && (
-          <div className="flex items-center gap-2 bg-white px-3 py-1.5 rounded-lg border border-gray-200 text-xs">
-            <span className="text-gray-400">Active GSTIN:</span>
-            <span className="font-mono font-bold text-gray-800">{activeAccount.gstin}</span>
-            <span className="text-gray-400">({activeAccount.tradeName})</span>
-          </div>
-        )}
+        <div className="flex items-center gap-2">
+          {activeAccount && (
+            <div className="hidden sm:flex items-center gap-2 bg-white px-3 py-1.5 rounded-lg border border-gray-200 text-xs">
+              <span className="text-gray-400">Active GSTIN:</span>
+              <span className="font-mono font-bold text-gray-800">{activeAccount.gstin}</span>
+              <span className="text-gray-400">({activeAccount.tradeName})</span>
+            </div>
+          )}
+          <button
+            onClick={() => handleOpenQuickOrder()}
+            className="btn-primary py-1.5 px-3.5 text-xs flex items-center gap-1.5 font-semibold shadow-xs"
+          >
+            <Plus className="w-4 h-4" />
+            + New Order
+          </button>
+        </div>
       </div>
 
       {/* KPI Cards */}
@@ -278,15 +391,27 @@ export const PackingDispatchPage: React.FC = () => {
             </p>
           </div>
 
-          {/* Error Notification */}
+          {/* Error Notification with Direct Action */}
           {lookupError && (
-            <div className="p-4 bg-red-50 border border-red-200 rounded-xl flex items-start gap-3 text-red-800 animate-fade-in">
-              <ShieldAlert className="w-5 h-5 text-red-600 flex-shrink-0 mt-0.5" />
-              <div className="flex-1 text-sm">
-                <p className="font-semibold">{lookupError}</p>
-                <p className="text-xs text-red-600 mt-0.5">
-                  No stock or inventory was altered. Make sure the parcel belongs to the currently active GSTIN account.
-                </p>
+            <div className="p-4 bg-amber-50 border border-amber-200 rounded-xl flex items-start gap-3 text-amber-900 animate-fade-in shadow-xs">
+              <AlertCircle className="w-5 h-5 text-amber-600 flex-shrink-0 mt-0.5" />
+              <div className="flex-1 text-sm space-y-2">
+                <div>
+                  <p className="font-semibold text-amber-900">{lookupError}</p>
+                  <p className="text-xs text-amber-700 mt-0.5">
+                    No order is registered with this code yet. You can create it right now from this scan to begin packing.
+                  </p>
+                </div>
+                <div>
+                  <button
+                    type="button"
+                    onClick={() => handleOpenQuickOrder(scanInput)}
+                    className="inline-flex items-center gap-1.5 px-3.5 py-2 bg-primary-600 hover:bg-primary-700 text-white rounded-lg text-xs font-semibold shadow-xs transition-all"
+                  >
+                    <Plus className="w-3.5 h-3.5" />
+                    + Add New Order with Code: <span className="font-mono underline">{scanInput || 'This Label'}</span>
+                  </button>
+                </div>
               </div>
             </div>
           )}
@@ -669,6 +794,167 @@ export const PackingDispatchPage: React.FC = () => {
           lookupMutation.mutate(code);
         }}
       />
+
+      {/* Quick Add Order from Scan Modal */}
+      {isQuickOrderOpen && (
+        <Modal
+          isOpen={true}
+          onClose={() => setIsQuickOrderOpen(false)}
+          title="Quick-Add New Order from Scanned Label"
+          size="lg"
+          footer={
+            <div className="flex flex-col sm:flex-row items-center justify-between gap-3 w-full">
+              <label className="flex items-center gap-2 text-xs font-medium text-gray-700 cursor-pointer select-none">
+                <input
+                  type="checkbox"
+                  checked={newOrderAutoPack}
+                  onChange={(e) => setNewOrderAutoPack(e.target.checked)}
+                  className="rounded text-primary-600 focus:ring-primary-500 w-4 h-4"
+                />
+                <span>Mark order as <strong>PACKED</strong> immediately</span>
+              </label>
+              <div className="flex gap-2 w-full sm:w-auto justify-end">
+                <button
+                  type="button"
+                  onClick={() => setIsQuickOrderOpen(false)}
+                  className="btn-secondary text-xs flex-1 sm:flex-initial"
+                >
+                  Cancel
+                </button>
+                <button
+                  type="button"
+                  onClick={handleCreateQuickOrderSubmit}
+                  disabled={createOrderMutation.isPending || !newOrderProductId || !newOrderAccountId}
+                  className="btn-primary text-xs font-semibold flex-1 sm:flex-initial justify-center"
+                >
+                  {createOrderMutation.isPending ? (
+                    <LoadingSpinner size="sm" />
+                  ) : newOrderAutoPack ? (
+                    'Create & Pack Now'
+                  ) : (
+                    'Save Order'
+                  )}
+                </button>
+              </div>
+            </div>
+          }
+        >
+          <form onSubmit={handleCreateQuickOrderSubmit} className="space-y-4 text-xs">
+            {/* Scanned Code / Order Number */}
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+              <div>
+                <label className="font-semibold text-gray-700 block mb-1">
+                  Scanned Shipping Label / Barcode:
+                </label>
+                <input
+                  type="text"
+                  value={newOrderCode}
+                  onChange={(e) => setNewOrderCode(e.target.value)}
+                  placeholder="e.g. 811709477610"
+                  className="input font-mono text-xs font-semibold"
+                  required
+                />
+              </div>
+
+              <div>
+                <label className="font-semibold text-gray-700 block mb-1">
+                  GSTIN Business Account:
+                </label>
+                <select
+                  value={newOrderAccountId}
+                  onChange={(e) => setNewOrderAccountId(e.target.value)}
+                  className="input text-xs"
+                  required
+                >
+                  <option value="">Select Account</option>
+                  {accounts.map((acc) => (
+                    <option key={acc._id} value={acc._id}>
+                      {acc.tradeName || acc.name} ({acc.gstin})
+                    </option>
+                  ))}
+                </select>
+              </div>
+            </div>
+
+            {/* Product selection */}
+            <div>
+              <label className="font-semibold text-gray-700 block mb-1">
+                Select Perfume Product:
+              </label>
+              <select
+                value={newOrderProductId}
+                onChange={(e) => handleProductSelect(e.target.value)}
+                className="input text-xs font-medium"
+                required
+              >
+                <option value="">Select a perfume</option>
+                {products.map((p) => (
+                  <option key={p._id} value={p._id}>
+                    {p.name} — SKU: {p.sku} (Available: {p.currentStock})
+                  </option>
+                ))}
+              </select>
+            </div>
+
+            {/* Quantity, Selling Price & Carrier */}
+            <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+              <div>
+                <label className="font-semibold text-gray-700 block mb-1">Quantity:</label>
+                <input
+                  type="number"
+                  min="1"
+                  value={newOrderQty}
+                  onChange={(e) => setNewOrderQty(Math.max(1, parseInt(e.target.value) || 1))}
+                  className="input text-xs font-bold"
+                  required
+                />
+              </div>
+
+              <div>
+                <label className="font-semibold text-gray-700 block mb-1">Selling Price (₹):</label>
+                <input
+                  type="number"
+                  step="0.01"
+                  min="0"
+                  value={newOrderPriceRupees}
+                  onChange={(e) => setNewOrderPriceRupees(parseFloat(e.target.value) || 0)}
+                  className="input text-xs font-bold"
+                  required
+                />
+              </div>
+
+              <div>
+                <label className="font-semibold text-gray-700 block mb-1">Carrier Name:</label>
+                <select
+                  value={newOrderCarrier}
+                  onChange={(e) => setNewOrderCarrier(e.target.value)}
+                  className="input text-xs"
+                >
+                  <option value="Shadowfax">Shadowfax</option>
+                  <option value="Delhivery">Delhivery</option>
+                  <option value="Xpressbees">Xpressbees</option>
+                  <option value="Ecom Express">Ecom Express</option>
+                  <option value="Meesho Express">Meesho Express</option>
+                  <option value="Blue Dart">Blue Dart</option>
+                  <option value="Other">Other</option>
+                </select>
+              </div>
+            </div>
+
+            {/* Notes */}
+            <div>
+              <label className="font-semibold text-gray-700 block mb-1">Order Notes (Optional):</label>
+              <input
+                type="text"
+                value={newOrderNotes}
+                onChange={(e) => setNewOrderNotes(e.target.value)}
+                placeholder="Operator remarks / shipping batch"
+                className="input text-xs"
+              />
+            </div>
+          </form>
+        </Modal>
+      )}
 
       {/* Printable QR Label Modal */}
       {labelModalOrder && (

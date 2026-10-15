@@ -2,6 +2,7 @@ import { Router, Response } from 'express';
 import mongoose from 'mongoose';
 import { Order } from '../models/Order';
 import { Product } from '../models/Product';
+import { PackingRecord } from '../models/PackingRecord';
 import { authenticate, requireManagerOrAdmin, enforceAccountAccess, AuthRequest } from '../middleware/auth';
 import { createAuditLog } from '../services/audit.service';
 import { recordStockMovement, reverseMovementsByReference } from '../services/inventory.service';
@@ -94,7 +95,27 @@ router.post('/', requireManagerOrAdmin, enforceAccountAccess, async (req: AuthRe
       internalQrCode,
       product: productId, sku: product.sku, sellingPrice, quantity, grossAmount,
       status: orderStatus, notes, createdBy: req.user?._id,
+      packedQuantity: orderStatus === 'packed' ? quantity : 0,
+      packedAt: orderStatus === 'packed' ? new Date() : undefined,
+      packedBy: orderStatus === 'packed' ? req.user?._id : undefined,
     });
+
+    if (orderStatus === 'packed') {
+      const dateStr = new Date().toISOString().slice(0, 10).replace(/-/g, '');
+      const rand = Math.random().toString(36).substring(2, 7).toUpperCase();
+      await PackingRecord.create({
+        transactionId: `PCK-${dateStr}-${rand}`,
+        businessAccount,
+        order: order._id,
+        product: productId,
+        sku: product.sku,
+        packedQuantity: quantity,
+        scannedCode: shippingLabelId || meeshoOrderId || internalQrCode,
+        scanType: shippingLabelId ? 'carrier_label' : meeshoOrderId ? 'meesho_order_id' : 'internal_qr',
+        operator: req.user?._id,
+        notes: notes || 'Auto-packed on order creation',
+      });
+    }
 
     // Record stock deduction if not cancelled
     if (orderStatus !== 'cancelled') {
