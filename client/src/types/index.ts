@@ -57,6 +57,7 @@ export interface Product {
   defaultPurchaseCost: number; // in paise
   reorderThreshold: number;
   currentStock: number;
+  weightedAvgCost?: number; // in paise
   isActive: boolean;
 }
 

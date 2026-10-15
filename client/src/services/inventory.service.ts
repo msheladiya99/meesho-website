@@ -34,7 +34,7 @@ export const stockPurchasesApi = {
 };
 
 export const inventoryApi = {
-  list: (params?: { accountId?: string; search?: string }) =>
+  list: (params?: { accountId?: string; search?: string; categoryId?: string }) =>
     api.get<ApiResponse<Product[]>>('/inventory', { params }),
   movements: (productId: string, params?: PaginationParams) =>
     api.get<ApiResponse<StockMovement[]>>(`/inventory/${productId}/movements`, { params }),

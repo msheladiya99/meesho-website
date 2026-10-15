@@ -53,4 +53,6 @@ stockPurchaseSchema.index({ businessAccount: 1, purchaseDate: -1 });
 stockPurchaseSchema.index({ vendor: 1 });
 stockPurchaseSchema.index({ 'items.product': 1 });
 
+// No pre-save hooks - stock movements are recorded explicitly in the route
+
 export const StockPurchase = mongoose.model<IStockPurchase>('StockPurchase', stockPurchaseSchema);

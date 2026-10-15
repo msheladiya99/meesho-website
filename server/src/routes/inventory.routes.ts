@@ -11,9 +11,10 @@ router.use(authenticate);
 // GET /api/inventory — list products with current stock
 router.get('/', async (req: AuthRequest, res: Response): Promise<void> => {
   try {
-    const { accountId: _acc, search } = req.query as Record<string, string>;
+    const { accountId: _acc, search, categoryId } = req.query as Record<string, string>;
     const filter: Record<string, unknown> = { isActive: true };
     if (search) filter.$or = [{ name: { $regex: search, $options: 'i' } }, { sku: { $regex: search, $options: 'i' } }];
+    if (categoryId && categoryId !== 'all') filter.category = categoryId;
 
     const products = await Product.find(filter).populate('category', 'name').sort({ name: 1 });
     res.json({ success: true, data: products });

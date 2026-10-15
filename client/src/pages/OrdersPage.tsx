@@ -74,6 +74,8 @@ const OrdersPage: React.FC = () => {
     mutationFn: (data: Partial<Order>) => ordersApi.create(data),
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ['orders'] });
+      qc.invalidateQueries({ queryKey: ['inventory'] });
+      qc.invalidateQueries({ queryKey: ['products'] });
       qc.invalidateQueries({ queryKey: ['dashboard'] });
       toast.success('Order added!');
       if (!keepOpen) { setIsModalOpen(false); reset(); }
@@ -88,6 +90,9 @@ const OrdersPage: React.FC = () => {
     mutationFn: ({ id, data }: { id: string; data: Partial<Order> }) => ordersApi.update(id, data),
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ['orders'] });
+      qc.invalidateQueries({ queryKey: ['inventory'] });
+      qc.invalidateQueries({ queryKey: ['products'] });
+      qc.invalidateQueries({ queryKey: ['dashboard'] });
       setIsModalOpen(false); setEditingOrder(null); reset();
       toast.success('Order updated!');
     },
@@ -97,6 +102,8 @@ const OrdersPage: React.FC = () => {
     mutationFn: (id: string) => ordersApi.delete(id),
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ['orders'] });
+      qc.invalidateQueries({ queryKey: ['inventory'] });
+      qc.invalidateQueries({ queryKey: ['products'] });
       qc.invalidateQueries({ queryKey: ['dashboard'] });
       toast.success('Order deleted');
       setDeleteId(null);

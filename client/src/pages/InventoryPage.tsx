@@ -1,27 +1,36 @@
 import React, { useState } from 'react';
 import { useQuery } from '@tanstack/react-query';
-import { inventoryApi } from '../services/inventory.service';
+import { inventoryApi, categoriesApi } from '../services/inventory.service';
 import { useAccountStore } from '../store/accountStore';
 import { formatCurrency, formatNumber } from '../lib/utils';
 import { Warehouse, AlertTriangle } from 'lucide-react';
 import { EmptyState, LoadingSpinner } from '../components/ui/Feedback';
-import type { Product } from '../types';
+import type { Product, Category } from '../types';
 
 const InventoryPage: React.FC = () => {
   const { activeAccountId } = useAccountStore();
   const [search, setSearch] = useState('');
+  const [selectedCategory, setSelectedCategory] = useState<string>('all');
+
+  const { data: categoriesData } = useQuery({
+    queryKey: ['categories'],
+    queryFn: () => categoriesApi.list(),
+  });
+  const categories: Category[] = categoriesData?.data?.data || [];
 
   const { data, isLoading } = useQuery({
-    queryKey: ['inventory', activeAccountId, search],
+    queryKey: ['inventory', activeAccountId, search, selectedCategory],
     queryFn: () => inventoryApi.list({
       accountId: activeAccountId === 'all' ? undefined : activeAccountId,
       search: search || undefined,
+      categoryId: selectedCategory === 'all' ? undefined : selectedCategory,
     }),
   });
 
   const products: Product[] = data?.data?.data || [];
+  const getProductCost = (p: Product) => (p.defaultPurchaseCost > 0 ? p.defaultPurchaseCost : (p.weightedAvgCost || 0));
   const totalQty = products.reduce((s, p) => s + p.currentStock, 0);
-  const totalValue = products.reduce((s, p) => s + p.currentStock * p.defaultPurchaseCost, 0);
+  const totalValue = products.reduce((s, p) => s + p.currentStock * getProductCost(p), 0);
   const lowStockCount = products.filter(p => p.currentStock <= p.reorderThreshold).length;
 
   return (
@@ -51,8 +60,18 @@ const InventoryPage: React.FC = () => {
         </div>
       </div>
 
-      <div className="card p-4">
+      <div className="card p-4 flex flex-wrap items-center gap-3">
         <input className="input max-w-xs" placeholder="Search products..." value={search} onChange={e => setSearch(e.target.value)} />
+        <select
+          value={selectedCategory}
+          onChange={e => setSelectedCategory(e.target.value)}
+          className="select max-w-xs"
+        >
+          <option value="all">All Categories</option>
+          {categories.map(c => (
+            <option key={c._id} value={c._id}>{c.name}</option>
+          ))}
+        </select>
       </div>
 
       <div className="card">
@@ -67,6 +86,7 @@ const InventoryPage: React.FC = () => {
                   const lowStock = p.currentStock <= p.reorderThreshold;
                   const outOfStock = p.currentStock === 0;
                   const cat = typeof p.category === 'object' ? p.category : null;
+                  const unitCost = getProductCost(p);
                   return (
                     <tr key={p._id}>
                       <td className="font-medium">{p.name}</td>
@@ -77,8 +97,8 @@ const InventoryPage: React.FC = () => {
                         {lowStock && !outOfStock && <AlertTriangle className="inline w-3.5 h-3.5 ml-1" />}
                       </td>
                       <td className="text-gray-500">{p.reorderThreshold}</td>
-                      <td>{formatCurrency(p.defaultPurchaseCost)}</td>
-                      <td className="font-semibold">{formatCurrency(p.currentStock * p.defaultPurchaseCost)}</td>
+                      <td>{formatCurrency(unitCost)}</td>
+                      <td className="font-semibold">{formatCurrency(p.currentStock * unitCost)}</td>
                       <td>
                         {outOfStock ? <span className="badge badge-red">Out of Stock</span> :
                          lowStock ? <span className="badge badge-yellow">Low Stock</span> :

@@ -59,30 +59,56 @@ const ProductsPage: React.FC = () => {
 
   // Product form
   const pForm = useForm<ProductForm>({
-    resolver: zodResolver(productSchema),
+    resolver: zodResolver(productSchema) as any,
     defaultValues: { isActive: true, reorderThreshold: 5 },
   });
 
+  const getProductCost = (p: Product) => (p.defaultPurchaseCost > 0 ? p.defaultPurchaseCost : (p.weightedAvgCost || 0));
+
   const createProductMut = useMutation({
     mutationFn: (d: Partial<Product>) => productsApi.create(d),
-    onSuccess: () => { qc.invalidateQueries({ queryKey: ['products'] }); toast.success('Product created!'); setIsProductModalOpen(false); pForm.reset(); },
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ['products'] });
+      qc.invalidateQueries({ queryKey: ['inventory'] });
+      toast.success('Product created!');
+      setIsProductModalOpen(false);
+      pForm.reset();
+    },
     onError: (e: unknown) => toast.error((e as { response?: { data?: { message?: string } } })?.response?.data?.message || 'Error'),
   });
 
   const updateProductMut = useMutation({
     mutationFn: ({ id, data }: { id: string; data: Partial<Product> }) => productsApi.update(id, data),
-    onSuccess: () => { qc.invalidateQueries({ queryKey: ['products'] }); toast.success('Product updated!'); setIsProductModalOpen(false); setEditingProduct(null); pForm.reset(); },
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ['products'] });
+      qc.invalidateQueries({ queryKey: ['inventory'] });
+      toast.success('Product updated!');
+      setIsProductModalOpen(false);
+      setEditingProduct(null);
+      pForm.reset();
+    },
   });
 
   const deleteProductMut = useMutation({
     mutationFn: (id: string) => productsApi.delete(id),
-    onSuccess: () => { qc.invalidateQueries({ queryKey: ['products'] }); toast.success('Product deleted'); setDeleteProductId(null); },
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ['products'] });
+      qc.invalidateQueries({ queryKey: ['inventory'] });
+      toast.success('Product deleted');
+      setDeleteProductId(null);
+    },
     onError: (e: unknown) => { toast.error((e as { response?: { data?: { message?: string } } })?.response?.data?.message || 'Failed to delete product'); },
   });
 
   const bulkDeleteMut = useMutation({
     mutationFn: (ids: string[]) => Promise.all(ids.map(id => productsApi.delete(id))),
-    onSuccess: () => { qc.invalidateQueries({ queryKey: ['products'] }); toast.success(`${selectedProductIds.size} products deleted`); setSelectedProductIds(new Set()); setShowBulkDelete(false); },
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ['products'] });
+      qc.invalidateQueries({ queryKey: ['inventory'] });
+      toast.success(`${selectedProductIds.size} products deleted`);
+      setSelectedProductIds(new Set());
+      setShowBulkDelete(false);
+    },
     onError: (e: unknown) => { toast.error((e as { response?: { data?: { message?: string } } })?.response?.data?.message || 'Failed to delete products'); },
   });
 
@@ -117,7 +143,7 @@ const ProductsPage: React.FC = () => {
       category: typeof p.category === 'string' ? p.category : (p.category as Category)._id,
       sizeml: p.sizeml, fragranceType: p.fragranceType, brand: p.brand,
       sellingPrice: paiseToRupees(p.sellingPrice),
-      defaultPurchaseCost: paiseToRupees(p.defaultPurchaseCost),
+      defaultPurchaseCost: paiseToRupees(getProductCost(p)),
       reorderThreshold: p.reorderThreshold, isActive: p.isActive,
     });
     setIsProductModalOpen(true);
@@ -233,7 +259,7 @@ const ProductsPage: React.FC = () => {
                           <td>{(cat as Category)?.name || '—'}</td>
                           <td>{p.sizeml}ml</td>
                           <td>{formatCurrency(p.sellingPrice)}</td>
-                          <td>{formatCurrency(p.defaultPurchaseCost)}</td>
+                          <td>{formatCurrency(getProductCost(p))}</td>
                           <td className={lowStock ? 'text-red-600 font-semibold' : ''}>{p.currentStock} {lowStock && '⚠'}</td>
                           <td>{p.reorderThreshold}</td>
                           <td><span className={`badge ${p.isActive ? 'badge-green' : 'badge-gray'}`}>{p.isActive ? 'Active' : 'Inactive'}</span></td>

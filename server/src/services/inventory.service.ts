@@ -58,10 +58,18 @@ export const recordStockMovement = async (params: RecordMovementParams): Promise
     createdBy: createdBy ? new mongoose.Types.ObjectId(createdBy) : undefined,
   }], { session });
 
-  // Update product stock and WAC
+  // Update product stock and WAC (and defaultPurchaseCost if purchase)
+  const productUpdate: Record<string, any> = {
+    currentStock: newBalance,
+    weightedAvgCost: newWeightedAvgCost,
+  };
+  if (movementType === 'purchase' && unitCost > 0) {
+    productUpdate.defaultPurchaseCost = unitCost;
+  }
+
   await Product.findByIdAndUpdate(
     productId,
-    { currentStock: newBalance, weightedAvgCost: newWeightedAvgCost },
+    productUpdate,
     { session }
   );
 };
@@ -78,17 +86,31 @@ export const reverseMovementsByReference = async (
   const movements = await StockMovement.find({ referenceId: new mongoose.Types.ObjectId(referenceId) }).session(session || null);
 
   for (const mv of movements) {
-    await recordStockMovement({
-      businessAccount: mv.businessAccount.toString(),
-      productId: mv.product.toString(),
-      movementType: 'adjustment',
-      quantity: -mv.quantity, // reverse
-      unitCost: mv.unitCost,
-      referenceType: 'Reversal',
-      referenceId: mv._id.toString(),
-      reason: `Reversal of ${mv.movementType} movement`,
-      createdBy,
-      session,
-    });
+    // Directly reverse the stock without creating a new movement entry
+    // This avoids double-counting when re-recording new movements
+    const product = await Product.findById(mv.product).session(session || null);
+    if (product) {
+      // Calculate the reversal - subtract the movement quantity
+      // But ensure we don't go below 0
+      const reversalQuantity = mv.quantity;
+      const newBalance = Math.max(0, product.currentStock - reversalQuantity);
+      
+      // Recalculate weighted average cost if it was an incoming movement (quantity > 0)
+      let newWeightedAvgCost = product.weightedAvgCost;
+      if (reversalQuantity > 0) {
+        const currentValue = product.currentStock * product.weightedAvgCost;
+        const reversedValue = reversalQuantity * mv.unitCost;
+        newWeightedAvgCost = newBalance > 0 ? Math.max(0, Math.round((currentValue - reversedValue) / newBalance)) : product.weightedAvgCost;
+      }
+
+      await Product.findByIdAndUpdate(
+        mv.product,
+        { currentStock: newBalance, weightedAvgCost: newWeightedAvgCost },
+        { session }
+      );
+    }
+
+    // Delete the original movement
+    await StockMovement.findByIdAndDelete(mv._id).session(session || null);
   }
 };

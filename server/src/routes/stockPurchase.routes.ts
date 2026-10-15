@@ -26,7 +26,11 @@ router.get('/', enforceAccountAccess, async (req: AuthRequest, res: Response): P
     const [purchases, total] = await Promise.all([
       StockPurchase.find(filter)
         .populate('vendor', 'name')
-        .populate('items.product', 'name sku')
+        .populate({
+          path: 'items.product',
+          select: 'name sku category defaultPurchaseCost weightedAvgCost currentStock',
+          populate: { path: 'category', select: 'name' }
+        })
         .populate('businessAccount', 'name gstin')
         .sort({ purchaseDate: -1 }).skip(skip).limit(parseInt(limit)),
       StockPurchase.countDocuments(filter),
@@ -40,7 +44,14 @@ router.get('/', enforceAccountAccess, async (req: AuthRequest, res: Response): P
 // GET /api/stock-purchases/:id
 router.get('/:id', async (req, res: Response): Promise<void> => {
   try {
-    const p = await StockPurchase.findById(req.params.id).populate('vendor').populate('items.product').populate('businessAccount');
+    const p = await StockPurchase.findById(req.params.id)
+      .populate('vendor')
+      .populate({
+        path: 'items.product',
+        select: 'name sku category defaultPurchaseCost weightedAvgCost currentStock',
+        populate: { path: 'category', select: 'name' }
+      })
+      .populate('businessAccount');
     if (!p || p.isDeleted) { res.status(404).json({ success: false, message: 'Purchase not found' }); return; }
     res.json({ success: true, data: p });
   } catch (err) {
@@ -55,10 +66,26 @@ router.post('/', requireManagerOrAdmin, enforceAccountAccess, async (req: AuthRe
     if (!businessAccount) { res.status(400).json({ success: false, message: 'businessAccount is required' }); return; }
     if (!items || !Array.isArray(items) || items.length === 0) { res.status(400).json({ success: false, message: 'items array is required' }); return; }
 
+    console.log('=== STOCK PURCHASE CREATE ===');
+    console.log('Items received:', items.length);
+    console.log('Items data:', JSON.stringify(items, null, 2));
+
+    // Check for duplicate products in items
+    const productIds = items.map((i: any) => i.product);
+    const uniqueIds = new Set(productIds);
+    if (productIds.length !== uniqueIds.size) {
+      console.error('DUPLICATE PRODUCTS DETECTED:', productIds);
+      res.status(400).json({ success: false, message: 'Duplicate products in items list' });
+      return;
+    }
+
     const purchase = await StockPurchase.create({ ...req.body, createdBy: req.user?._id });
+    console.log('Purchase created with ID:', purchase._id.toString());
 
     // Record stock movement for each item
-    for (const item of items) {
+    for (let i = 0; i < items.length; i++) {
+      const item = items[i];
+      console.log(`[${i+1}/${items.length}] Recording movement for product ${item.product}, quantity: ${item.quantityPurchased}`);
       const unitCostForMovement = item.quantityPurchased > 0 ? Math.round(item.totalAmount / item.quantityPurchased) : item.purchasePricePerUnit;
       await recordStockMovement({
         businessAccount,
@@ -71,12 +98,22 @@ router.post('/', requireManagerOrAdmin, enforceAccountAccess, async (req: AuthRe
         reason: `Stock purchase from vendor`,
         createdBy: req.user?._id,
       });
+      console.log(`[${i+1}/${items.length}] Movement recorded for product ${item.product}`);
     }
 
     await createAuditLog({ action: 'CREATE', resource: 'StockPurchase', resourceId: purchase._id.toString(), userId: req.user?._id });
-    const populated = await StockPurchase.findById(purchase._id).populate('vendor', 'name').populate('items.product', 'name sku').populate('businessAccount', 'name gstin');
+    const populated = await StockPurchase.findById(purchase._id)
+      .populate('vendor', 'name')
+      .populate({
+        path: 'items.product',
+        select: 'name sku category defaultPurchaseCost weightedAvgCost currentStock',
+        populate: { path: 'category', select: 'name' }
+      })
+      .populate('businessAccount', 'name gstin');
+    console.log('=== STOCK PURCHASE CREATE COMPLETE ===');
     res.status(201).json({ success: true, data: populated });
   } catch (err) {
+    console.error('Error creating stock purchase:', err);
     res.status(400).json({ success: false, message: (err as Error).message });
   }
 });
@@ -87,13 +124,26 @@ router.put('/:id', requireManagerOrAdmin, enforceAccountAccess, async (req: Auth
     const existing = await StockPurchase.findById(req.params.id);
     if (!existing || existing.isDeleted) { res.status(404).json({ success: false, message: 'Purchase not found' }); return; }
 
-    const { items } = req.body;
+    const { items, purchaseDate, vendor, vendorInvoiceNumber, discount, additionalCosts, taxAmount, totalAmount, paymentStatus, notes } = req.body;
     if (!items || !Array.isArray(items) || items.length === 0) { res.status(400).json({ success: false, message: 'items array is required' }); return; }
 
     // Reverse old movements, then re-record with new values
-    await reverseMovementsByReference(req.params.id, req.user?._id);
+    await reverseMovementsByReference(req.params.id as string, req.user?._id?.toString());
 
-    const updated = await StockPurchase.findByIdAndUpdate(req.params.id, req.body, { new: true });
+    const updateData = {
+      items,
+      purchaseDate,
+      vendor,
+      vendorInvoiceNumber,
+      discount,
+      additionalCosts,
+      taxAmount,
+      totalAmount,
+      paymentStatus,
+      notes,
+    };
+
+    const updated = await StockPurchase.findByIdAndUpdate(req.params.id, updateData, { new: true });
     if (!updated) { res.status(404).json({ success: false, message: 'Not found' }); return; }
 
     // Record stock movement for each item
@@ -108,14 +158,22 @@ router.put('/:id', requireManagerOrAdmin, enforceAccountAccess, async (req: Auth
         referenceType: 'StockPurchase',
         referenceId: updated._id.toString(),
         reason: 'Stock purchase updated — re-recorded',
-        createdBy: req.user?._id,
+        createdBy: req.user?._id?.toString(),
       });
     }
 
-    await createAuditLog({ action: 'UPDATE', resource: 'StockPurchase', resourceId: req.params.id, userId: req.user?._id });
-    const populated = await StockPurchase.findById(updated._id).populate('vendor', 'name').populate('items.product', 'name sku').populate('businessAccount', 'name gstin');
+    await createAuditLog({ action: 'UPDATE', resource: 'StockPurchase', resourceId: req.params.id as string, userId: req.user?._id?.toString() });
+    const populated = await StockPurchase.findById(updated._id)
+      .populate('vendor', 'name')
+      .populate({
+        path: 'items.product',
+        select: 'name sku category defaultPurchaseCost weightedAvgCost currentStock',
+        populate: { path: 'category', select: 'name' }
+      })
+      .populate('businessAccount', 'name gstin');
     res.json({ success: true, data: populated });
   } catch (err) {
+    console.error('Update error:', err);
     res.status(400).json({ success: false, message: (err as Error).message });
   }
 });
@@ -126,9 +184,9 @@ router.delete('/:id', requireManagerOrAdmin, async (req: AuthRequest, res: Respo
     const purchase = await StockPurchase.findById(req.params.id);
     if (!purchase || purchase.isDeleted) { res.status(404).json({ success: false, message: 'Purchase not found' }); return; }
 
-    await reverseMovementsByReference(req.params.id, req.user?._id);
+    await reverseMovementsByReference(req.params.id as string, req.user?._id?.toString());
     await StockPurchase.findByIdAndUpdate(req.params.id, { isDeleted: true });
-    await createAuditLog({ action: 'DELETE', resource: 'StockPurchase', resourceId: req.params.id, userId: req.user?._id });
+    await createAuditLog({ action: 'DELETE', resource: 'StockPurchase', resourceId: req.params.id as string, userId: req.user?._id?.toString() });
     res.json({ success: true, message: 'Purchase deleted and stock reversed' });
   } catch (err) {
     res.status(500).json({ success: false, message: (err as Error).message });

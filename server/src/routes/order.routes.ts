@@ -4,6 +4,7 @@ import { Order } from '../models/Order';
 import { Product } from '../models/Product';
 import { authenticate, requireManagerOrAdmin, enforceAccountAccess, AuthRequest } from '../middleware/auth';
 import { createAuditLog } from '../services/audit.service';
+import { recordStockMovement, reverseMovementsByReference } from '../services/inventory.service';
 
 const router = Router();
 router.use(authenticate);
@@ -59,19 +60,45 @@ router.post('/', requireManagerOrAdmin, enforceAccountAccess, async (req: AuthRe
     const { businessAccount, orderDate, meeshoOrderId, product: productId, sellingPrice, quantity, notes, status } = req.body;
 
     if (!businessAccount) { res.status(400).json({ success: false, message: 'businessAccount is required' }); return; }
+    if (!productId) { res.status(400).json({ success: false, message: 'product is required' }); return; }
+    if (!quantity || quantity <= 0) { res.status(400).json({ success: false, message: 'quantity must be greater than 0' }); return; }
 
     const product = await Product.findById(productId);
     if (!product) { res.status(404).json({ success: false, message: 'Product not found' }); return; }
+
+    const orderStatus = status || 'pending';
+    if (orderStatus !== 'cancelled' && product.currentStock < quantity) {
+      res.status(400).json({
+        success: false,
+        message: `Insufficient stock for product "${product.name}". Available: ${product.currentStock}, Requested: ${quantity}`
+      });
+      return;
+    }
 
     const grossAmount = sellingPrice * quantity;
 
     const order = await Order.create({
       businessAccount, orderDate, meeshoOrderId: meeshoOrderId || undefined,
       product: productId, sku: product.sku, sellingPrice, quantity, grossAmount,
-      status: status || 'pending', notes, createdBy: req.user?._id,
+      status: orderStatus, notes, createdBy: req.user?._id,
     });
 
-    await createAuditLog({ action: 'CREATE', resource: 'Order', resourceId: order._id.toString(), userId: req.user?._id, details: `Order ${meeshoOrderId || order._id}` });
+    // Record stock deduction if not cancelled
+    if (orderStatus !== 'cancelled') {
+      await recordStockMovement({
+        businessAccount,
+        productId,
+        movementType: 'sale',
+        quantity: -quantity,
+        unitCost: product.weightedAvgCost || product.defaultPurchaseCost,
+        referenceType: 'Order',
+        referenceId: order._id.toString(),
+        reason: `Order placed: ${meeshoOrderId || order._id}`,
+        createdBy: req.user?._id?.toString(),
+      });
+    }
+
+    await createAuditLog({ action: 'CREATE', resource: 'Order', resourceId: order._id.toString(), userId: req.user?._id?.toString(), details: `Order ${meeshoOrderId || order._id}` });
 
     const populated = await Order.findById(order._id).populate('product', 'name sku').populate('businessAccount', 'name gstin');
     res.status(201).json({ success: true, data: populated });
@@ -96,11 +123,34 @@ router.put('/:id', requireManagerOrAdmin, enforceAccountAccess, async (req: Auth
       req.body.grossAmount = sellingPrice * quantity;
     }
 
+    // Reverse old stock movements for this order
+    await reverseMovementsByReference(req.params.id as string, req.user?._id?.toString());
+
     const order = await Order.findByIdAndUpdate(req.params.id, req.body, { new: true, runValidators: true })
       .populate('product', 'name sku').populate('businessAccount', 'name gstin');
 
+    if (!order) { res.status(404).json({ success: false, message: 'Order not found' }); return; }
+
+    // Re-record stock deduction if not cancelled
+    if (order.status !== 'cancelled') {
+      const prod = await Product.findById(order.product);
+      if (prod) {
+        await recordStockMovement({
+          businessAccount: order.businessAccount.toString(),
+          productId: order.product.toString(),
+          movementType: 'sale',
+          quantity: -order.quantity,
+          unitCost: prod.weightedAvgCost || prod.defaultPurchaseCost,
+          referenceType: 'Order',
+          referenceId: order._id.toString(),
+          reason: `Order updated: ${order.meeshoOrderId || order._id}`,
+          createdBy: req.user?._id?.toString(),
+        });
+      }
+    }
+
     await createAuditLog({
-      action: 'UPDATE', resource: 'Order', resourceId: req.params.id, userId: req.user?._id,
+      action: 'UPDATE', resource: 'Order', resourceId: req.params.id as string, userId: req.user?._id?.toString(),
       changes: { before: { sellingPrice: existing.sellingPrice, quantity: existing.quantity }, after: { sellingPrice, quantity } },
     });
 
@@ -116,10 +166,13 @@ router.delete('/:id', requireManagerOrAdmin, async (req: AuthRequest, res: Respo
     const order = await Order.findById(req.params.id);
     if (!order || order.isDeleted) { res.status(404).json({ success: false, message: 'Order not found' }); return; }
 
-    await Order.findByIdAndUpdate(req.params.id, { isDeleted: true, deletedAt: new Date() });
-    await createAuditLog({ action: 'DELETE', resource: 'Order', resourceId: req.params.id, userId: req.user?._id, details: `Soft deleted order ${order.meeshoOrderId || order._id}` });
+    // Restore stock by reversing movement
+    await reverseMovementsByReference(req.params.id as string, req.user?._id?.toString());
 
-    res.json({ success: true, message: 'Order deleted' });
+    await Order.findByIdAndUpdate(req.params.id, { isDeleted: true, deletedAt: new Date() });
+    await createAuditLog({ action: 'DELETE', resource: 'Order', resourceId: req.params.id as string, userId: req.user?._id?.toString(), details: `Soft deleted order ${order.meeshoOrderId || order._id}` });
+
+    res.json({ success: true, message: 'Order deleted and stock restored' });
   } catch (err) {
     res.status(500).json({ success: false, message: (err as Error).message });
   }
