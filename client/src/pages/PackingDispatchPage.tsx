@@ -91,15 +91,25 @@ export const PackingDispatchPage: React.FC = () => {
   });
   const products: Product[] = productsData?.data?.data || [];
 
+  // Cache last selected product for rapid consecutive packing
+  const [lastSelectedProductId, setLastSelectedProductId] = useState<string>(() => {
+    return localStorage.getItem('last_packed_product_id') || '';
+  });
+
   const handleOpenQuickOrder = (code?: string) => {
-    const raw = code !== undefined ? code : scanInput;
+    const raw = (code !== undefined ? code : scanInput).trim();
     const defaultAcc = activeAccountId !== 'all' ? activeAccountId : (accounts[0]?._id || '');
     setNewOrderCode(raw || '');
     setNewOrderAccountId(defaultAcc);
-    const firstProd = products[0];
-    if (firstProd) {
-      setNewOrderProductId(firstProd._id);
-      setNewOrderPriceRupees(paiseToRupees(firstProd.sellingPrice || 0));
+
+    // Pick last selected product or fallback to first product
+    const savedId = lastSelectedProductId || localStorage.getItem('last_packed_product_id');
+    const matched = products.find((p) => p._id === savedId);
+    const targetProd = matched || products[0];
+
+    if (targetProd) {
+      setNewOrderProductId(targetProd._id);
+      setNewOrderPriceRupees(paiseToRupees(targetProd.sellingPrice || 0));
     }
     setNewOrderQty(1);
     setNewOrderCarrier('Shadowfax');
@@ -110,6 +120,8 @@ export const PackingDispatchPage: React.FC = () => {
 
   const handleProductSelect = (prodId: string) => {
     setNewOrderProductId(prodId);
+    setLastSelectedProductId(prodId);
+    localStorage.setItem('last_packed_product_id', prodId);
     const prod = products.find((p) => p._id === prodId);
     if (prod) {
       setNewOrderPriceRupees(paiseToRupees(prod.sellingPrice || 0));
@@ -184,11 +196,18 @@ export const PackingDispatchPage: React.FC = () => {
       setPackQuantity(data.remainingQuantity > 0 ? data.remainingQuantity : 1);
       toast.success(`Matched Order: ${data.order.meeshoOrderId || data.order._id}`);
     },
-    onError: (err: any) => {
+    onError: (err: any, variables: string) => {
       const msg = err?.response?.data?.message || 'Order Not Found';
       setLookupError(msg);
       setActiveLookup(null);
-      toast.error(msg);
+
+      // Directly open Quick Add Order popup with the fresh scanned code prefilled!
+      const targetCode = (variables || scanInput).trim();
+      handleOpenQuickOrder(targetCode);
+      toast('📦 Fresh QR detected! Select product to create & pack.', {
+        icon: '✨',
+        duration: 4000,
+      });
     },
   });
 
@@ -790,6 +809,7 @@ export const PackingDispatchPage: React.FC = () => {
         isOpen={isCameraOpen}
         onClose={() => setIsCameraOpen(false)}
         onScan={(code) => {
+          setIsCameraOpen(false);
           setScanInput(code);
           lookupMutation.mutate(code);
         }}
@@ -800,7 +820,7 @@ export const PackingDispatchPage: React.FC = () => {
         <Modal
           isOpen={true}
           onClose={() => setIsQuickOrderOpen(false)}
-          title="Quick-Add New Order from Scanned Label"
+          title="📦 Fresh Label Scanned — Add & Pack"
           size="lg"
           footer={
             <div className="flex flex-col sm:flex-row items-center justify-between gap-3 w-full">
@@ -851,7 +871,7 @@ export const PackingDispatchPage: React.FC = () => {
                   value={newOrderCode}
                   onChange={(e) => setNewOrderCode(e.target.value)}
                   placeholder="e.g. 811709477610"
-                  className="input font-mono text-xs font-semibold"
+                  className="input font-mono text-xs font-semibold bg-gray-50 border-primary-200"
                   required
                 />
               </div>
@@ -878,9 +898,16 @@ export const PackingDispatchPage: React.FC = () => {
 
             {/* Product selection */}
             <div>
-              <label className="font-semibold text-gray-700 block mb-1">
-                Select Perfume Product:
-              </label>
+              <div className="flex items-center justify-between mb-1">
+                <label className="font-semibold text-gray-700">
+                  Select Perfume Product:
+                </label>
+                {newOrderProductId && (
+                  <span className="text-[11px] text-primary-600 font-medium">
+                    Stock: {products.find((p) => p._id === newOrderProductId)?.currentStock ?? 0} units
+                  </span>
+                )}
+              </div>
               <select
                 value={newOrderProductId}
                 onChange={(e) => handleProductSelect(e.target.value)}
@@ -894,6 +921,27 @@ export const PackingDispatchPage: React.FC = () => {
                   </option>
                 ))}
               </select>
+
+              {/* Quick 1-tap product chips */}
+              {products.length > 0 && (
+                <div className="flex flex-wrap gap-1.5 pt-2">
+                  <span className="text-[11px] text-gray-400 self-center">Quick pick:</span>
+                  {products.slice(0, 6).map((p) => (
+                    <button
+                      key={p._id}
+                      type="button"
+                      onClick={() => handleProductSelect(p._id)}
+                      className={`px-2 py-1 rounded-md text-[11px] font-medium border transition-all ${
+                        newOrderProductId === p._id
+                          ? 'bg-primary-50 border-primary-500 text-primary-700 font-bold shadow-xs ring-1 ring-primary-500'
+                          : 'bg-white border-gray-200 text-gray-700 hover:bg-gray-50'
+                      }`}
+                    >
+                      {p.name} ({p.currentStock})
+                    </button>
+                  ))}
+                </div>
+              )}
             </div>
 
             {/* Quantity, Selling Price & Carrier */}
