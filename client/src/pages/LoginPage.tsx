@@ -32,7 +32,8 @@ const LoginPage: React.FC = () => {
       toast.success(`Welcome back, ${user.name}!`);
       navigate('/');
     } catch (err: unknown) {
-      const msg = (err as { response?: { data?: { message?: string } } })?.response?.data?.message || 'Invalid credentials';
+      const axiosErr = err as { response?: { data?: { message?: string } }; message?: string };
+      const msg = axiosErr.response?.data?.message || (axiosErr.message?.includes('Network') ? 'Cannot connect to backend server. Backend is not reachable.' : 'Invalid credentials');
       toast.error(msg);
     }
   };
