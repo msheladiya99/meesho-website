@@ -274,15 +274,15 @@ export const ReturnsPage: React.FC = () => {
               <span className="text-xs text-gray-400">USB Barcode & Mobile Camera</span>
             </div>
 
-            <form onSubmit={handleScanSubmit} className="flex gap-2">
+            <form onSubmit={handleScanSubmit} className="flex flex-col sm:flex-row gap-2">
               <div className="relative flex-1">
                 <input
                   ref={scanInputRef}
                   type="text"
                   value={scanInput}
                   onChange={(e) => setScanInput(e.target.value)}
-                  placeholder="Scan returned parcel shipping label or enter Order ID..."
-                  className="input pl-4 pr-10 py-3 text-base font-mono w-full border-gray-300 focus:border-rose-500 shadow-sm"
+                  placeholder="Scan returned parcel label or enter Order ID..."
+                  className="input pl-4 pr-10 py-2.5 sm:py-3 text-sm sm:text-base font-mono w-full border-gray-300 focus:border-rose-500 shadow-sm"
                   autoFocus
                 />
                 {scanInput && (
@@ -301,23 +301,25 @@ export const ReturnsPage: React.FC = () => {
                 )}
               </div>
 
-              <button
-                type="submit"
-                disabled={lookupMutation.isPending || !scanInput.trim()}
-                className="btn-primary bg-rose-600 hover:bg-rose-700 px-5 py-3 text-sm font-semibold whitespace-nowrap"
-              >
-                {lookupMutation.isPending ? <LoadingSpinner size="sm" /> : 'Lookup'}
-              </button>
+              <div className="flex gap-2">
+                <button
+                  type="submit"
+                  disabled={lookupMutation.isPending || !scanInput.trim()}
+                  className="btn-primary bg-rose-600 hover:bg-rose-700 flex-1 sm:flex-initial px-5 py-2.5 sm:py-3 text-sm font-semibold justify-center whitespace-nowrap"
+                >
+                  {lookupMutation.isPending ? <LoadingSpinner size="sm" /> : 'Lookup'}
+                </button>
 
-              <button
-                type="button"
-                onClick={() => setIsCameraOpen(true)}
-                className="btn-secondary px-3.5 py-3 text-sm text-gray-700 flex items-center gap-1.5"
-                title="Camera Scanner"
-              >
-                <Camera className="w-5 h-5 text-gray-600" />
-                <span className="hidden sm:inline">Camera</span>
-              </button>
+                <button
+                  type="button"
+                  onClick={() => setIsCameraOpen(true)}
+                  className="btn-secondary px-4 py-2.5 sm:py-3 text-sm text-gray-700 flex items-center justify-center gap-1.5"
+                  title="Camera Scanner"
+                >
+                  <Camera className="w-5 h-5 text-gray-600" />
+                  <span className="sm:inline">Camera</span>
+                </button>
+              </div>
             </form>
           </div>
 

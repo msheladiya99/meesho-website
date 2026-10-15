@@ -67,6 +67,7 @@
 
   .table-container {
     @apply w-full overflow-x-auto;
+    -webkit-overflow-scrolling: touch;
   }
 
   .table {
