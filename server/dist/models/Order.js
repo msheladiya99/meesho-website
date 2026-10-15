@@ -39,12 +39,34 @@ const orderSchema = new mongoose_1.Schema({
     businessAccount: { type: mongoose_1.Schema.Types.ObjectId, ref: 'BusinessAccount', required: true },
     orderDate: { type: Date, required: true },
     meeshoOrderId: { type: String, trim: true },
+    shippingLabelId: { type: String, trim: true },
+    carrierName: { type: String, trim: true },
+    internalQrCode: { type: String, trim: true },
     product: { type: mongoose_1.Schema.Types.ObjectId, ref: 'Product', required: true },
     sku: { type: String, required: true, uppercase: true },
     sellingPrice: { type: Number, required: true }, // paise
     quantity: { type: Number, required: true, min: 1 },
+    packedQuantity: { type: Number, default: 0, min: 0 },
     grossAmount: { type: Number, required: true }, // paise
-    status: { type: String, enum: ['pending', 'dispatched', 'delivered', 'cancelled', 'returned'], default: 'pending' },
+    status: {
+        type: String,
+        enum: [
+            'pending',
+            'packed',
+            'dispatched',
+            'delivered',
+            'cancelled',
+            'returned',
+            'rto_in_transit',
+            'rto_received',
+        ],
+        default: 'pending',
+    },
+    stockDeducted: { type: Boolean, default: true },
+    packedAt: { type: Date },
+    packedBy: { type: mongoose_1.Schema.Types.ObjectId, ref: 'User' },
+    dispatchedAt: { type: Date },
+    dispatchedBy: { type: mongoose_1.Schema.Types.ObjectId, ref: 'User' },
     notes: { type: String },
     isDeleted: { type: Boolean, default: false },
     deletedAt: { type: Date },
@@ -55,7 +77,17 @@ orderSchema.index({ businessAccount: 1, meeshoOrderId: 1 }, {
     unique: true,
     partialFilterExpression: { meeshoOrderId: { $exists: true, $ne: null }, isDeleted: false },
 });
+// Index for shipping label and internal QR lookup
+orderSchema.index({ businessAccount: 1, shippingLabelId: 1 }, {
+    unique: true,
+    partialFilterExpression: { shippingLabelId: { $exists: true, $ne: null }, isDeleted: false },
+});
+orderSchema.index({ internalQrCode: 1 }, {
+    unique: true,
+    partialFilterExpression: { internalQrCode: { $exists: true, $ne: null } },
+});
 orderSchema.index({ businessAccount: 1, orderDate: -1 });
+orderSchema.index({ businessAccount: 1, status: 1 });
 orderSchema.index({ product: 1 });
 orderSchema.index({ isDeleted: 1 });
 exports.Order = mongoose_1.default.model('Order', orderSchema);

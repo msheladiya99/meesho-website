@@ -6,8 +6,7 @@ import { formatCurrency, formatNumber, formatDate, dateRangePresets, today } fro
 import DateRangePicker from '../components/ui/DateRangePicker';
 import { LoadingSpinner } from '../components/ui/Feedback';
 import type { DateRange } from '../types';
-import { FileDown, Printer } from 'lucide-react';
-import dayjs from 'dayjs';
+import { FileDown, Printer, Download } from 'lucide-react';
 
 type ReportType = 'daily' | 'monthly' | 'yearly' | 'custom';
 
@@ -65,6 +64,25 @@ const ReportsPage: React.FC = () => {
       URL.revokeObjectURL(url);
     } catch {
       alert('Export failed. Please try again.');
+    }
+  };
+
+  const handleExportRegister = async (type: string) => {
+    try {
+      const params: Record<string, string> = {
+        startDate: dateRange.startDate,
+        endDate: dateRange.endDate,
+      };
+      if (accountId) {
+        params.accountId = accountId;
+      }
+      const res = await reportsApi.exportCsv(type, params);
+      const url = URL.createObjectURL(res.data as Blob);
+      const a = document.createElement('a');
+      a.href = url; a.download = `${type}_register_${today()}.csv`; a.click();
+      URL.revokeObjectURL(url);
+    } catch {
+      alert('Register export failed.');
     }
   };
 
@@ -190,6 +208,64 @@ const ReportsPage: React.FC = () => {
           )}
         </div>
       )}
+
+      {/* Operational Registers & Exception Audits */}
+      <div className="card p-5 space-y-3">
+        <div>
+          <h2 className="text-sm font-bold text-gray-800 uppercase tracking-wider">
+            Warehouse Operational Registers & Audit Exports
+          </h2>
+          <p className="text-xs text-gray-500">
+            Export immutable audit logs and registers for packing scans, RTO, customer returns, and scan exceptions.
+          </p>
+        </div>
+
+        <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-4 gap-3 pt-2">
+          <button
+            onClick={() => handleExportRegister('packing')}
+            className="p-3 rounded-xl border border-gray-200 bg-white hover:bg-gray-50 text-left flex items-center justify-between group transition-all"
+          >
+            <div>
+              <p className="text-xs font-bold text-gray-900">Packing Register</p>
+              <p className="text-[11px] text-gray-400">Barcode/QR scan logs</p>
+            </div>
+            <Download className="w-4 h-4 text-primary-600 group-hover:translate-y-0.5 transition-transform" />
+          </button>
+
+          <button
+            onClick={() => handleExportRegister('rto')}
+            className="p-3 rounded-xl border border-gray-200 bg-white hover:bg-gray-50 text-left flex items-center justify-between group transition-all"
+          >
+            <div>
+              <p className="text-xs font-bold text-gray-900">RTO Register</p>
+              <p className="text-[11px] text-gray-400">Courier return parcels</p>
+            </div>
+            <Download className="w-4 h-4 text-amber-600 group-hover:translate-y-0.5 transition-transform" />
+          </button>
+
+          <button
+            onClick={() => handleExportRegister('customer_returns')}
+            className="p-3 rounded-xl border border-gray-200 bg-white hover:bg-gray-50 text-left flex items-center justify-between group transition-all"
+          >
+            <div>
+              <p className="text-xs font-bold text-gray-900">Customer Returns</p>
+              <p className="text-[11px] text-gray-400">Inspected returns</p>
+            </div>
+            <Download className="w-4 h-4 text-rose-600 group-hover:translate-y-0.5 transition-transform" />
+          </button>
+
+          <button
+            onClick={() => handleExportRegister('exceptions')}
+            className="p-3 rounded-xl border border-gray-200 bg-white hover:bg-gray-50 text-left flex items-center justify-between group transition-all"
+          >
+            <div>
+              <p className="text-xs font-bold text-gray-900">Scan Exceptions</p>
+              <p className="text-[11px] text-gray-400">Duplicates & unknown QRs</p>
+            </div>
+            <Download className="w-4 h-4 text-red-600 group-hover:translate-y-0.5 transition-transform" />
+          </button>
+        </div>
+      </div>
     </div>
   );
 };

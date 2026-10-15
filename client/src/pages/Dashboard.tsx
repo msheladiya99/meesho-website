@@ -2,7 +2,8 @@ import React, { useState } from 'react';
 import { useQuery } from '@tanstack/react-query';
 import {
   ShoppingCart, RotateCcw, Package, TrendingUp, TrendingDown,
-  DollarSign, Warehouse, BarChart2, AlertTriangle, Plus
+  DollarSign, Warehouse, BarChart2, AlertTriangle, Plus,
+  PackageCheck, Truck, Clock, ShieldAlert, CheckCircle2
 } from 'lucide-react';
 import StatCard from '../components/ui/StatCard';
 import DateRangePicker from '../components/ui/DateRangePicker';
@@ -52,16 +53,16 @@ const Dashboard: React.FC = () => {
   const cards = [
     { title: 'Total Order Sales', value: stats ? formatCurrency(stats.totalOrderSales) : '—', icon: ShoppingCart, iconColor: 'text-blue-600', iconBg: 'bg-blue-50' },
     { title: 'Total Orders', value: stats ? formatNumber(stats.totalOrders) : '—', icon: ShoppingCart, iconColor: 'text-indigo-600', iconBg: 'bg-indigo-50' },
-    { title: 'Qty Sold', value: stats ? formatNumber(stats.totalQuantitySold) : '—', icon: Package, iconColor: 'text-violet-600', iconBg: 'bg-violet-50' },
-    { title: 'Returns', value: stats ? formatNumber(stats.totalReturnedOrders) : '—', icon: RotateCcw, iconColor: 'text-orange-600', iconBg: 'bg-orange-50' },
-    { title: 'Return Qty', value: stats ? formatNumber(stats.totalReturnQuantity) : '—', icon: RotateCcw, iconColor: 'text-red-500', iconBg: 'bg-red-50' },
+    { title: 'Pending Packing', value: stats ? formatNumber(stats.pendingPacking ?? 0) : '—', icon: Clock, iconColor: 'text-amber-600', iconBg: 'bg-amber-50' },
+    { title: 'Packed Today', value: stats ? formatNumber(stats.packedToday ?? 0) : '—', icon: PackageCheck, iconColor: 'text-emerald-600', iconBg: 'bg-emerald-50' },
+    { title: 'Dispatched Today', value: stats ? formatNumber(stats.dispatchedToday ?? 0) : '—', icon: Truck, iconColor: 'text-indigo-600', iconBg: 'bg-indigo-50' },
+    { title: 'RTO Returns', value: stats ? `${formatNumber(stats.rtoReturns ?? 0)} (${stats.rtoReturnQty ?? 0}u)` : '—', icon: RotateCcw, iconColor: 'text-orange-600', iconBg: 'bg-orange-50' },
+    { title: 'Customer Returns', value: stats ? `${formatNumber(stats.customerReturns ?? 0)} (${stats.customerReturnQty ?? 0}u)` : '—', icon: RotateCcw, iconColor: 'text-rose-600', iconBg: 'bg-rose-50' },
+    { title: 'Good Stock Recovered', value: stats ? formatNumber(stats.goodStockRecovered ?? 0) : '—', icon: CheckCircle2, iconColor: 'text-green-600', iconBg: 'bg-green-50' },
+    { title: 'Damaged Stock', value: stats ? formatNumber(stats.damagedStock ?? 0) : '—', icon: ShieldAlert, iconColor: 'text-red-500', iconBg: 'bg-red-50' },
+    { title: 'Awaiting Inspection', value: stats ? formatNumber(stats.returnsAwaitingInspection ?? 0) : '—', icon: Clock, iconColor: 'text-amber-500', iconBg: 'bg-amber-50' },
     { title: 'Net Sales', value: stats ? formatCurrency(stats.netSales) : '—', icon: TrendingUp, iconColor: 'text-emerald-600', iconBg: 'bg-emerald-50' },
-    { title: 'Purchase Cost', value: stats ? formatCurrency(stats.totalPurchaseCost) : '—', icon: DollarSign, iconColor: 'text-amber-600', iconBg: 'bg-amber-50' },
-    { title: 'Expenses', value: stats ? formatCurrency(stats.totalExpenses) : '—', icon: DollarSign, iconColor: 'text-rose-600', iconBg: 'bg-rose-50' },
-    { title: 'Est. Gross Profit', value: stats ? formatCurrency(stats.estimatedGrossProfit) : '—', icon: TrendingUp, iconColor: 'text-green-600', iconBg: 'bg-green-50' },
     { title: 'Est. Net Profit', value: stats ? formatCurrency(stats.estimatedNetProfit) : '—', icon: TrendingDown, iconColor: stats?.estimatedNetProfit >= 0 ? 'text-green-600' : 'text-red-500', iconBg: stats?.estimatedNetProfit >= 0 ? 'bg-green-50' : 'bg-red-50' },
-    { title: 'Current Stock Qty', value: stats ? formatNumber(stats.currentInventoryQty) : '—', icon: Warehouse, iconColor: 'text-cyan-600', iconBg: 'bg-cyan-50' },
-    { title: 'Inventory Value', value: stats ? formatCurrency(stats.inventoryValue) : '—', icon: BarChart2, iconColor: 'text-teal-600', iconBg: 'bg-teal-50' },
   ];
 
   return (
@@ -120,7 +121,7 @@ const Dashboard: React.FC = () => {
                 <XAxis dataKey="date" tick={{ fontSize: 11 }} />
                 <YAxis tick={{ fontSize: 11 }} tickFormatter={(v) => `₹${(v/100).toFixed(0)}`} />
                 <Tooltip
-                  formatter={(v: number) => formatCurrency(v)}
+                  formatter={(v: any) => [formatCurrency(Number(v) || 0)]}
                   labelStyle={{ fontSize: 12 }}
                   contentStyle={{ borderRadius: 8, fontSize: 12 }}
                 />

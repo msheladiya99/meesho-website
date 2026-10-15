@@ -1,6 +1,6 @@
 import React, { useState } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
-import { Plus, Search, Edit2, Trash2, ShoppingCart } from 'lucide-react';
+import { Plus, Search, Edit2, Trash2, ShoppingCart, QrCode, Printer } from 'lucide-react';
 import { useForm } from 'react-hook-form';
 import { zodResolver } from '@hookform/resolvers/zod';
 import { z } from 'zod';
@@ -11,6 +11,7 @@ import { formatCurrency, formatDate, rupeesToPaise, paiseToRupees, dateRangePres
 import DateRangePicker from '../components/ui/DateRangePicker';
 import Modal from '../components/ui/Modal';
 import { EmptyState, LoadingSpinner, ConfirmDialog } from '../components/ui/Feedback';
+import { PrintableQrLabel } from '../components/ui/PrintableQrLabel';
 import toast from 'react-hot-toast';
 import type { DateRange, Order } from '../types';
 
@@ -34,6 +35,7 @@ const OrdersPage: React.FC = () => {
   const [editingOrder, setEditingOrder] = useState<Order | null>(null);
   const [deleteId, setDeleteId] = useState<string | null>(null);
   const [keepOpen, setKeepOpen] = useState(false);
+  const [printOrder, setPrintOrder] = useState<Order | null>(null);
 
   const params = {
     accountId: activeAccountId === 'all' ? undefined : activeAccountId,
@@ -211,14 +213,18 @@ const OrdersPage: React.FC = () => {
                       <td className="font-semibold">{formatCurrency(order.grossAmount)}</td>
                       <td>
                         <span className={`badge ${
-                          order.status === 'delivered' ? 'badge-green' :
-                          order.status === 'returned' ? 'badge-red' :
+                          order.status === 'delivered' || order.status === 'packed' ? 'badge-green' :
+                          order.status === 'returned' || order.status === 'rto_received' ? 'badge-red' :
                           order.status === 'cancelled' ? 'badge-gray' :
-                          'badge-blue'
+                          order.status === 'dispatched' ? 'badge-blue' :
+                          'badge-yellow'
                         }`}>{order.status}</span>
                       </td>
                       <td>
                         <div className="flex items-center gap-1">
+                          <button onClick={() => setPrintOrder(order)} className="p-1.5 rounded hover:bg-gray-100 text-gray-400 hover:text-gray-700" title="Print Internal QR Label">
+                            <QrCode className="w-3.5 h-3.5" />
+                          </button>
                           <button onClick={() => openEdit(order)} className="p-1.5 rounded hover:bg-gray-100 text-gray-400 hover:text-gray-700">
                             <Edit2 className="w-3.5 h-3.5" />
                           </button>
@@ -321,6 +327,14 @@ const OrdersPage: React.FC = () => {
         confirmText="Delete"
         isDangerous
       />
+
+      {printOrder && (
+        <PrintableQrLabel
+          order={printOrder}
+          isOpen={true}
+          onClose={() => setPrintOrder(null)}
+        />
+      )}
     </div>
   );
 };

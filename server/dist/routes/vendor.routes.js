@@ -22,12 +22,13 @@ router.post('/', auth_1.requireManagerOrAdmin, async (req, res) => {
 });
 router.put('/:id', auth_1.requireManagerOrAdmin, async (req, res) => {
     try {
-        const v = await Vendor_1.Vendor.findByIdAndUpdate(req.params.id, req.body, { new: true });
+        const id = req.params.id;
+        const v = await Vendor_1.Vendor.findByIdAndUpdate(id, req.body, { new: true });
         if (!v) {
             res.status(404).json({ success: false, message: 'Vendor not found' });
             return;
         }
-        await (0, audit_service_1.createAuditLog)({ action: 'UPDATE', resource: 'Vendor', resourceId: req.params.id, userId: req.user?._id });
+        await (0, audit_service_1.createAuditLog)({ action: 'UPDATE', resource: 'Vendor', resourceId: id, userId: req.user?._id });
         res.json({ success: true, data: v });
     }
     catch (err) {
@@ -36,8 +37,9 @@ router.put('/:id', auth_1.requireManagerOrAdmin, async (req, res) => {
 });
 router.delete('/:id', auth_1.requireManagerOrAdmin, async (req, res) => {
     try {
-        await Vendor_1.Vendor.findByIdAndUpdate(req.params.id, { isActive: false });
-        await (0, audit_service_1.createAuditLog)({ action: 'DELETE', resource: 'Vendor', resourceId: req.params.id, userId: req.user?._id });
+        const id = req.params.id;
+        await Vendor_1.Vendor.findByIdAndUpdate(id, { isActive: false });
+        await (0, audit_service_1.createAuditLog)({ action: 'DELETE', resource: 'Vendor', resourceId: id, userId: req.user?._id });
         res.json({ success: true, message: 'Vendor deactivated' });
     }
     catch (err) {

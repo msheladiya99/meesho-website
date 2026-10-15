@@ -11,6 +11,8 @@ export interface IProduct extends Document {
   defaultPurchaseCost: number; // paise
   reorderThreshold: number;
   currentStock: number;
+  damagedStock: number;
+  pendingInspectionStock: number;
   weightedAvgCost: number;    // paise — updated on each purchase
   isActive: boolean;
 }
@@ -26,6 +28,8 @@ const productSchema = new Schema<IProduct>({
   defaultPurchaseCost: { type: Number, required: true }, // paise
   reorderThreshold: { type: Number, default: 5 },
   currentStock: { type: Number, default: 0 },
+  damagedStock: { type: Number, default: 0, min: 0 },
+  pendingInspectionStock: { type: Number, default: 0, min: 0 },
   weightedAvgCost: { type: Number, default: 0 },        // paise
   isActive: { type: Boolean, default: true },
 }, { timestamps: true });

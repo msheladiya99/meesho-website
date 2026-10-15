@@ -57,6 +57,8 @@ export interface Product {
   defaultPurchaseCost: number; // in paise
   reorderThreshold: number;
   currentStock: number;
+  damagedStock?: number;
+  pendingInspectionStock?: number;
   weightedAvgCost?: number; // in paise
   isActive: boolean;
 }
@@ -80,12 +82,29 @@ export interface Order {
   businessAccount: BusinessAccount | string;
   orderDate: string;
   meeshoOrderId?: string;
+  shippingLabelId?: string;
+  carrierName?: string;
+  internalQrCode?: string;
   product: Product | string;
   sku: string;
   sellingPrice: number; // paise
   quantity: number;
+  packedQuantity?: number;
   grossAmount: number; // paise
-  status: 'pending' | 'dispatched' | 'delivered' | 'cancelled' | 'returned';
+  status:
+    | 'pending'
+    | 'packed'
+    | 'dispatched'
+    | 'delivered'
+    | 'cancelled'
+    | 'returned'
+    | 'rto_in_transit'
+    | 'rto_received';
+  stockDeducted?: boolean;
+  packedAt?: string;
+  packedBy?: User | string;
+  dispatchedAt?: string;
+  dispatchedBy?: User | string;
   notes?: string;
   isDeleted: boolean;
   createdAt: string;
@@ -94,19 +113,80 @@ export interface Order {
 // ─── Return Order ────────────────────────────────────────────────────────────
 export interface ReturnOrder {
   _id: string;
+  returnTransactionId?: string;
   businessAccount: BusinessAccount | string;
   returnDate: string;
+  returnType?: 'customer_return' | 'rto_return';
+  status?:
+    | 'return_initiated'
+    | 'parcel_received'
+    | 'inspection_pending'
+    | 'inspected'
+    | 'stock_updated';
   originalOrder?: Order | string;
   meeshoOrderId?: string;
+  carrierTrackingId?: string;
+  scannedQrCode?: string;
   product: Product | string;
   returnedQuantity: number;
+  goodQuantity?: number;
+  damagedQuantity?: number;
+  pendingInspectionQuantity?: number;
   originalSellingPrice: number; // paise
   returnAmount: number; // paise
   returnReason?: string;
+  damageReason?: string;
+  damagePhotos?: string[];
+  damageResolution?: 'none' | 'repaired' | 'disposed' | 'resale_approved';
   itemCondition: 'sellable' | 'damaged' | 'opened' | 'pending_inspection';
   stockDisposition: 'restock' | 'discard' | 'pending';
+  stockRestored?: boolean;
+  damagedStockRestored?: boolean;
+  receivedAt?: string;
+  receivedBy?: User | string;
+  inspectedAt?: string;
+  inspectedBy?: User | string;
+  operator?: User | string;
   notes?: string;
   isProcessed: boolean;
+  createdAt: string;
+}
+
+// ─── Packing Record ──────────────────────────────────────────────────────────
+export interface PackingRecord {
+  _id: string;
+  transactionId: string;
+  businessAccount: BusinessAccount | string;
+  order: Order | string;
+  product: Product | string;
+  sku: string;
+  packedQuantity: number;
+  scannedCode: string;
+  scanType: 'internal_qr' | 'carrier_label' | 'meesho_order_id' | 'order_id' | 'manual';
+  operator: User | string;
+  notes?: string;
+  createdAt: string;
+}
+
+// ─── Scan Exception ──────────────────────────────────────────────────────────
+export interface ScanException {
+  _id: string;
+  businessAccount?: BusinessAccount | string;
+  scannedCode: string;
+  module: 'packing' | 'return';
+  exceptionType:
+    | 'order_not_found'
+    | 'already_packed'
+    | 'already_returned'
+    | 'qty_exceeded'
+    | 'wrong_account'
+    | 'invalid_format'
+    | 'system_error';
+  attemptedAction?: string;
+  reason?: string;
+  details?: string;
+  operator?: User | string;
+  operatorName?: string;
   createdAt: string;
 }
 
@@ -186,6 +266,17 @@ export interface DashboardStats {
   estimatedNetProfit: number;
   currentInventoryQty: number;
   inventoryValue: number;
+  // Module 8 Cards
+  pendingPacking?: number;
+  packedToday?: number;
+  dispatchedToday?: number;
+  rtoReturns?: number;
+  rtoReturnQty?: number;
+  customerReturns?: number;
+  customerReturnQty?: number;
+  goodStockRecovered?: number;
+  damagedStock?: number;
+  returnsAwaitingInspection?: number;
 }
 
 // ─── API ──────────────────────────────────────────────────────────────────────

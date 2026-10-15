@@ -1,0 +1,683 @@
+import React, { useState, useRef, useEffect } from 'react';
+import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
+import {
+  QrCode, Camera, CheckCircle2, AlertCircle, PackageCheck, Truck,
+  Printer, Search, RotateCcw, Clock, Layers, ArrowRight, ShieldAlert,
+  ChevronRight, Sparkles, Filter
+} from 'lucide-react';
+import { packingApi, type PackingLookupResult } from '../services/packing.service';
+import { useAccountStore } from '../store/accountStore';
+import { formatCurrency, formatDate } from '../lib/utils';
+import { CameraScannerModal } from '../components/ui/CameraScannerModal';
+import { PrintableQrLabel } from '../components/ui/PrintableQrLabel';
+import { LoadingSpinner, EmptyState } from '../components/ui/Feedback';
+import toast from 'react-hot-toast';
+import type { Order, PackingRecord } from '../types';
+
+export const PackingDispatchPage: React.FC = () => {
+  const { activeAccountId, getActiveAccount } = useAccountStore();
+  const qc = useQueryClient();
+  const activeAccount = getActiveAccount();
+
+  // Scanner state
+  const [scanInput, setScanInput] = useState('');
+  const [isCameraOpen, setIsCameraOpen] = useState(false);
+  const [activeLookup, setActiveLookup] = useState<PackingLookupResult | null>(null);
+  const [lookupError, setLookupError] = useState<string | null>(null);
+  const [packQuantity, setPackQuantity] = useState<number>(1);
+  const [packingNotes, setPackingNotes] = useState('');
+  const [labelModalOrder, setLabelModalOrder] = useState<Order | null>(null);
+
+  // Dispatch modal state
+  const [dispatchOrder, setDispatchOrder] = useState<Order | null>(null);
+  const [carrierName, setCarrierName] = useState('Shadowfax');
+  const [dispatchAwb, setDispatchAwb] = useState('');
+
+  // Table filter state
+  const [packingFilter, setPackingFilter] = useState<'pending' | 'partially_packed' | 'packed' | 'dispatched'>('pending');
+  const [orderSearch, setOrderSearch] = useState('');
+
+  const inputRef = useRef<HTMLInputElement | null>(null);
+
+  // Focus input automatically on mount and after successful scans
+  useEffect(() => {
+    inputRef.current?.focus();
+  }, [activeLookup]);
+
+  // Fetch summary counts for today
+  const { data: summaryData } = useQuery({
+    queryKey: ['packing-summary', activeAccountId],
+    queryFn: () => packingApi.summary(activeAccountId),
+  });
+  const summary = summaryData?.data?.data;
+
+  // Fetch recent packing records
+  const { data: recordsData, isLoading: recordsLoading } = useQuery({
+    queryKey: ['packing-records', activeAccountId],
+    queryFn: () => packingApi.records({ accountId: activeAccountId === 'all' ? undefined : activeAccountId, limit: 15 }),
+  });
+  const recentRecords: PackingRecord[] = recordsData?.data?.data || [];
+
+  // Fetch orders based on filter
+  const { data: ordersData, isLoading: ordersLoading } = useQuery({
+    queryKey: ['packing-orders', activeAccountId, packingFilter, orderSearch],
+    queryFn: () => packingApi.orders({
+      accountId: activeAccountId === 'all' ? undefined : activeAccountId,
+      packingStatus: packingFilter,
+      search: orderSearch || undefined,
+      limit: 50,
+    }),
+  });
+  const filteredOrders: Order[] = ordersData?.data?.data || [];
+
+  // Lookup mutation
+  const lookupMutation = useMutation({
+    mutationFn: (code: string) => packingApi.lookup(code, activeAccountId),
+    onSuccess: (res) => {
+      const data = res.data.data;
+      setActiveLookup(data);
+      setLookupError(null);
+      setPackQuantity(data.remainingQuantity > 0 ? data.remainingQuantity : 1);
+      toast.success(`Matched Order: ${data.order.meeshoOrderId || data.order._id}`);
+    },
+    onError: (err: any) => {
+      const msg = err?.response?.data?.message || 'Order Not Found';
+      setLookupError(msg);
+      setActiveLookup(null);
+      toast.error(msg);
+    },
+  });
+
+  const handleScanSubmit = (e?: React.FormEvent) => {
+    if (e) e.preventDefault();
+    const clean = scanInput.trim();
+    if (!clean) return;
+    lookupMutation.mutate(clean);
+  };
+
+  // Pack mutation
+  const packMutation = useMutation({
+    mutationFn: (data: { orderId: string; quantityToPack: number; scannedCode: string; notes?: string }) =>
+      packingApi.pack(data),
+    onSuccess: (res) => {
+      qc.invalidateQueries({ queryKey: ['packing-summary'] });
+      qc.invalidateQueries({ queryKey: ['packing-records'] });
+      qc.invalidateQueries({ queryKey: ['packing-orders'] });
+      qc.invalidateQueries({ queryKey: ['orders'] });
+      qc.invalidateQueries({ queryKey: ['dashboard'] });
+
+      toast.success(res.data.message || 'Order successfully packed!');
+      setActiveLookup(null);
+      setScanInput('');
+      setPackingNotes('');
+      inputRef.current?.focus();
+    },
+    onError: (err: any) => {
+      toast.error(err?.response?.data?.message || 'Failed to pack order');
+    },
+  });
+
+  // Dispatch mutation
+  const dispatchMutation = useMutation({
+    mutationFn: (data: { orderId: string; carrierName?: string; shippingLabelId?: string }) =>
+      packingApi.dispatch(data),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ['packing-summary'] });
+      qc.invalidateQueries({ queryKey: ['packing-orders'] });
+      qc.invalidateQueries({ queryKey: ['orders'] });
+      qc.invalidateQueries({ queryKey: ['dashboard'] });
+
+      toast.success('Order marked as DISPATCHED');
+      setDispatchOrder(null);
+    },
+    onError: (err: any) => {
+      toast.error(err?.response?.data?.message || 'Failed to dispatch order');
+    },
+  });
+
+  const handlePack = () => {
+    if (!activeLookup) return;
+    packMutation.mutate({
+      orderId: activeLookup.order._id,
+      quantityToPack: packQuantity,
+      scannedCode: scanInput || activeLookup.order.shippingLabelId || activeLookup.order.meeshoOrderId || activeLookup.order._id,
+      notes: packingNotes,
+    });
+  };
+
+  return (
+    <div className="space-y-6">
+      {/* Top Header */}
+      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
+        <div>
+          <div className="flex items-center gap-2">
+            <h1 className="text-xl font-bold text-gray-900">Packing & Dispatch</h1>
+            <span className="px-2.5 py-0.5 rounded-full text-xs font-semibold bg-primary-100 text-primary-700">
+              Live Scanner
+            </span>
+          </div>
+          <p className="text-sm text-gray-500 mt-0.5">
+            Scan carrier shipping label QR/barcode to verify, pack, and dispatch orders safely.
+          </p>
+        </div>
+
+        {activeAccount && (
+          <div className="flex items-center gap-2 bg-white px-3 py-1.5 rounded-lg border border-gray-200 text-xs">
+            <span className="text-gray-400">Active GSTIN:</span>
+            <span className="font-mono font-bold text-gray-800">{activeAccount.gstin}</span>
+            <span className="text-gray-400">({activeAccount.tradeName})</span>
+          </div>
+        )}
+      </div>
+
+      {/* KPI Cards */}
+      <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+        <div className="card p-4 flex items-center gap-4 border-l-4 border-l-amber-500">
+          <div className="p-3 bg-amber-50 text-amber-600 rounded-xl">
+            <Clock className="w-5 h-5" />
+          </div>
+          <div>
+            <p className="text-xs font-medium text-gray-400">Pending Packing</p>
+            <p className="text-xl font-bold text-gray-900">{summary?.pendingPacking ?? '—'}</p>
+          </div>
+        </div>
+
+        <div className="card p-4 flex items-center gap-4 border-l-4 border-l-blue-500">
+          <div className="p-3 bg-blue-50 text-blue-600 rounded-xl">
+            <Layers className="w-5 h-5" />
+          </div>
+          <div>
+            <p className="text-xs font-medium text-gray-400">Partially Packed</p>
+            <p className="text-xl font-bold text-gray-900">{summary?.partiallyPacked ?? '—'}</p>
+          </div>
+        </div>
+
+        <div className="card p-4 flex items-center gap-4 border-l-4 border-l-emerald-500">
+          <div className="p-3 bg-emerald-50 text-emerald-600 rounded-xl">
+            <PackageCheck className="w-5 h-5" />
+          </div>
+          <div>
+            <p className="text-xs font-medium text-gray-400">Packed Today (Units)</p>
+            <p className="text-xl font-bold text-emerald-700">{summary?.packedToday ?? 0}</p>
+          </div>
+        </div>
+
+        <div className="card p-4 flex items-center gap-4 border-l-4 border-l-indigo-500">
+          <div className="p-3 bg-indigo-50 text-indigo-600 rounded-xl">
+            <Truck className="w-5 h-5" />
+          </div>
+          <div>
+            <p className="text-xs font-medium text-gray-400">Dispatched Today</p>
+            <p className="text-xl font-bold text-indigo-700">{summary?.dispatchedToday ?? 0}</p>
+          </div>
+        </div>
+      </div>
+
+      {/* Main Scanner Section */}
+      <div className="grid grid-cols-1 lg:grid-cols-12 gap-6">
+        {/* Left: Scan Input & Matched Order Details */}
+        <div className="lg:col-span-7 space-y-4">
+          <div className="card p-5 border-2 border-primary-200 shadow-md">
+            <div className="flex items-center justify-between mb-3">
+              <span className="text-xs font-bold uppercase tracking-wider text-primary-700 flex items-center gap-1.5">
+                <QrCode className="w-4 h-4" /> Barcode & QR Scan Input
+              </span>
+              <span className="text-xs text-gray-400">USB Scanner & Mobile Ready</span>
+            </div>
+
+            <form onSubmit={handleScanSubmit} className="flex gap-2">
+              <div className="relative flex-1">
+                <input
+                  ref={inputRef}
+                  type="text"
+                  value={scanInput}
+                  onChange={(e) => setScanInput(e.target.value)}
+                  placeholder="Scan shipping label barcode / QR, or paste Order ID..."
+                  className="input pl-4 pr-10 py-3 text-base font-mono w-full border-gray-300 focus:border-primary-500 shadow-sm"
+                  autoFocus
+                />
+                {scanInput && (
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setScanInput('');
+                      setActiveLookup(null);
+                      setLookupError(null);
+                      inputRef.current?.focus();
+                    }}
+                    className="absolute right-3 top-1/2 -translate-y-1/2 text-gray-400 hover:text-gray-600"
+                  >
+                    <RotateCcw className="w-4 h-4" />
+                  </button>
+                )}
+              </div>
+
+              <button
+                type="submit"
+                disabled={lookupMutation.isPending || !scanInput.trim()}
+                className="btn-primary px-5 py-3 text-sm font-semibold whitespace-nowrap"
+              >
+                {lookupMutation.isPending ? <LoadingSpinner size="sm" /> : 'Lookup'}
+              </button>
+
+              <button
+                type="button"
+                onClick={() => setIsCameraOpen(true)}
+                className="btn-secondary px-3.5 py-3 text-sm text-gray-700 flex items-center gap-1.5"
+                title="Open Camera Scanner"
+              >
+                <Camera className="w-5 h-5 text-gray-600" />
+                <span className="hidden sm:inline">Camera</span>
+              </button>
+            </form>
+
+            <p className="text-[11px] text-gray-400 mt-2">
+              Tip: Plug in any USB handheld barcode or 2D scanner. Scanned inputs are automatically parsed and verified.
+            </p>
+          </div>
+
+          {/* Error Notification */}
+          {lookupError && (
+            <div className="p-4 bg-red-50 border border-red-200 rounded-xl flex items-start gap-3 text-red-800 animate-fade-in">
+              <ShieldAlert className="w-5 h-5 text-red-600 flex-shrink-0 mt-0.5" />
+              <div className="flex-1 text-sm">
+                <p className="font-semibold">{lookupError}</p>
+                <p className="text-xs text-red-600 mt-0.5">
+                  No stock or inventory was altered. Make sure the parcel belongs to the currently active GSTIN account.
+                </p>
+              </div>
+            </div>
+          )}
+
+          {/* Order Details Panel */}
+          {activeLookup ? (
+            <div className="card p-5 border border-primary-100 shadow-sm space-y-4 animate-fade-in">
+              <div className="flex items-center justify-between border-b pb-3">
+                <div className="flex items-center gap-2">
+                  <span className={`badge ${
+                    activeLookup.order.status === 'packed' ? 'badge-green' :
+                    activeLookup.order.status === 'dispatched' ? 'badge-blue' :
+                    'badge-yellow'
+                  }`}>
+                    {activeLookup.order.status.toUpperCase()}
+                  </span>
+                  <span className="text-xs text-gray-400 font-mono">Matched by {activeLookup.matchedBy}</span>
+                </div>
+                <button
+                  onClick={() => setLabelModalOrder(activeLookup.order)}
+                  className="text-xs text-primary-600 hover:text-primary-800 flex items-center gap-1 font-medium"
+                >
+                  <Printer className="w-3.5 h-3.5" /> Print QR Label
+                </button>
+              </div>
+
+              {/* Order Info Grid */}
+              <div className="grid grid-cols-2 sm:grid-cols-3 gap-3 bg-gray-50 p-3.5 rounded-xl text-xs">
+                <div>
+                  <span className="text-gray-400">Meesho Order ID:</span>
+                  <p className="font-mono font-bold text-gray-900 text-sm">{activeLookup.order.meeshoOrderId || '—'}</p>
+                </div>
+                <div>
+                  <span className="text-gray-400">Internal Order ID:</span>
+                  <p className="font-mono text-gray-700 truncate">{activeLookup.order._id}</p>
+                </div>
+                <div>
+                  <span className="text-gray-400">Order Date:</span>
+                  <p className="font-medium text-gray-800">{formatDate(activeLookup.order.orderDate)}</p>
+                </div>
+                <div>
+                  <span className="text-gray-400">Product:</span>
+                  <p className="font-bold text-gray-900 truncate">{(activeLookup.order.product as any)?.name || 'Product'}</p>
+                </div>
+                <div>
+                  <span className="text-gray-400">SKU:</span>
+                  <p className="font-mono font-bold text-primary-700">{activeLookup.order.sku}</p>
+                </div>
+                <div>
+                  <span className="text-gray-400">Selling Price:</span>
+                  <p className="font-semibold text-gray-900">{formatCurrency(activeLookup.order.sellingPrice)}</p>
+                </div>
+              </div>
+
+              {/* Quantities Status Bar */}
+              <div className="grid grid-cols-3 gap-3 text-center">
+                <div className="p-3 bg-blue-50 border border-blue-100 rounded-xl">
+                  <p className="text-xs text-blue-600 font-medium">Ordered Qty</p>
+                  <p className="text-xl font-bold text-blue-900">{activeLookup.orderedQuantity}</p>
+                </div>
+                <div className="p-3 bg-emerald-50 border border-emerald-100 rounded-xl">
+                  <p className="text-xs text-emerald-600 font-medium">Previously Packed</p>
+                  <p className="text-xl font-bold text-emerald-900">{activeLookup.previouslyPacked}</p>
+                </div>
+                <div className="p-3 bg-amber-50 border border-amber-100 rounded-xl">
+                  <p className="text-xs text-amber-600 font-medium">Remaining to Pack</p>
+                  <p className="text-xl font-bold text-amber-900">{activeLookup.remainingQuantity}</p>
+                </div>
+              </div>
+
+              {/* Duplicate Packing Warning */}
+              {activeLookup.isFullyPacked ? (
+                <div className="p-3.5 bg-emerald-50 border border-emerald-200 rounded-xl flex items-center gap-3 text-emerald-800 text-xs">
+                  <CheckCircle2 className="w-5 h-5 text-emerald-600 flex-shrink-0" />
+                  <div>
+                    <p className="font-bold">This order is already fully packed!</p>
+                    <p className="text-emerald-700">Duplicate packing has been prevented to protect inventory accuracy.</p>
+                  </div>
+                </div>
+              ) : (
+                /* Packing action form */
+                <div className="space-y-3 border-t pt-3">
+                  <div className="flex items-center gap-4">
+                    <div className="w-36">
+                      <label className="text-xs font-semibold text-gray-700 block mb-1">
+                        Quantity to Pack:
+                      </label>
+                      <input
+                        type="number"
+                        min={1}
+                        max={activeLookup.remainingQuantity}
+                        value={packQuantity}
+                        onChange={(e) => setPackQuantity(parseInt(e.target.value, 10) || 1)}
+                        className="input font-bold text-base text-center"
+                      />
+                    </div>
+                    <div className="flex-1">
+                      <label className="text-xs font-semibold text-gray-700 block mb-1">
+                        Notes / Batch (Optional):
+                      </label>
+                      <input
+                        type="text"
+                        value={packingNotes}
+                        onChange={(e) => setPackingNotes(e.target.value)}
+                        placeholder="e.g. Batch 2, verified seal"
+                        className="input text-xs"
+                      />
+                    </div>
+                  </div>
+
+                  <button
+                    onClick={handlePack}
+                    disabled={packMutation.isPending || packQuantity <= 0 || packQuantity > activeLookup.remainingQuantity}
+                    className="btn-primary w-full py-3 text-sm font-bold flex items-center justify-center gap-2 shadow"
+                  >
+                    {packMutation.isPending ? <LoadingSpinner size="sm" /> : <PackageCheck className="w-5 h-5" />}
+                    Mark as Packed ({packQuantity} unit{packQuantity > 1 ? 's' : ''})
+                  </button>
+                </div>
+              )}
+            </div>
+          ) : (
+            <div className="card p-10 text-center border-dashed border-2 text-gray-400">
+              <QrCode className="w-12 h-12 mx-auto mb-3 opacity-40" />
+              <p className="font-medium text-sm text-gray-600">No Order Selected</p>
+              <p className="text-xs mt-1">Scan a shipping label barcode or use search to begin packing.</p>
+            </div>
+          )}
+        </div>
+
+        {/* Right: Recent Scans Register */}
+        <div className="lg:col-span-5 space-y-4">
+          <div className="card p-4">
+            <div className="flex items-center justify-between mb-3 border-b pb-2">
+              <h3 className="font-bold text-sm text-gray-900 flex items-center gap-2">
+                <Sparkles className="w-4 h-4 text-primary-500" /> Recent Packing Scans
+              </h3>
+              <span className="text-xs text-gray-400">{recentRecords.length} recent</span>
+            </div>
+
+            {recordsLoading ? (
+              <LoadingSpinner />
+            ) : recentRecords.length === 0 ? (
+              <div className="text-center py-8 text-xs text-gray-400">
+                No packing scans recorded today yet.
+              </div>
+            ) : (
+              <div className="divide-y divide-gray-100 max-h-[380px] overflow-y-auto pr-1">
+                {recentRecords.map((rec) => (
+                  <div key={rec._id} className="py-2.5 flex items-start justify-between gap-2 text-xs">
+                    <div>
+                      <div className="flex items-center gap-1.5 font-medium text-gray-900">
+                        <span>{rec.sku}</span>
+                        <span className="badge badge-green">+{rec.packedQuantity} packed</span>
+                      </div>
+                      <p className="text-[11px] text-gray-400 font-mono mt-0.5 truncate max-w-[200px]">
+                        Tx: {rec.transactionId}
+                      </p>
+                      <p className="text-[10px] text-gray-400">
+                        By {(rec.operator as any)?.name || 'Operator'} • {new Date(rec.createdAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
+                      </p>
+                    </div>
+                    <span className="font-mono text-[11px] bg-gray-50 px-2 py-0.5 rounded border text-gray-600">
+                      {(rec.order as any)?.meeshoOrderId || 'Order'}
+                    </span>
+                  </div>
+                ))}
+              </div>
+            )}
+          </div>
+        </div>
+      </div>
+
+      {/* Orders By Packing Status Table */}
+      <div className="card space-y-4 p-5">
+        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 border-b pb-4">
+          <div className="flex items-center gap-2 overflow-x-auto pb-1 sm:pb-0">
+            {(['pending', 'partially_packed', 'packed', 'dispatched'] as const).map((tab) => (
+              <button
+                key={tab}
+                onClick={() => setPackingFilter(tab)}
+                className={`px-3 py-1.5 rounded-lg text-xs font-semibold capitalize transition-all whitespace-nowrap ${
+                  packingFilter === tab
+                    ? 'bg-primary-600 text-white shadow-sm'
+                    : 'bg-gray-100 text-gray-600 hover:bg-gray-200'
+                }`}
+              >
+                {tab.replace('_', ' ')}
+              </button>
+            ))}
+          </div>
+
+          <div className="relative max-w-xs w-full">
+            <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-gray-400" />
+            <input
+              type="text"
+              placeholder="Search Meesho ID, SKU, label..."
+              value={orderSearch}
+              onChange={(e) => setOrderSearch(e.target.value)}
+              className="input pl-8 py-1.5 text-xs w-full"
+            />
+          </div>
+        </div>
+
+        {/* Table Content */}
+        {ordersLoading ? (
+          <LoadingSpinner />
+        ) : filteredOrders.length === 0 ? (
+          <EmptyState
+            title={`No ${packingFilter.replace('_', ' ')} orders found`}
+            description="Orders matching this status will appear here."
+            icon={<Filter className="w-10 h-10 text-gray-300" />}
+          />
+        ) : (
+          <div className="table-container">
+            <table className="table">
+              <thead>
+                <tr>
+                  <th>Order Date</th>
+                  <th>Meesho Order ID</th>
+                  <th>Product & SKU</th>
+                  <th>Ordered</th>
+                  <th>Packed</th>
+                  <th>Remaining</th>
+                  <th>Carrier Label</th>
+                  <th>Status</th>
+                  <th>Actions</th>
+                </tr>
+              </thead>
+              <tbody>
+                {filteredOrders.map((order) => {
+                  const packed = order.packedQuantity || 0;
+                  const remaining = Math.max(0, order.quantity - packed);
+                  const prod = typeof order.product === 'object' ? order.product : null;
+
+                  return (
+                    <tr key={order._id}>
+                      <td className="whitespace-nowrap">{formatDate(order.orderDate)}</td>
+                      <td className="font-mono font-bold text-xs text-gray-900">{order.meeshoOrderId || '—'}</td>
+                      <td>
+                        <div className="font-medium text-gray-900 truncate max-w-[180px]">{(prod as any)?.name || '—'}</div>
+                        <div className="font-mono text-[11px] text-gray-400">{order.sku}</div>
+                      </td>
+                      <td className="font-semibold">{order.quantity}</td>
+                      <td className="text-emerald-700 font-semibold">{packed}</td>
+                      <td className="font-semibold text-amber-700">{remaining}</td>
+                      <td className="font-mono text-xs">
+                        {order.shippingLabelId ? (
+                          <span className="text-gray-700 font-medium">{order.shippingLabelId}</span>
+                        ) : order.internalQrCode ? (
+                          <span className="text-xs text-gray-400">{order.internalQrCode}</span>
+                        ) : (
+                          <span className="text-gray-300">—</span>
+                        )}
+                      </td>
+                      <td>
+                        <span className={`badge ${
+                          order.status === 'packed' ? 'badge-green' :
+                          order.status === 'dispatched' ? 'badge-blue' :
+                          'badge-yellow'
+                        }`}>
+                          {order.status}
+                        </span>
+                      </td>
+                      <td>
+                        <div className="flex items-center gap-1.5">
+                          {order.status !== 'packed' && order.status !== 'dispatched' && (
+                            <button
+                              onClick={() => {
+                                setScanInput(order.meeshoOrderId || order._id);
+                                lookupMutation.mutate(order.meeshoOrderId || order._id);
+                              }}
+                              className="px-2 py-1 rounded bg-primary-50 text-primary-700 hover:bg-primary-100 text-xs font-medium"
+                            >
+                              Pack
+                            </button>
+                          )}
+                          {order.status === 'packed' && (
+                            <button
+                              onClick={() => {
+                                setDispatchOrder(order);
+                                setDispatchAwb(order.shippingLabelId || '');
+                              }}
+                              className="px-2 py-1 rounded bg-indigo-50 text-indigo-700 hover:bg-indigo-100 text-xs font-medium flex items-center gap-1"
+                            >
+                              <Truck className="w-3 h-3" /> Dispatch
+                            </button>
+                          )}
+                          <button
+                            onClick={() => setLabelModalOrder(order)}
+                            className="p-1 rounded text-gray-400 hover:text-gray-700 hover:bg-gray-100"
+                            title="Print QR Label"
+                          >
+                            <Printer className="w-3.5 h-3.5" />
+                          </button>
+                        </div>
+                      </td>
+                    </tr>
+                  );
+                })}
+              </tbody>
+            </table>
+          </div>
+        )}
+      </div>
+
+      {/* Dispatch Modal */}
+      {dispatchOrder && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/60 backdrop-blur-sm">
+          <div className="bg-white rounded-2xl shadow-xl max-w-md w-full p-5 space-y-4">
+            <div className="flex items-center justify-between border-b pb-3">
+              <h3 className="font-bold text-gray-900 text-sm flex items-center gap-2">
+                <Truck className="w-4 h-4 text-indigo-600" /> Mark as Dispatched
+              </h3>
+              <button onClick={() => setDispatchOrder(null)} className="text-gray-400 hover:text-gray-600">✕</button>
+            </div>
+
+            <div className="text-xs bg-gray-50 p-3 rounded-xl space-y-1">
+              <p>Meesho Order: <span className="font-bold text-gray-900">{dispatchOrder.meeshoOrderId || dispatchOrder._id}</span></p>
+              <p>Product: <span className="font-medium text-gray-800">{(dispatchOrder.product as any)?.name}</span> ({dispatchOrder.sku})</p>
+              <p>Quantity: <span className="font-bold text-gray-900">{dispatchOrder.quantity} units</span></p>
+            </div>
+
+            <div className="space-y-3">
+              <div>
+                <label className="text-xs font-semibold text-gray-700 block mb-1">Carrier Partner:</label>
+                <select
+                  value={carrierName}
+                  onChange={(e) => setCarrierName(e.target.value)}
+                  className="input text-xs"
+                >
+                  <option value="Shadowfax">Shadowfax</option>
+                  <option value="Delhivery">Delhivery</option>
+                  <option value="Xpressbees">Xpressbees</option>
+                  <option value="Ecom Express">Ecom Express</option>
+                  <option value="Valmo">Valmo</option>
+                  <option value="BlueDart">BlueDart</option>
+                  <option value="Other">Other Courier</option>
+                </select>
+              </div>
+
+              <div>
+                <label className="text-xs font-semibold text-gray-700 block mb-1">Shipping Label / AWB Number:</label>
+                <input
+                  type="text"
+                  value={dispatchAwb}
+                  onChange={(e) => setDispatchAwb(e.target.value)}
+                  placeholder="Scan or enter AWB / tracking number"
+                  className="input text-xs font-mono"
+                />
+              </div>
+            </div>
+
+            <div className="flex justify-end gap-2 border-t pt-3">
+              <button onClick={() => setDispatchOrder(null)} className="btn-secondary text-xs">Cancel</button>
+              <button
+                onClick={() => {
+                  dispatchMutation.mutate({
+                    orderId: dispatchOrder._id,
+                    carrierName,
+                    shippingLabelId: dispatchAwb,
+                  });
+                }}
+                disabled={dispatchMutation.isPending}
+                className="btn-primary text-xs"
+              >
+                {dispatchMutation.isPending ? <LoadingSpinner size="sm" /> : 'Confirm Dispatch'}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Camera Scanner Modal */}
+      <CameraScannerModal
+        isOpen={isCameraOpen}
+        onClose={() => setIsCameraOpen(false)}
+        onScan={(code) => {
+          setScanInput(code);
+          lookupMutation.mutate(code);
+        }}
+      />
+
+      {/* Printable QR Label Modal */}
+      {labelModalOrder && (
+        <PrintableQrLabel
+          order={labelModalOrder}
+          isOpen={true}
+          onClose={() => setLabelModalOrder(null)}
+        />
+      )}
+    </div>
+  );
+};
+
+export default PackingDispatchPage;

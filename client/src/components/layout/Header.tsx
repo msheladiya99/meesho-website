@@ -6,7 +6,7 @@ import { useAccountStore } from '../../store/accountStore';
 import { accountsApi } from '../../services/accounts.service';
 
 const Header: React.FC = () => {
-  const { user, logout } = useAuthStore();
+  const { logout } = useAuthStore();
   const { activeAccountId, accounts, setActiveAccountId, setAccounts } = useAccountStore();
 
   const { data } = useQuery({

@@ -36,12 +36,13 @@ router.post('/', auth_1.requireManagerOrAdmin, async (req, res) => {
 });
 router.put('/:id', auth_1.requireManagerOrAdmin, async (req, res) => {
     try {
-        const p = await Partner_1.Partner.findByIdAndUpdate(req.params.id, req.body, { new: true });
+        const id = req.params.id;
+        const p = await Partner_1.Partner.findByIdAndUpdate(id, req.body, { new: true });
         if (!p) {
             res.status(404).json({ success: false, message: 'Partner not found' });
             return;
         }
-        await (0, audit_service_1.createAuditLog)({ action: 'UPDATE', resource: 'Partner', resourceId: req.params.id, userId: req.user?._id });
+        await (0, audit_service_1.createAuditLog)({ action: 'UPDATE', resource: 'Partner', resourceId: id, userId: req.user?._id });
         res.json({ success: true, data: p });
     }
     catch (err) {

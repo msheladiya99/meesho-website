@@ -5,6 +5,8 @@ import { ReturnOrder } from '../models/ReturnOrder';
 import { StockPurchase } from '../models/StockPurchase';
 import { Expense } from '../models/Expense';
 import { Product } from '../models/Product';
+import { PackingRecord } from '../models/PackingRecord';
+import { ScanException } from '../models/ScanException';
 import { authenticate, enforceAccountAccess, AuthRequest } from '../middleware/auth';
 
 const router = Router();
@@ -31,16 +33,76 @@ router.get('/dashboard', enforceAccountAccess, async (req: AuthRequest, res: Res
     const pdf = dateFilter(startDate, endDate, 'purchaseDate');
     const edf = dateFilter(startDate, endDate, 'expenseDate');
 
-    const [orderAgg, returnAgg, purchaseAgg, expenseAgg, products] = await Promise.all([
+    const todayStart = new Date();
+    todayStart.setHours(0, 0, 0, 0);
+    const todayEnd = new Date();
+    todayEnd.setHours(23, 59, 59, 999);
+
+    const [
+      orderAgg,
+      returnAgg,
+      purchaseAgg,
+      expenseAgg,
+      products,
+      pendingPackingCount,
+      packedTodayAgg,
+      dispatchedTodayCount,
+      rtoReturnAgg,
+      customerReturnAgg,
+      returnsAwaitingInspectionCount,
+    ] = await Promise.all([
       Order.aggregate([{ $match: { isDeleted: false, ...af, ...df } }, { $group: { _id: null, totalSales: { $sum: '$grossAmount' }, totalOrders: { $sum: 1 }, totalQty: { $sum: '$quantity' } } }]),
-      ReturnOrder.aggregate([{ $match: { isDeleted: false, ...af, ...rdf } }, { $group: { _id: null, totalReturns: { $sum: 1 }, totalReturnQty: { $sum: '$returnedQuantity' }, totalReturnValue: { $sum: '$returnAmount' } } }]),
+      ReturnOrder.aggregate([
+        { $match: { isDeleted: false, ...af, ...rdf } },
+        {
+          $group: {
+            _id: null,
+            totalReturns: { $sum: 1 },
+            totalReturnQty: { $sum: '$returnedQuantity' },
+            totalReturnValue: { $sum: '$returnAmount' },
+            totalGoodStockRecovered: { $sum: '$goodQuantity' },
+          },
+        },
+      ]),
       StockPurchase.aggregate([{ $match: { isDeleted: false, ...af, ...pdf } }, { $group: { _id: null, totalPurchases: { $sum: '$totalAmount' } } }]),
       Expense.aggregate([{ $match: { isDeleted: false, ...af, ...edf } }, { $group: { _id: null, totalExpenses: { $sum: '$amount' } } }]),
       Product.find({ isActive: true }),
+      Order.countDocuments({
+        isDeleted: false,
+        status: 'pending',
+        $or: [{ packedQuantity: 0 }, { packedQuantity: { $exists: false } }],
+        ...af,
+      }),
+      PackingRecord.aggregate([
+        { $match: { createdAt: { $gte: todayStart, $lte: todayEnd }, ...af } },
+        { $group: { _id: null, totalPacked: { $sum: '$packedQuantity' } } },
+      ]),
+      Order.countDocuments({
+        isDeleted: false,
+        status: 'dispatched',
+        dispatchedAt: { $gte: todayStart, $lte: todayEnd },
+        ...af,
+      }),
+      ReturnOrder.aggregate([
+        { $match: { isDeleted: false, returnType: 'rto_return', ...af, ...rdf } },
+        { $group: { _id: null, count: { $sum: 1 }, qty: { $sum: '$returnedQuantity' } } },
+      ]),
+      ReturnOrder.aggregate([
+        { $match: { isDeleted: false, returnType: 'customer_return', ...af, ...rdf } },
+        { $group: { _id: null, count: { $sum: 1 }, qty: { $sum: '$returnedQuantity' } } },
+      ]),
+      ReturnOrder.countDocuments({
+        isDeleted: false,
+        $or: [
+          { status: 'inspection_pending' },
+          { pendingInspectionQuantity: { $gt: 0 } },
+        ],
+        ...af,
+      }),
     ]);
 
     const orders = orderAgg[0] || { totalSales: 0, totalOrders: 0, totalQty: 0 };
-    const returns = returnAgg[0] || { totalReturns: 0, totalReturnQty: 0, totalReturnValue: 0 };
+    const returns = returnAgg[0] || { totalReturns: 0, totalReturnQty: 0, totalReturnValue: 0, totalGoodStockRecovered: 0 };
     const purchases = purchaseAgg[0] || { totalPurchases: 0 };
     const expenses = expenseAgg[0] || { totalExpenses: 0 };
 
@@ -51,6 +113,7 @@ router.get('/dashboard', enforceAccountAccess, async (req: AuthRequest, res: Res
     const netProfit = grossProfit - expenses.totalExpenses;
 
     const inventoryQty = products.reduce((s, p) => s + p.currentStock, 0);
+    const damagedStockTotal = products.reduce((s, p) => s + (p.damagedStock || 0), 0);
     const inventoryValue = products.reduce((s, p) => s + p.currentStock * p.weightedAvgCost, 0);
 
     res.json({
@@ -68,6 +131,17 @@ router.get('/dashboard', enforceAccountAccess, async (req: AuthRequest, res: Res
         estimatedNetProfit: netProfit,
         currentInventoryQty: inventoryQty,
         inventoryValue,
+        // MODULE 8 Cards
+        pendingPacking: pendingPackingCount,
+        packedToday: packedTodayAgg[0]?.totalPacked || 0,
+        dispatchedToday: dispatchedTodayCount,
+        rtoReturns: rtoReturnAgg[0]?.count || 0,
+        rtoReturnQty: rtoReturnAgg[0]?.qty || 0,
+        customerReturns: customerReturnAgg[0]?.count || 0,
+        customerReturnQty: customerReturnAgg[0]?.qty || 0,
+        goodStockRecovered: returns.totalGoodStockRecovered || 0,
+        damagedStock: damagedStockTotal,
+        returnsAwaitingInspection: returnsAwaitingInspectionCount,
       },
     });
   } catch (err) {
@@ -307,8 +381,8 @@ router.get('/export/:type', enforceAccountAccess, async (req: AuthRequest, res: 
         const prod = typeof o.product === 'object' ? o.product : null;
         return [
           new Date(o.orderDate).toLocaleDateString('en-IN'),
-          o.meeshoOrderId || '',
-          (prod as { name?: string })?.name || '',
+          `"${(o.meeshoOrderId || '').replace(/"/g, '""')}"`,
+          `"${((prod as { name?: string })?.name || '').replace(/"/g, '""')}"`,
           o.sku,
           (o.sellingPrice / 100).toFixed(2),
           o.quantity,
@@ -316,7 +390,84 @@ router.get('/export/:type', enforceAccountAccess, async (req: AuthRequest, res: 
           o.status,
         ].join(',');
       }).join('\n');
-      filename = `orders_${startDate}_${endDate}.csv`;
+      filename = `orders_${startDate || 'all'}_${endDate || 'all'}.csv`;
+    } else if (type === 'packing') {
+      const records = await PackingRecord.find({ createdAt: { $gte: start, $lte: end }, ...af })
+        .populate('product', 'name sku')
+        .populate('order', 'meeshoOrderId quantity')
+        .populate('operator', 'name email')
+        .sort({ createdAt: -1 });
+
+      csvContent = 'Timestamp,Transaction ID,Meesho Order ID,Product,SKU,Packed Quantity,Scanned Code,Scan Type,Operator\n';
+      csvContent += records.map(r => {
+        const prod = (r.product as any)?.name || '';
+        const orderId = (r.order as any)?.meeshoOrderId || '';
+        const opName = (r.operator as any)?.name || '';
+        return [
+          new Date(r.createdAt).toISOString(),
+          r.transactionId,
+          `"${orderId.replace(/"/g, '""')}"`,
+          `"${prod.replace(/"/g, '""')}"`,
+          r.sku,
+          r.packedQuantity,
+          `"${r.scannedCode.replace(/"/g, '""')}"`,
+          r.scanType,
+          `"${opName.replace(/"/g, '""')}"`,
+        ].join(',');
+      }).join('\n');
+      filename = `packing_register_${startDate || 'all'}_${endDate || 'all'}.csv`;
+    } else if (type === 'returns' || type === 'rto' || type === 'customer_returns') {
+      const retFilter: Record<string, unknown> = { isDeleted: false, returnDate: { $gte: start, $lte: end }, ...af };
+      if (type === 'rto') retFilter.returnType = 'rto_return';
+      if (type === 'customer_returns') retFilter.returnType = 'customer_return';
+
+      const returns = await ReturnOrder.find(retFilter)
+        .populate('product', 'name sku')
+        .populate('operator', 'name email')
+        .sort({ returnDate: -1 });
+
+      csvContent = 'Return Date,Transaction ID,Type,Status,Meesho Order ID,Product,SKU,Returned Qty,Good Qty,Damaged Qty,Pending Qty,Return Amount (₹),Reason,Damage Reason,Operator\n';
+      csvContent += returns.map(r => {
+        const prod = (r.product as any)?.name || '';
+        const opName = (r.operator as any)?.name || '';
+        return [
+          new Date(r.returnDate).toLocaleDateString('en-IN'),
+          r.returnTransactionId || '',
+          r.returnType,
+          r.status,
+          `"${(r.meeshoOrderId || '').replace(/"/g, '""')}"`,
+          `"${prod.replace(/"/g, '""')}"`,
+          (r.product as any)?.sku || '',
+          r.returnedQuantity,
+          r.goodQuantity,
+          r.damagedQuantity,
+          r.pendingInspectionQuantity,
+          (r.returnAmount / 100).toFixed(2),
+          `"${(r.returnReason || '').replace(/"/g, '""')}"`,
+          `"${(r.damageReason || '').replace(/"/g, '""')}"`,
+          `"${opName.replace(/"/g, '""')}"`,
+        ].join(',');
+      }).join('\n');
+      filename = `${type}_register_${startDate || 'all'}_${endDate || 'all'}.csv`;
+    } else if (type === 'exceptions') {
+      const exceptions = await ScanException.find({ createdAt: { $gte: start, $lte: end }, ...af })
+        .populate('operator', 'name email')
+        .sort({ createdAt: -1 });
+
+      csvContent = 'Timestamp,Module,Exception Type,Scanned Code,Attempted Action,Details,Operator\n';
+      csvContent += exceptions.map(e => {
+        const opName = (e.operator as any)?.name || '';
+        return [
+          new Date(e.createdAt).toISOString(),
+          e.module,
+          e.exceptionType,
+          `"${e.scannedCode.replace(/"/g, '""')}"`,
+          `"${e.attemptedAction.replace(/"/g, '""')}"`,
+          `"${(e.details || '').replace(/"/g, '""')}"`,
+          `"${opName.replace(/"/g, '""')}"`,
+        ].join(',');
+      }).join('\n');
+      filename = `scan_exceptions_${startDate || 'all'}_${endDate || 'all'}.csv`;
     }
 
     res.setHeader('Content-Type', 'text/csv');

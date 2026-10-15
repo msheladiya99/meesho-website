@@ -36,11 +36,29 @@ Object.defineProperty(exports, "__esModule", { value: true });
 exports.StockMovement = void 0;
 const mongoose_1 = __importStar(require("mongoose"));
 const stockMovementSchema = new mongoose_1.Schema({
+    transactionId: { type: String, required: true, trim: true },
     businessAccount: { type: mongoose_1.Schema.Types.ObjectId, ref: 'BusinessAccount', required: true },
     product: { type: mongoose_1.Schema.Types.ObjectId, ref: 'Product', required: true },
+    sku: { type: String, required: true, uppercase: true },
+    stockBucket: {
+        type: String,
+        enum: ['saleable', 'damaged', 'pending'],
+        default: 'saleable',
+    },
     movementType: {
         type: String,
-        enum: ['purchase', 'sale', 'return_in', 'return_out', 'adjustment', 'opening'],
+        enum: [
+            'purchase',
+            'sale',
+            'return_in',
+            'return_out',
+            'adjustment',
+            'opening',
+            'return_damaged',
+            'damage_disposed',
+            'damage_repaired',
+            'damage_to_saleable',
+        ],
         required: true,
     },
     quantity: { type: Number, required: true },
@@ -48,10 +66,14 @@ const stockMovementSchema = new mongoose_1.Schema({
     referenceType: { type: String },
     referenceId: { type: mongoose_1.Schema.Types.ObjectId },
     reason: { type: String },
+    previousStock: { type: Number, required: true, default: 0 },
+    resultingStock: { type: Number, required: true },
     runningBalance: { type: Number, required: true },
     createdBy: { type: mongoose_1.Schema.Types.ObjectId, ref: 'User' },
 }, { timestamps: true });
+stockMovementSchema.index({ transactionId: 1 }, { unique: true });
 stockMovementSchema.index({ businessAccount: 1, product: 1, createdAt: -1 });
+stockMovementSchema.index({ businessAccount: 1, movementType: 1 });
 stockMovementSchema.index({ referenceId: 1 });
 exports.StockMovement = mongoose_1.default.model('StockMovement', stockMovementSchema);
 //# sourceMappingURL=StockMovement.js.map

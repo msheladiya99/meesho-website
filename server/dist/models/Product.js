@@ -46,6 +46,8 @@ const productSchema = new mongoose_1.Schema({
     defaultPurchaseCost: { type: Number, required: true }, // paise
     reorderThreshold: { type: Number, default: 5 },
     currentStock: { type: Number, default: 0 },
+    damagedStock: { type: Number, default: 0, min: 0 },
+    pendingInspectionStock: { type: Number, default: 0, min: 0 },
     weightedAvgCost: { type: Number, default: 0 }, // paise
     isActive: { type: Boolean, default: true },
 }, { timestamps: true });

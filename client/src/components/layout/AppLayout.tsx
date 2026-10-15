@@ -17,7 +17,7 @@ const AppLayout: React.FC = () => {
 
   useEffect(() => {
     if (data?.data) {
-      const accounts = Array.isArray(data.data) ? data.data : (data.data as { data?: typeof data.data }).data;
+      const accounts = Array.isArray(data.data) ? data.data : (data.data as any)?.data;
       if (Array.isArray(accounts)) setAccounts(accounts);
     }
   }, [data, setAccounts]);

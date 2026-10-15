@@ -35,12 +35,13 @@ router.post('/', auth_1.requireAdmin, async (req, res) => {
 // PUT /api/business-accounts/:id
 router.put('/:id', auth_1.requireAdmin, async (req, res) => {
     try {
-        const account = await BusinessAccount_1.BusinessAccount.findByIdAndUpdate(req.params.id, req.body, { new: true, runValidators: true });
+        const id = req.params.id;
+        const account = await BusinessAccount_1.BusinessAccount.findByIdAndUpdate(id, req.body, { new: true, runValidators: true });
         if (!account) {
             res.status(404).json({ success: false, message: 'Account not found' });
             return;
         }
-        await (0, audit_service_1.createAuditLog)({ action: 'UPDATE', resource: 'BusinessAccount', resourceId: req.params.id, userId: req.user?._id });
+        await (0, audit_service_1.createAuditLog)({ action: 'UPDATE', resource: 'BusinessAccount', resourceId: id, userId: req.user?._id });
         res.json({ success: true, data: account });
     }
     catch (err) {
@@ -50,8 +51,9 @@ router.put('/:id', auth_1.requireAdmin, async (req, res) => {
 // DELETE /api/business-accounts/:id
 router.delete('/:id', auth_1.requireAdmin, async (req, res) => {
     try {
-        await BusinessAccount_1.BusinessAccount.findByIdAndUpdate(req.params.id, { isActive: false });
-        await (0, audit_service_1.createAuditLog)({ action: 'DELETE', resource: 'BusinessAccount', resourceId: req.params.id, userId: req.user?._id });
+        const id = req.params.id;
+        await BusinessAccount_1.BusinessAccount.findByIdAndUpdate(id, { isActive: false });
+        await (0, audit_service_1.createAuditLog)({ action: 'DELETE', resource: 'BusinessAccount', resourceId: id, userId: req.user?._id });
         res.json({ success: true, message: 'Account deactivated' });
     }
     catch (err) {

@@ -34,9 +34,10 @@ router.post('/', requireManagerOrAdmin, async (req: AuthRequest, res: Response):
 
 router.put('/:id', requireManagerOrAdmin, async (req: AuthRequest, res: Response): Promise<void> => {
   try {
-    const p = await Partner.findByIdAndUpdate(req.params.id, req.body, { new: true });
+    const id = req.params.id as string;
+    const p = await Partner.findByIdAndUpdate(id, req.body, { new: true });
     if (!p) { res.status(404).json({ success: false, message: 'Partner not found' }); return; }
-    await createAuditLog({ action: 'UPDATE', resource: 'Partner', resourceId: req.params.id, userId: req.user?._id });
+    await createAuditLog({ action: 'UPDATE', resource: 'Partner', resourceId: id, userId: req.user?._id });
     res.json({ success: true, data: p });
   } catch (err) {
     res.status(400).json({ success: false, message: (err as Error).message });

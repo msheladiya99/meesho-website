@@ -38,14 +38,15 @@ router.post('/', requireAdmin, async (req: AuthRequest, res: Response): Promise<
 // PUT /api/users/:id
 router.put('/:id', requireAdmin, async (req: AuthRequest, res: Response): Promise<void> => {
   try {
+    const id = req.params.id as string;
     const { name, email, role, allowedAccounts, isActive } = req.body;
     const user = await User.findByIdAndUpdate(
-      req.params.id,
+      id,
       { name, email, role, allowedAccounts, isActive },
       { new: true, runValidators: true }
     ).select('-password');
     if (!user) { res.status(404).json({ success: false, message: 'User not found' }); return; }
-    await createAuditLog({ action: 'UPDATE', resource: 'User', resourceId: req.params.id, userId: req.user?._id, details: `Updated user ${user.email}` });
+    await createAuditLog({ action: 'UPDATE', resource: 'User', resourceId: id, userId: req.user?._id, details: `Updated user ${user.email}` });
     res.json({ success: true, data: user });
   } catch (err) {
     res.status(500).json({ success: false, message: (err as Error).message });
@@ -55,16 +56,17 @@ router.put('/:id', requireAdmin, async (req: AuthRequest, res: Response): Promis
 // POST /api/users/:id/reset-password
 router.post('/:id/reset-password', requireAdmin, async (req: AuthRequest, res: Response): Promise<void> => {
   try {
+    const id = req.params.id as string;
     const { password } = req.body;
     if (!password || password.length < 6) {
       res.status(400).json({ success: false, message: 'Password must be at least 6 characters' });
       return;
     }
-    const user = await User.findById(req.params.id);
+    const user = await User.findById(id);
     if (!user) { res.status(404).json({ success: false, message: 'User not found' }); return; }
     user.password = password;
     await user.save();
-    await createAuditLog({ action: 'UPDATE', resource: 'User', resourceId: req.params.id, userId: req.user?._id, details: `Password reset for user ${user.email}` });
+    await createAuditLog({ action: 'UPDATE', resource: 'User', resourceId: id, userId: req.user?._id, details: `Password reset for user ${user.email}` });
     res.json({ success: true, message: 'Password reset successfully' });
   } catch (err) {
     res.status(500).json({ success: false, message: (err as Error).message });
@@ -74,12 +76,13 @@ router.post('/:id/reset-password', requireAdmin, async (req: AuthRequest, res: R
 // DELETE /api/users/:id
 router.delete('/:id', requireAdmin, async (req: AuthRequest, res: Response): Promise<void> => {
   try {
-    if (req.params.id === req.user?._id) {
+    const id = req.params.id as string;
+    if (id === req.user?._id) {
       res.status(400).json({ success: false, message: 'Cannot delete your own account' });
       return;
     }
-    await User.findByIdAndUpdate(req.params.id, { isActive: false });
-    await createAuditLog({ action: 'DELETE', resource: 'User', resourceId: req.params.id, userId: req.user?._id });
+    await User.findByIdAndUpdate(id, { isActive: false });
+    await createAuditLog({ action: 'DELETE', resource: 'User', resourceId: id, userId: req.user?._id });
     res.json({ success: true, message: 'User deactivated' });
   } catch (err) {
     res.status(500).json({ success: false, message: (err as Error).message });

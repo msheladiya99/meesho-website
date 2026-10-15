@@ -10,6 +10,7 @@ import AppLayout from './components/layout/AppLayout';
 import LoginPage from './pages/LoginPage';
 import Dashboard from './pages/Dashboard';
 import OrdersPage from './pages/OrdersPage';
+import PackingDispatchPage from './pages/PackingDispatchPage';
 import ReturnsPage from './pages/ReturnsPage';
 import ProductsPage from './pages/ProductsPage';
 import InventoryPage from './pages/InventoryPage';
@@ -54,6 +55,7 @@ function App() {
           <Route path="/" element={<PrivateRoute><AppLayout /></PrivateRoute>}>
             <Route index element={<Dashboard />} />
             <Route path="orders" element={<OrdersPage />} />
+            <Route path="packing" element={<PackingDispatchPage />} />
             <Route path="returns" element={<ReturnsPage />} />
             <Route path="products" element={<ProductsPage />} />
             <Route path="inventory" element={<InventoryPage />} />

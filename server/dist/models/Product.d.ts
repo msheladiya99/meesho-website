@@ -10,6 +10,8 @@ export interface IProduct extends Document {
     defaultPurchaseCost: number;
     reorderThreshold: number;
     currentStock: number;
+    damagedStock: number;
+    pendingInspectionStock: number;
     weightedAvgCost: number;
     isActive: boolean;
 }

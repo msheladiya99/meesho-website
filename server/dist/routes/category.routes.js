@@ -22,12 +22,13 @@ router.post('/', auth_1.requireManagerOrAdmin, async (req, res) => {
 });
 router.put('/:id', auth_1.requireManagerOrAdmin, async (req, res) => {
     try {
-        const cat = await Category_1.Category.findByIdAndUpdate(req.params.id, req.body, { new: true });
+        const id = req.params.id;
+        const cat = await Category_1.Category.findByIdAndUpdate(id, req.body, { new: true });
         if (!cat) {
             res.status(404).json({ success: false, message: 'Category not found' });
             return;
         }
-        await (0, audit_service_1.createAuditLog)({ action: 'UPDATE', resource: 'Category', resourceId: req.params.id, userId: req.user?._id });
+        await (0, audit_service_1.createAuditLog)({ action: 'UPDATE', resource: 'Category', resourceId: id, userId: req.user?._id });
         res.json({ success: true, data: cat });
     }
     catch (err) {
@@ -36,12 +37,13 @@ router.put('/:id', auth_1.requireManagerOrAdmin, async (req, res) => {
 });
 router.delete('/:id', auth_1.requireManagerOrAdmin, async (req, res) => {
     try {
-        const category = await Category_1.Category.findByIdAndDelete(req.params.id);
+        const id = req.params.id;
+        const category = await Category_1.Category.findByIdAndDelete(id);
         if (!category) {
             res.status(404).json({ success: false, message: 'Category not found' });
             return;
         }
-        await (0, audit_service_1.createAuditLog)({ action: 'DELETE', resource: 'Category', resourceId: req.params.id, userId: req.user?._id, details: `Deleted category ${category.name}` });
+        await (0, audit_service_1.createAuditLog)({ action: 'DELETE', resource: 'Category', resourceId: id, userId: req.user?._id, details: `Deleted category ${category.name}` });
         res.json({ success: true, message: 'Category deleted' });
     }
     catch (err) {

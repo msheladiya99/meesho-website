@@ -5,6 +5,7 @@ import { Product } from '../models/Product';
 import { authenticate, requireManagerOrAdmin, enforceAccountAccess, AuthRequest } from '../middleware/auth';
 import { createAuditLog } from '../services/audit.service';
 import { recordStockMovement, reverseMovementsByReference } from '../services/inventory.service';
+import { generateInternalQrCode } from '../services/qrScanner.service';
 
 const router = Router();
 router.use(authenticate);
@@ -28,6 +29,9 @@ router.get('/', enforceAccountAccess, async (req: AuthRequest, res: Response): P
     if (search) {
       filter.$or = [
         { meeshoOrderId: { $regex: search, $options: 'i' } },
+        { shippingLabelId: { $regex: search, $options: 'i' } },
+        { internalQrCode: { $regex: search, $options: 'i' } },
+        { sku: { $regex: search, $options: 'i' } },
       ];
     }
 
@@ -57,7 +61,10 @@ router.get('/:id', async (req, res: Response): Promise<void> => {
 // POST /api/orders
 router.post('/', requireManagerOrAdmin, enforceAccountAccess, async (req: AuthRequest, res: Response): Promise<void> => {
   try {
-    const { businessAccount, orderDate, meeshoOrderId, product: productId, sellingPrice, quantity, notes, status } = req.body;
+    const {
+      businessAccount, orderDate, meeshoOrderId, product: productId,
+      sellingPrice, quantity, notes, status, shippingLabelId, carrierName,
+    } = req.body;
 
     if (!businessAccount) { res.status(400).json({ success: false, message: 'businessAccount is required' }); return; }
     if (!productId) { res.status(400).json({ success: false, message: 'product is required' }); return; }
@@ -76,9 +83,15 @@ router.post('/', requireManagerOrAdmin, enforceAccountAccess, async (req: AuthRe
     }
 
     const grossAmount = sellingPrice * quantity;
+    const tempId = new mongoose.Types.ObjectId();
+    const internalQrCode = generateInternalQrCode(tempId.toString(), product.sku);
 
     const order = await Order.create({
+      _id: tempId,
       businessAccount, orderDate, meeshoOrderId: meeshoOrderId || undefined,
+      shippingLabelId: shippingLabelId || undefined,
+      carrierName: carrierName || undefined,
+      internalQrCode,
       product: productId, sku: product.sku, sellingPrice, quantity, grossAmount,
       status: orderStatus, notes, createdBy: req.user?._id,
     });

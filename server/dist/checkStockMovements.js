@@ -34,7 +34,8 @@ async function checkStock(productId) {
         let runningBalance = 0;
         for (const mv of movements) {
             runningBalance += mv.quantity;
-            console.log(`   ${mv.createdAt?.toISOString().split('T')[0]} | ${mv.movementType.padEnd(12)} | Qty: ${mv.quantity.toString().padStart(4)} | Running: ${runningBalance} | Ref: ${mv.referenceType || 'N/A'} | ${mv.reason || ''}`);
+            const createdDate = mv.createdAt ? mv.createdAt.toISOString().split('T')[0] : '';
+            console.log(`   ${createdDate} | ${mv.movementType.padEnd(12)} | Qty: ${mv.quantity.toString().padStart(4)} | Running: ${runningBalance} | Ref: ${mv.referenceType || 'N/A'} | ${mv.reason || ''}`);
         }
     }
     else {

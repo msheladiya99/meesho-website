@@ -1,15 +1,24 @@
 import mongoose, { Document } from 'mongoose';
-export type OrderStatus = 'pending' | 'dispatched' | 'delivered' | 'cancelled' | 'returned';
+export type OrderStatus = 'pending' | 'packed' | 'dispatched' | 'delivered' | 'cancelled' | 'returned' | 'rto_in_transit' | 'rto_received';
 export interface IOrder extends Document {
     businessAccount: mongoose.Types.ObjectId;
     orderDate: Date;
     meeshoOrderId?: string;
+    shippingLabelId?: string;
+    carrierName?: string;
+    internalQrCode?: string;
     product: mongoose.Types.ObjectId;
     sku: string;
     sellingPrice: number;
     quantity: number;
+    packedQuantity: number;
     grossAmount: number;
     status: OrderStatus;
+    stockDeducted: boolean;
+    packedAt?: Date;
+    packedBy?: mongoose.Types.ObjectId;
+    dispatchedAt?: Date;
+    dispatchedBy?: mongoose.Types.ObjectId;
     notes?: string;
     isDeleted: boolean;
     deletedAt?: Date;

@@ -50,12 +50,13 @@ router.post('/', auth_1.requireManagerOrAdmin, async (req, res) => {
 });
 router.put('/:id', auth_1.requireManagerOrAdmin, async (req, res) => {
     try {
-        const p = await Product_1.Product.findByIdAndUpdate(req.params.id, req.body, { new: true, runValidators: true }).populate('category');
+        const id = req.params.id;
+        const p = await Product_1.Product.findByIdAndUpdate(id, req.body, { new: true, runValidators: true }).populate('category');
         if (!p) {
             res.status(404).json({ success: false, message: 'Product not found' });
             return;
         }
-        await (0, audit_service_1.createAuditLog)({ action: 'UPDATE', resource: 'Product', resourceId: req.params.id, userId: req.user?._id });
+        await (0, audit_service_1.createAuditLog)({ action: 'UPDATE', resource: 'Product', resourceId: id, userId: req.user?._id });
         res.json({ success: true, data: p });
     }
     catch (err) {
@@ -64,12 +65,13 @@ router.put('/:id', auth_1.requireManagerOrAdmin, async (req, res) => {
 });
 router.delete('/:id', auth_1.requireManagerOrAdmin, async (req, res) => {
     try {
-        const product = await Product_1.Product.findByIdAndDelete(req.params.id);
+        const id = req.params.id;
+        const product = await Product_1.Product.findByIdAndDelete(id);
         if (!product) {
             res.status(404).json({ success: false, message: 'Product not found' });
             return;
         }
-        await (0, audit_service_1.createAuditLog)({ action: 'DELETE', resource: 'Product', resourceId: req.params.id, userId: req.user?._id, details: `Deleted product ${product.sku}` });
+        await (0, audit_service_1.createAuditLog)({ action: 'DELETE', resource: 'Product', resourceId: id, userId: req.user?._id, details: `Deleted product ${product.sku}` });
         res.json({ success: true, message: 'Product deleted' });
     }
     catch (err) {

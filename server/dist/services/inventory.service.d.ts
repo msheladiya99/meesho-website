@@ -1,10 +1,11 @@
 import mongoose from 'mongoose';
-type MovementType = 'purchase' | 'sale' | 'return_in' | 'return_out' | 'adjustment' | 'opening';
+import { MovementType, StockBucket } from '../models/StockMovement';
 interface RecordMovementParams {
     businessAccount: string;
     productId: string;
     movementType: MovementType;
     quantity: number;
+    stockBucket?: StockBucket;
     unitCost?: number;
     referenceType?: string;
     referenceId?: string;
@@ -12,14 +13,18 @@ interface RecordMovementParams {
     createdBy?: string;
     session?: mongoose.ClientSession;
 }
+export declare const generateStockTransactionId: () => string;
 /**
- * Record a stock movement and update the product's currentStock and weightedAvgCost.
- * Uses weighted-average cost method for inventory valuation.
+ * Record a stock movement and update the product's stock buckets and weightedAvgCost.
+ * Supports saleable, damaged, and pending buckets.
  */
 export declare const recordStockMovement: (params: RecordMovementParams) => Promise<void>;
 /**
+ * Check if an order has already had its stock deducted.
+ */
+export declare const hasOrderDeductedStock: (orderId: string, session?: mongoose.ClientSession) => Promise<boolean>;
+/**
  * Reverse a movement (e.g., when an order or purchase is deleted).
- * Finds movements linked to the referenceId and creates reversal entries.
  */
 export declare const reverseMovementsByReference: (referenceId: string, createdBy?: string, session?: mongoose.ClientSession) => Promise<void>;
 export {};

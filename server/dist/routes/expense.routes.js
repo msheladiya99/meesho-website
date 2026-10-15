@@ -82,12 +82,13 @@ router.post('/', auth_1.requireManagerOrAdmin, auth_1.enforceAccountAccess, asyn
 // PUT /api/expenses/:id
 router.put('/:id', auth_1.requireManagerOrAdmin, auth_1.enforceAccountAccess, async (req, res) => {
     try {
-        const updated = await Expense_1.Expense.findByIdAndUpdate(req.params.id, req.body, { new: true }).populate('paidByPartner', 'name').populate('businessAccount', 'name gstin');
+        const id = req.params.id;
+        const updated = await Expense_1.Expense.findByIdAndUpdate(id, req.body, { new: true }).populate('paidByPartner', 'name').populate('businessAccount', 'name gstin');
         if (!updated) {
             res.status(404).json({ success: false, message: 'Expense not found' });
             return;
         }
-        await (0, audit_service_1.createAuditLog)({ action: 'UPDATE', resource: 'Expense', resourceId: req.params.id, userId: req.user?._id });
+        await (0, audit_service_1.createAuditLog)({ action: 'UPDATE', resource: 'Expense', resourceId: id, userId: req.user?._id });
         res.json({ success: true, data: updated });
     }
     catch (err) {
@@ -97,8 +98,9 @@ router.put('/:id', auth_1.requireManagerOrAdmin, auth_1.enforceAccountAccess, as
 // DELETE /api/expenses/:id
 router.delete('/:id', auth_1.requireManagerOrAdmin, async (req, res) => {
     try {
-        await Expense_1.Expense.findByIdAndUpdate(req.params.id, { isDeleted: true });
-        await (0, audit_service_1.createAuditLog)({ action: 'DELETE', resource: 'Expense', resourceId: req.params.id, userId: req.user?._id });
+        const id = req.params.id;
+        await Expense_1.Expense.findByIdAndUpdate(id, { isDeleted: true });
+        await (0, audit_service_1.createAuditLog)({ action: 'DELETE', resource: 'Expense', resourceId: id, userId: req.user?._id });
         res.json({ success: true, message: 'Expense deleted' });
     }
     catch (err) {
