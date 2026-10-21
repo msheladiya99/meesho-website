@@ -47,10 +47,10 @@ const recordStockMovement = async (params) => {
         // Default: saleable stock
         previousStock = product.currentStock;
         resultingStock = previousStock + quantity;
-        if (resultingStock < 0) {
+        if (resultingStock < 0 && movementType !== 'sale') {
             throw new Error(`Insufficient saleable stock for product "${product.name}". Available: ${product.currentStock}, Requested: ${Math.abs(quantity)}`);
         }
-        productUpdate.currentStock = resultingStock;
+        productUpdate.currentStock = Math.max(0, resultingStock);
         // Update weighted average cost on saleable stock IN
         if (quantity > 0 && unitCost > 0) {
             const currentValue = product.currentStock * product.weightedAvgCost;
@@ -81,6 +81,14 @@ const recordStockMovement = async (params) => {
             runningBalance: resultingStock,
             createdBy: createdBy ? new mongoose_1.default.Types.ObjectId(createdBy) : undefined,
         }], { session });
+    // Ensure product.currentStock strictly mirrors the movement ledger for saleable stock
+    if (stockBucket === 'saleable') {
+        const agg = await StockMovement_1.StockMovement.aggregate([
+            { $match: { product: new mongoose_1.default.Types.ObjectId(productId), stockBucket: 'saleable' } },
+            { $group: { _id: null, total: { $sum: '$quantity' } } }
+        ]).session(session || null);
+        productUpdate.currentStock = agg.length > 0 ? Math.max(0, agg[0].total) : 0;
+    }
     // Update product model
     await Product_1.Product.findByIdAndUpdate(productId, productUpdate, { session });
 };
@@ -129,6 +137,15 @@ const reverseMovementsByReference = async (referenceId, createdBy, session) => {
         }
         // Delete the original movement
         await StockMovement_1.StockMovement.findByIdAndDelete(mv._id).session(session || null);
+        // Recalculate true currentStock from remaining movements to prevent drift
+        if (!mv.stockBucket || mv.stockBucket === 'saleable') {
+            const agg = await StockMovement_1.StockMovement.aggregate([
+                { $match: { product: mv.product, stockBucket: 'saleable' } },
+                { $group: { _id: null, total: { $sum: '$quantity' } } }
+            ]).session(session || null);
+            const actualStock = agg.length > 0 ? Math.max(0, agg[0].total) : 0;
+            await Product_1.Product.findByIdAndUpdate(mv.product, { currentStock: actualStock }, { session });
+        }
     }
 };
 exports.reverseMovementsByReference = reverseMovementsByReference;
