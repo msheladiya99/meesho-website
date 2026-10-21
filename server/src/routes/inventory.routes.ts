@@ -78,13 +78,12 @@ router.get('/', async (req: AuthRequest, res: Response): Promise<void> => {
 
       const mappedProducts = products.map(p => {
         const pObj: any = p.toObject();
-        const hasAnyTargetMovement = targetStockMap.has(p._id.toString());
         const ownStock = ownStockMap.get(p._id.toString()) ?? 0;
         
-        // If account has movements or shared stock enabled, use calculated stock
-        if (hasAnyTargetMovement || isSharedStock || ownStockMap.has(p._id.toString())) {
-          pObj.currentStock = Math.max(0, targetStockMap.get(p._id.toString()) ?? 0);
-        }
+        // STRICT INVENTORY ISOLATION:
+        // Current stock is strictly the calculated stock for target accounts (own stock if unchecked, shared if checked).
+        // If an account has 0 stock movements, it strictly shows 0. Never mix with other accounts!
+        pObj.currentStock = Math.max(0, targetStockMap.get(p._id.toString()) ?? 0);
         pObj.ownStock = Math.max(0, ownStock);
         pObj.isSharedStock = isSharedStock;
         return pObj;

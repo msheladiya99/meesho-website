@@ -12,6 +12,8 @@ const Expense_1 = require("../models/Expense");
 const Product_1 = require("../models/Product");
 const PackingRecord_1 = require("../models/PackingRecord");
 const ScanException_1 = require("../models/ScanException");
+const BusinessAccount_1 = require("../models/BusinessAccount");
+const StockMovement_1 = require("../models/StockMovement");
 const auth_1 = require("../middleware/auth");
 const router = (0, express_1.Router)();
 router.use(auth_1.authenticate);
@@ -25,6 +27,46 @@ const dateFilter = (startDate, endDate, field = 'orderDate') => {
     if (endDate)
         f['$lte'] = new Date(endDate + 'T23:59:59.999Z');
     return { [field]: f };
+};
+const getAccountInventoryStats = async (accountId, products = []) => {
+    if (accountId && accountId !== 'all' && mongoose_1.default.Types.ObjectId.isValid(accountId)) {
+        const account = await BusinessAccount_1.BusinessAccount.findById(accountId);
+        const targetAccountIds = [new mongoose_1.default.Types.ObjectId(accountId)];
+        if (account?.allowSharedStock && account.sharedStockAccounts && account.sharedStockAccounts.length > 0) {
+            targetAccountIds.push(...account.sharedStockAccounts.map((id) => new mongoose_1.default.Types.ObjectId(id)));
+        }
+        const movements = await StockMovement_1.StockMovement.aggregate([
+            {
+                $match: {
+                    businessAccount: { $in: targetAccountIds },
+                    stockBucket: 'saleable',
+                }
+            },
+            {
+                $group: {
+                    _id: '$product',
+                    qty: { $sum: '$quantity' }
+                }
+            }
+        ]);
+        const productMap = new Map();
+        products.forEach(p => productMap.set(p._id.toString(), p));
+        let closingStockQty = 0;
+        let inventoryValue = 0;
+        movements.forEach(m => {
+            const qty = Math.max(0, m.qty);
+            const p = productMap.get(m._id.toString());
+            closingStockQty += qty;
+            if (p) {
+                inventoryValue += qty * (p.weightedAvgCost || p.defaultPurchaseCost || 0);
+            }
+        });
+        return { closingStockQty, inventoryValue };
+    }
+    return {
+        closingStockQty: products.reduce((s, p) => s + p.currentStock, 0),
+        inventoryValue: products.reduce((s, p) => s + p.currentStock * p.weightedAvgCost, 0),
+    };
 };
 // GET /api/reports/dashboard
 router.get('/dashboard', auth_1.enforceAccountAccess, async (req, res) => {
@@ -98,9 +140,10 @@ router.get('/dashboard', auth_1.enforceAccountAccess, async (req, res) => {
         const cogs = orders.totalQty * (products.reduce((s, p) => s + p.weightedAvgCost, 0) / Math.max(products.length, 1));
         const grossProfit = netSales - cogs;
         const netProfit = grossProfit - expenses.totalExpenses;
-        const inventoryQty = products.reduce((s, p) => s + p.currentStock, 0);
+        const invStats = await getAccountInventoryStats(accountId, products);
+        const inventoryQty = invStats.closingStockQty;
         const damagedStockTotal = products.reduce((s, p) => s + (p.damagedStock || 0), 0);
-        const inventoryValue = products.reduce((s, p) => s + p.currentStock * p.weightedAvgCost, 0);
+        const inventoryValue = invStats.inventoryValue;
         res.json({
             success: true,
             data: {
@@ -271,6 +314,7 @@ router.get('/monthly', auth_1.enforceAccountAccess, async (req, res) => {
         const o = oAgg[0] || {};
         const r = rAgg[0] || {};
         const netSales = (o.gross || 0) - (r.value || 0);
+        const invStats = await getAccountInventoryStats(accountId, products);
         res.json({
             success: true,
             data: {
@@ -279,8 +323,8 @@ router.get('/monthly', auth_1.enforceAccountAccess, async (req, res) => {
                 netSales, stockPurchases: pAgg[0]?.total || 0, totalExpenses: eAgg[0]?.total || 0,
                 estimatedGrossProfit: netSales - (pAgg[0]?.total || 0),
                 estimatedNetProfit: netSales - (pAgg[0]?.total || 0) - (eAgg[0]?.total || 0),
-                closingStockQty: products.reduce((s, p) => s + p.currentStock, 0),
-                inventoryValue: products.reduce((s, p) => s + p.currentStock * p.weightedAvgCost, 0),
+                closingStockQty: invStats.closingStockQty,
+                inventoryValue: invStats.inventoryValue,
             },
         });
     }
@@ -306,7 +350,8 @@ router.get('/yearly', auth_1.enforceAccountAccess, async (req, res) => {
         const o = oAgg[0] || {};
         const r = rAgg[0] || {};
         const netSales = (o.gross || 0) - (r.value || 0);
-        res.json({ success: true, data: { totalOrders: o.orders || 0, grossOrderValue: o.gross || 0, returnValue: r.value || 0, netSales, stockPurchases: pAgg[0]?.total || 0, totalExpenses: eAgg[0]?.total || 0, estimatedNetProfit: netSales - (pAgg[0]?.total || 0) - (eAgg[0]?.total || 0), closingStockQty: products.reduce((s, p) => s + p.currentStock, 0) } });
+        const invStats = await getAccountInventoryStats(accountId, products);
+        res.json({ success: true, data: { totalOrders: o.orders || 0, grossOrderValue: o.gross || 0, returnValue: r.value || 0, netSales, stockPurchases: pAgg[0]?.total || 0, totalExpenses: eAgg[0]?.total || 0, estimatedNetProfit: netSales - (pAgg[0]?.total || 0) - (eAgg[0]?.total || 0), closingStockQty: invStats.closingStockQty, inventoryValue: invStats.inventoryValue } });
     }
     catch (err) {
         res.status(500).json({ success: false, message: err.message });
@@ -329,7 +374,8 @@ router.get('/custom', auth_1.enforceAccountAccess, async (req, res) => {
         const o = oAgg[0] || {};
         const r = rAgg[0] || {};
         const netSales = (o.gross || 0) - (r.value || 0);
-        res.json({ success: true, data: { totalOrders: o.orders || 0, totalQuantity: o.qty || 0, grossOrderValue: o.gross || 0, totalReturns: r.returns || 0, returnQuantity: r.qty || 0, returnValue: r.value || 0, netSales, stockPurchases: pAgg[0]?.total || 0, totalExpenses: eAgg[0]?.total || 0, estimatedGrossProfit: netSales - (pAgg[0]?.total || 0), estimatedNetProfit: netSales - (pAgg[0]?.total || 0) - (eAgg[0]?.total || 0), closingStockQty: products.reduce((s, p) => s + p.currentStock, 0), inventoryValue: products.reduce((s, p) => s + p.currentStock * p.weightedAvgCost, 0) } });
+        const invStats = await getAccountInventoryStats(accountId, products);
+        res.json({ success: true, data: { totalOrders: o.orders || 0, totalQuantity: o.qty || 0, grossOrderValue: o.gross || 0, totalReturns: r.returns || 0, returnQuantity: r.qty || 0, returnValue: r.value || 0, netSales, stockPurchases: pAgg[0]?.total || 0, totalExpenses: eAgg[0]?.total || 0, estimatedGrossProfit: netSales - (pAgg[0]?.total || 0), estimatedNetProfit: netSales - (pAgg[0]?.total || 0) - (eAgg[0]?.total || 0), closingStockQty: invStats.closingStockQty, inventoryValue: invStats.inventoryValue } });
     }
     catch (err) {
         res.status(500).json({ success: false, message: err.message });

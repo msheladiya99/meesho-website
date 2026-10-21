@@ -13,7 +13,7 @@ import Modal from '../components/ui/Modal';
 import { EmptyState, LoadingSpinner, ConfirmDialog } from '../components/ui/Feedback';
 import { PrintableQrLabel } from '../components/ui/PrintableQrLabel';
 import toast from 'react-hot-toast';
-import type { DateRange, Order } from '../types';
+import type { DateRange, Order, Product } from '../types';
 
 const schema = z.object({
   orderDate: z.string().min(1, 'Required'),
@@ -51,8 +51,8 @@ const OrdersPage: React.FC = () => {
   });
 
   const { data: productsData } = useQuery({
-    queryKey: ['products'],
-    queryFn: () => productsApi.list(),
+    queryKey: ['products', activeAccountId],
+    queryFn: () => productsApi.list({ accountId: activeAccountId === 'all' ? undefined : activeAccountId }),
   });
 
   const orders = data?.data?.data || [];
@@ -295,8 +295,10 @@ const OrdersPage: React.FC = () => {
             <label className="label">Product *</label>
             <select {...register('product')} className="select">
               <option value="">Select product</option>
-              {products.map((p: { _id: string; name: string; sku: string }) => (
-                <option key={p._id} value={p._id}>{p.name} ({p.sku})</option>
+              {products.map((p: Product) => (
+                <option key={p._id} value={p._id}>
+                  {p.name} ({p.sku}) — Available: {p.currentStock ?? 0}{p.isSharedStock ? ' • Shared' : ''}
+                </option>
               ))}
             </select>
             {errors.product && <p className="text-xs text-red-500 mt-1">{errors.product.message}</p>}

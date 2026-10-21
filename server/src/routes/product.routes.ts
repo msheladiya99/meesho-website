@@ -1,5 +1,8 @@
 import { Router, Response } from 'express';
+import mongoose from 'mongoose';
 import { Product } from '../models/Product';
+import { BusinessAccount } from '../models/BusinessAccount';
+import { StockMovement } from '../models/StockMovement';
 import { authenticate, requireManagerOrAdmin, AuthRequest } from '../middleware/auth';
 import { createAuditLog } from '../services/audit.service';
 
@@ -8,7 +11,7 @@ router.use(authenticate);
 
 router.get('/', async (req: AuthRequest, res: Response): Promise<void> => {
   try {
-    const { search, categoryId, page = '1', limit = '100' } = req.query as Record<string, string>;
+    const { search, categoryId, accountId, page = '1', limit = '100' } = req.query as Record<string, string>;
     const filter: Record<string, unknown> = {};
     if (search) filter.$or = [{ name: { $regex: search, $options: 'i' } }, { sku: { $regex: search, $options: 'i' } }];
     if (categoryId) filter.category = categoryId;
@@ -18,6 +21,48 @@ router.get('/', async (req: AuthRequest, res: Response): Promise<void> => {
       Product.find(filter).populate('category').skip(skip).limit(parseInt(limit)).sort({ name: 1 }),
       Product.countDocuments(filter),
     ]);
+
+    // If accountId is provided, strictly isolate stock
+    if (accountId && accountId !== 'all' && mongoose.Types.ObjectId.isValid(accountId)) {
+      const account = await BusinessAccount.findById(accountId);
+      const targetAccountIds: mongoose.Types.ObjectId[] = [new mongoose.Types.ObjectId(accountId)];
+      let isSharedStock = false;
+      if (account?.allowSharedStock && account.sharedStockAccounts && account.sharedStockAccounts.length > 0) {
+        targetAccountIds.push(...account.sharedStockAccounts.map((id: any) => new mongoose.Types.ObjectId(id)));
+        isSharedStock = true;
+      }
+
+      const productIds = products.map(p => p._id);
+      const movements = await StockMovement.aggregate([
+        {
+          $match: {
+            product: { $in: productIds },
+            businessAccount: { $in: targetAccountIds },
+            stockBucket: 'saleable',
+          }
+        },
+        {
+          $group: {
+            _id: '$product',
+            qty: { $sum: '$quantity' }
+          }
+        }
+      ]);
+
+      const stockMap = new Map<string, number>();
+      movements.forEach(m => stockMap.set(m._id.toString(), Math.max(0, m.qty)));
+
+      const adjustedProducts = products.map(p => {
+        const pObj: any = p.toObject();
+        pObj.currentStock = stockMap.get(p._id.toString()) ?? 0;
+        pObj.isSharedStock = isSharedStock;
+        return pObj;
+      });
+
+      res.json({ success: true, data: adjustedProducts, total, page: parseInt(page), limit: parseInt(limit) });
+      return;
+    }
+
     res.json({ success: true, data: products, total, page: parseInt(page), limit: parseInt(limit) });
   } catch (err) {
     res.status(500).json({ success: false, message: (err as Error).message });

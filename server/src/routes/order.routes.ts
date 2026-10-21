@@ -103,7 +103,8 @@ router.post('/', requireManagerOrAdmin, enforceAccountAccess, async (req: AuthRe
         }
       ]);
 
-      const availableStock = stockAgg.length > 0 ? Math.max(0, stockAgg[0].totalStock) : product.currentStock;
+      // STRICT: If no movements exist for this account (and shared stock is not checked), stock is 0.
+      const availableStock = stockAgg.length > 0 ? Math.max(0, stockAgg[0].totalStock) : 0;
 
       if (availableStock < quantity) {
         const accLabel = account?.tradeName || account?.name || 'this account';

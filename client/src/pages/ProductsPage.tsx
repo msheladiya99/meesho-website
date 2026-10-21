@@ -5,6 +5,7 @@ import { useForm } from 'react-hook-form';
 import { zodResolver } from '@hookform/resolvers/zod';
 import { z } from 'zod';
 import { productsApi, categoriesApi } from '../services/inventory.service';
+import { useAccountStore } from '../store/accountStore';
 import { formatCurrency, paiseToRupees, rupeesToPaise } from '../lib/utils';
 import Modal from '../components/ui/Modal';
 import { EmptyState, LoadingSpinner, ConfirmDialog } from '../components/ui/Feedback';
@@ -33,6 +34,7 @@ type ProductForm = z.infer<typeof productSchema>;
 type CategoryForm = z.infer<typeof categorySchema>;
 
 const ProductsPage: React.FC = () => {
+  const { activeAccountId } = useAccountStore();
   const qc = useQueryClient();
   const [tab, setTab] = useState<'products' | 'categories'>('products');
   const [isProductModalOpen, setIsProductModalOpen] = useState(false);
@@ -45,8 +47,8 @@ const ProductsPage: React.FC = () => {
   const [showBulkDelete, setShowBulkDelete] = useState(false);
 
   const { data: productsData, isLoading: prodLoading } = useQuery({
-    queryKey: ['products'],
-    queryFn: () => productsApi.list(),
+    queryKey: ['products', activeAccountId],
+    queryFn: () => productsApi.list({ accountId: activeAccountId === 'all' ? undefined : activeAccountId }),
   });
 
   const { data: categoriesData, isLoading: catLoading } = useQuery({
@@ -259,9 +261,15 @@ const ProductsPage: React.FC = () => {
                           <td>{(cat as Category)?.name || '—'}</td>
                           <td>{p.sizeml}ml</td>
                           <td>{formatCurrency(p.sellingPrice)}</td>
-                          <td>{formatCurrency(getProductCost(p))}</td>
-                          <td className={lowStock ? 'text-red-600 font-semibold' : ''}>{p.currentStock} {lowStock && '⚠'}</td>
-                          <td>{p.reorderThreshold}</td>
+                          <td className={lowStock ? 'text-red-600 font-semibold' : ''}>
+                            <span>{p.currentStock}</span>
+                            {p.isSharedStock && (
+                              <span className="ml-1.5 px-1.5 py-0.5 rounded text-[10px] bg-purple-100 text-purple-700 font-bold" title="Shared stock from other GST accounts">
+                                Shared
+                              </span>
+                            )}
+                            {lowStock && ' ⚠'}
+                          </td>
                           <td><span className={`badge ${p.isActive ? 'badge-green' : 'badge-gray'}`}>{p.isActive ? 'Active' : 'Inactive'}</span></td>
                           <td>
                             <div className="flex gap-1">
