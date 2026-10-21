@@ -1,5 +1,5 @@
 import React from 'react';
-import { AlertCircle } from 'lucide-react';
+import { AlertCircle, Loader2 } from 'lucide-react';
 
 interface Props {
   message: string;
@@ -49,10 +49,11 @@ interface ConfirmDialogProps {
   onCancel: () => void;
   confirmText?: string;
   isDangerous?: boolean;
+  isLoading?: boolean;
 }
 
 export const ConfirmDialog: React.FC<ConfirmDialogProps> = ({
-  isOpen, title, message, onConfirm, onCancel, confirmText = 'Confirm', isDangerous = false
+  isOpen, title, message, onConfirm, onCancel, confirmText = 'Confirm', isDangerous = false, isLoading = false
 }) => {
   if (!isOpen) return null;
   return (
@@ -61,8 +62,13 @@ export const ConfirmDialog: React.FC<ConfirmDialogProps> = ({
         <h3 className="text-base font-semibold text-gray-900 mb-2">{title}</h3>
         <p className="text-sm text-gray-500 mb-6">{message}</p>
         <div className="flex gap-3 justify-end">
-          <button onClick={onCancel} className="btn-secondary">Cancel</button>
-          <button onClick={onConfirm} className={isDangerous ? 'btn-danger' : 'btn-primary'}>
+          <button onClick={onCancel} disabled={isLoading} className="btn-secondary disabled:opacity-50">Cancel</button>
+          <button
+            onClick={onConfirm}
+            disabled={isLoading}
+            className={`${isDangerous ? 'btn-danger' : 'btn-primary'} disabled:opacity-50 flex items-center gap-1.5`}
+          >
+            {isLoading && <Loader2 className="w-3.5 h-3.5 animate-spin" />}
             {confirmText}
           </button>
         </div>

@@ -1,9 +1,9 @@
-import React, { useState, useMemo } from 'react';
+import React, { useState, useMemo, useRef } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import {
   Plus, Edit2, Trash2, TruckIcon, X, Search, Eye,
   ChevronDown, ChevronUp, Package, CreditCard, ShoppingBag,
-  Calendar, AlertCircle, CheckCircle2, Receipt
+  Calendar, AlertCircle, CheckCircle2, Receipt, Loader2
 } from 'lucide-react';
 import { useForm } from 'react-hook-form';
 import { z } from 'zod';
@@ -169,6 +169,8 @@ const StockPurchasesPage: React.FC = () => {
     qc.invalidateQueries({ queryKey: ['dashboard'] });
   };
 
+  const isSubmittingRef = useRef(false);
+
   const createMut = useMutation({
     mutationFn: (d: Partial<StockPurchase>) => stockPurchasesApi.create(d),
     onSuccess: () => {
@@ -179,6 +181,9 @@ const StockPurchasesPage: React.FC = () => {
       reset();
     },
     onError: (e: unknown) => toast.error((e as { response?: { data?: { message?: string } } })?.response?.data?.message || 'Error recording purchase'),
+    onSettled: () => {
+      isSubmittingRef.current = false;
+    },
   });
 
   const updateMut = useMutation({
@@ -192,7 +197,12 @@ const StockPurchasesPage: React.FC = () => {
       reset();
     },
     onError: (e: unknown) => toast.error((e as { response?: { data?: { message?: string } } })?.response?.data?.message || 'Error updating purchase'),
+    onSettled: () => {
+      isSubmittingRef.current = false;
+    },
   });
+
+  const isSubmitting = createMut.isPending || updateMut.isPending;
 
   const deleteMut = useMutation({
     mutationFn: (id: string) => stockPurchasesApi.delete(id),
@@ -201,9 +211,12 @@ const StockPurchasesPage: React.FC = () => {
       toast.success('Purchase deleted and stock restored');
       setDeleteId(null);
     },
+    onError: (e: unknown) => toast.error((e as { response?: { data?: { message?: string } } })?.response?.data?.message || 'Error deleting purchase'),
   });
 
   const onSubmit = (d: FormData) => {
+    if (isSubmittingRef.current || createMut.isPending || updateMut.isPending) return;
+
     const invalidItem = items.find(item => !item.product || item.quantityPurchased <= 0 || item.purchasePricePerUnit <= 0);
     if (invalidItem) {
       toast.error('Please ensure all items have a product, quantity and price');
@@ -216,6 +229,8 @@ const StockPurchasesPage: React.FC = () => {
       toast.error('Please remove duplicate products from the items list');
       return;
     }
+
+    isSubmittingRef.current = true;
 
     const payload = {
       ...d,
@@ -584,23 +599,39 @@ const StockPurchasesPage: React.FC = () => {
       {/* Add / Edit Purchase Modal */}
       <Modal
         isOpen={isModalOpen}
-        onClose={() => { setIsModalOpen(false); setEditingPurchase(null); }}
+        onClose={() => {
+          if (!isSubmitting) {
+            setIsModalOpen(false);
+            setEditingPurchase(null);
+          }
+        }}
         title={editingPurchase ? 'Edit Stock Purchase' : 'Add Stock Purchase'}
         size="lg"
         footer={
           <div className="flex gap-2 justify-end">
             <button
-              onClick={() => { setIsModalOpen(false); setEditingPurchase(null); }}
-              className="btn-secondary"
+              type="button"
+              onClick={() => {
+                if (!isSubmitting) {
+                  setIsModalOpen(false);
+                  setEditingPurchase(null);
+                }
+              }}
+              className="btn-secondary disabled:opacity-50"
+              disabled={isSubmitting}
             >
               Cancel
             </button>
             <button
               form="purchase-form"
               type="submit"
-              className="btn-primary"
+              disabled={isSubmitting}
+              className="btn-primary flex items-center justify-center gap-2 min-w-[150px] disabled:opacity-50 disabled:cursor-not-allowed"
             >
-              {editingPurchase ? 'Update Purchase' : 'Save Purchase'}
+              {isSubmitting && <Loader2 className="w-4 h-4 animate-spin" />}
+              {isSubmitting
+                ? (editingPurchase ? 'Updating Purchase...' : 'Saving Purchase...')
+                : (editingPurchase ? 'Update Purchase' : 'Save Purchase')}
             </button>
           </div>
         }
@@ -921,9 +952,16 @@ const StockPurchasesPage: React.FC = () => {
         isOpen={!!deleteId}
         title="Delete Stock Purchase"
         message="This will reverse the inventory stock quantities and costs associated with this purchase. Confirm deletion?"
-        onConfirm={() => deleteId && deleteMut.mutate(deleteId)}
-        onCancel={() => setDeleteId(null)}
-        confirmText="Delete"
+        onConfirm={() => {
+          if (deleteId && !deleteMut.isPending) {
+            deleteMut.mutate(deleteId);
+          }
+        }}
+        onCancel={() => {
+          if (!deleteMut.isPending) setDeleteId(null);
+        }}
+        confirmText={deleteMut.isPending ? 'Deleting...' : 'Delete'}
+        isLoading={deleteMut.isPending}
         isDangerous
       />
     </div>

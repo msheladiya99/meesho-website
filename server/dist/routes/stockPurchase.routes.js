@@ -6,11 +6,15 @@ Object.defineProperty(exports, "__esModule", { value: true });
 const express_1 = require("express");
 const mongoose_1 = __importDefault(require("mongoose"));
 const StockPurchase_1 = require("../models/StockPurchase");
+const StockMovement_1 = require("../models/StockMovement");
 const auth_1 = require("../middleware/auth");
 const audit_service_1 = require("../services/audit.service");
 const inventory_service_1 = require("../services/inventory.service");
 const router = (0, express_1.Router)();
 router.use(auth_1.authenticate);
+// Concurrency locks to prevent duplicate submissions from rapid clicks
+const activePurchaseLocks = new Set();
+const recentPurchaseCreations = new Map();
 const accountFilter = (accountId) => accountId && accountId !== 'all' ? { businessAccount: new mongoose_1.default.Types.ObjectId(accountId) } : {};
 // GET /api/stock-purchases
 router.get('/', auth_1.enforceAccountAccess, async (req, res) => {
@@ -76,23 +80,32 @@ router.post('/', auth_1.requireManagerOrAdmin, auth_1.enforceAccountAccess, asyn
             res.status(400).json({ success: false, message: 'items array is required' });
             return;
         }
-        console.log('=== STOCK PURCHASE CREATE ===');
-        console.log('Items received:', items.length);
-        console.log('Items data:', JSON.stringify(items, null, 2));
+        // Concurrency guard against rapid double clicks on Create
+        const createKey = `${req.user?._id}_${businessAccount}_${req.body.vendorInvoiceNumber || ''}_${req.body.vendor || ''}`;
+        const lastCreateTime = recentPurchaseCreations.get(createKey);
+        if (lastCreateTime && Date.now() - lastCreateTime < 3000) {
+            res.status(409).json({ success: false, message: 'Purchase creation already in progress. Please wait a moment.' });
+            return;
+        }
+        recentPurchaseCreations.set(createKey, Date.now());
+        if (recentPurchaseCreations.size > 100) {
+            const now = Date.now();
+            for (const [k, v] of recentPurchaseCreations.entries()) {
+                if (now - v > 10000)
+                    recentPurchaseCreations.delete(k);
+            }
+        }
         // Check for duplicate products in items
         const productIds = items.map((i) => i.product);
         const uniqueIds = new Set(productIds);
         if (productIds.length !== uniqueIds.size) {
-            console.error('DUPLICATE PRODUCTS DETECTED:', productIds);
             res.status(400).json({ success: false, message: 'Duplicate products in items list' });
             return;
         }
         const purchase = await StockPurchase_1.StockPurchase.create({ ...req.body, createdBy: req.user?._id });
-        console.log('Purchase created with ID:', purchase._id.toString());
         // Record stock movement for each item
         for (let i = 0; i < items.length; i++) {
             const item = items[i];
-            console.log(`[${i + 1}/${items.length}] Recording movement for product ${item.product}, quantity: ${item.quantityPurchased}`);
             const unitCostForMovement = item.quantityPurchased > 0 ? Math.round(item.totalAmount / item.quantityPurchased) : item.purchasePricePerUnit;
             await (0, inventory_service_1.recordStockMovement)({
                 businessAccount,
@@ -105,7 +118,6 @@ router.post('/', auth_1.requireManagerOrAdmin, auth_1.enforceAccountAccess, asyn
                 reason: `Stock purchase from vendor`,
                 createdBy: req.user?._id,
             });
-            console.log(`[${i + 1}/${items.length}] Movement recorded for product ${item.product}`);
         }
         await (0, audit_service_1.createAuditLog)({ action: 'CREATE', resource: 'StockPurchase', resourceId: purchase._id.toString(), userId: req.user?._id });
         const populated = await StockPurchase_1.StockPurchase.findById(purchase._id)
@@ -116,7 +128,6 @@ router.post('/', auth_1.requireManagerOrAdmin, auth_1.enforceAccountAccess, asyn
             populate: { path: 'category', select: 'name' }
         })
             .populate('businessAccount', 'name gstin');
-        console.log('=== STOCK PURCHASE CREATE COMPLETE ===');
         res.status(201).json({ success: true, data: populated });
     }
     catch (err) {
@@ -126,8 +137,14 @@ router.post('/', auth_1.requireManagerOrAdmin, auth_1.enforceAccountAccess, asyn
 });
 // PUT /api/stock-purchases/:id
 router.put('/:id', auth_1.requireManagerOrAdmin, auth_1.enforceAccountAccess, async (req, res) => {
+    const purchaseId = req.params.id;
+    if (activePurchaseLocks.has(purchaseId)) {
+        res.status(409).json({ success: false, message: 'An update is already in progress for this purchase. Please wait.' });
+        return;
+    }
+    activePurchaseLocks.add(purchaseId);
     try {
-        const existing = await StockPurchase_1.StockPurchase.findById(req.params.id);
+        const existing = await StockPurchase_1.StockPurchase.findById(purchaseId);
         if (!existing || existing.isDeleted) {
             res.status(404).json({ success: false, message: 'Purchase not found' });
             return;
@@ -137,8 +154,19 @@ router.put('/:id', auth_1.requireManagerOrAdmin, auth_1.enforceAccountAccess, as
             res.status(400).json({ success: false, message: 'items array is required' });
             return;
         }
-        // Reverse old movements, then re-record with new values
-        await (0, inventory_service_1.reverseMovementsByReference)(req.params.id, req.user?._id?.toString());
+        // Check for duplicate products in items
+        const productIds = items.map((i) => i.product);
+        const uniqueIds = new Set(productIds);
+        if (productIds.length !== uniqueIds.size) {
+            res.status(400).json({ success: false, message: 'Duplicate products in items list' });
+            return;
+        }
+        // Reverse old movements, then clean up any remaining movements with this referenceId
+        await (0, inventory_service_1.reverseMovementsByReference)(purchaseId, req.user?._id?.toString());
+        await StockMovement_1.StockMovement.deleteMany({
+            referenceType: 'StockPurchase',
+            referenceId: new mongoose_1.default.Types.ObjectId(purchaseId),
+        });
         const updateData = {
             items,
             purchaseDate,
@@ -151,7 +179,7 @@ router.put('/:id', auth_1.requireManagerOrAdmin, auth_1.enforceAccountAccess, as
             paymentStatus,
             notes,
         };
-        const updated = await StockPurchase_1.StockPurchase.findByIdAndUpdate(req.params.id, updateData, { new: true });
+        const updated = await StockPurchase_1.StockPurchase.findByIdAndUpdate(purchaseId, updateData, { new: true });
         if (!updated) {
             res.status(404).json({ success: false, message: 'Not found' });
             return;
@@ -171,7 +199,7 @@ router.put('/:id', auth_1.requireManagerOrAdmin, auth_1.enforceAccountAccess, as
                 createdBy: req.user?._id?.toString(),
             });
         }
-        await (0, audit_service_1.createAuditLog)({ action: 'UPDATE', resource: 'StockPurchase', resourceId: req.params.id, userId: req.user?._id?.toString() });
+        await (0, audit_service_1.createAuditLog)({ action: 'UPDATE', resource: 'StockPurchase', resourceId: purchaseId, userId: req.user?._id?.toString() });
         const populated = await StockPurchase_1.StockPurchase.findById(updated._id)
             .populate('vendor', 'name')
             .populate({
@@ -186,22 +214,38 @@ router.put('/:id', auth_1.requireManagerOrAdmin, auth_1.enforceAccountAccess, as
         console.error('Update error:', err);
         res.status(400).json({ success: false, message: err.message });
     }
+    finally {
+        activePurchaseLocks.delete(purchaseId);
+    }
 });
 // DELETE /api/stock-purchases/:id
 router.delete('/:id', auth_1.requireManagerOrAdmin, async (req, res) => {
+    const purchaseId = req.params.id;
+    if (activePurchaseLocks.has(purchaseId)) {
+        res.status(409).json({ success: false, message: 'An operation is already in progress for this purchase.' });
+        return;
+    }
+    activePurchaseLocks.add(purchaseId);
     try {
-        const purchase = await StockPurchase_1.StockPurchase.findById(req.params.id);
+        const purchase = await StockPurchase_1.StockPurchase.findById(purchaseId);
         if (!purchase || purchase.isDeleted) {
             res.status(404).json({ success: false, message: 'Purchase not found' });
             return;
         }
-        await (0, inventory_service_1.reverseMovementsByReference)(req.params.id, req.user?._id?.toString());
-        await StockPurchase_1.StockPurchase.findByIdAndUpdate(req.params.id, { isDeleted: true });
-        await (0, audit_service_1.createAuditLog)({ action: 'DELETE', resource: 'StockPurchase', resourceId: req.params.id, userId: req.user?._id?.toString() });
+        await (0, inventory_service_1.reverseMovementsByReference)(purchaseId, req.user?._id?.toString());
+        await StockMovement_1.StockMovement.deleteMany({
+            referenceType: 'StockPurchase',
+            referenceId: new mongoose_1.default.Types.ObjectId(purchaseId),
+        });
+        await StockPurchase_1.StockPurchase.findByIdAndUpdate(purchaseId, { isDeleted: true });
+        await (0, audit_service_1.createAuditLog)({ action: 'DELETE', resource: 'StockPurchase', resourceId: purchaseId, userId: req.user?._id?.toString() });
         res.json({ success: true, message: 'Purchase deleted and stock reversed' });
     }
     catch (err) {
         res.status(500).json({ success: false, message: err.message });
+    }
+    finally {
+        activePurchaseLocks.delete(purchaseId);
     }
 });
 exports.default = router;
