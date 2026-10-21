@@ -45,4 +45,12 @@ export const analyticsApi = {
 
   gstinPerformance: (params?: PaginationParams) =>
     api.get('/analytics/gstin-performance', { params }),
+
+  perfumePerformance: (params?: {
+    accountId?: string;
+    startDate?: string;
+    endDate?: string;
+    categoryId?: string;
+    search?: string;
+  }) => api.get('/analytics/perfume-performance', { params }),
 };

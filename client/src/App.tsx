@@ -24,6 +24,7 @@ import ReportsPage from './pages/ReportsPage';
 import SettingsPage from './pages/SettingsPage';
 import UsersPage from './pages/UsersPage';
 import AuditLogsPage from './pages/AuditLogsPage';
+import PerfumePerformancePage from './pages/PerfumePerformancePage';
 
 const queryClient = new QueryClient({
   defaultOptions: {
@@ -57,6 +58,8 @@ function App() {
             <Route path="orders" element={<OrdersPage />} />
             <Route path="packing" element={<PackingDispatchPage />} />
             <Route path="returns" element={<ReturnsPage />} />
+            <Route path="perfume-sales" element={<PerfumePerformancePage />} />
+            <Route path="perfume-analytics" element={<PerfumePerformancePage />} />
             <Route path="products" element={<ProductsPage />} />
             <Route path="inventory" element={<InventoryPage />} />
             <Route path="stock-purchases" element={<StockPurchasesPage />} />

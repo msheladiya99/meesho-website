@@ -337,3 +337,43 @@ export const EXPENSE_CATEGORIES = [
 ] as const;
 
 export type ExpenseCategory = typeof EXPENSE_CATEGORIES[number];
+
+// ─── Perfume Performance Analytics ───────────────────────────────────────────
+export interface PerfumePerformance {
+  _id: string;
+  name: string;
+  sku: string;
+  category?: string;
+  sizeml?: number;
+  fragranceType?: string;
+  brand?: string;
+  currentStock: number;
+  isSharedStock: boolean;
+  defaultPurchaseCost: number;
+  sellingPrice: number;
+  soldCount: number;
+  directSoldCount: number;
+  comboSoldCount: number;
+  soldOrdersCount: number;
+  salesRevenue: number;
+  returnCount: number;
+  customerReturnCount: number;
+  rtoReturnCount: number;
+  damagedReturnCount: number;
+  returnAmount: number;
+  netSoldCount: number;
+  returnRate: number;
+  netRevenue: number;
+}
+
+export interface PerfumePerformanceSummary {
+  totalSoldUnits: number;
+  totalReturnUnits: number;
+  totalNetSoldUnits: number;
+  totalSalesRevenue: number;
+  totalReturnAmount: number;
+  totalNetRevenue: number;
+  totalStockUnits: number;
+  overallReturnRate: number;
+  totalPerfumes: number;
+}

@@ -43,6 +43,9 @@ const ReturnOrder_1 = require("../models/ReturnOrder");
 const Expense_1 = require("../models/Expense");
 const Partner_1 = require("../models/Partner");
 const BusinessAccount_1 = require("../models/BusinessAccount");
+const Product_1 = require("../models/Product");
+const StockMovement_1 = require("../models/StockMovement");
+const inventory_service_1 = require("../services/inventory.service");
 const auth_1 = require("../middleware/auth");
 const router = (0, express_1.Router)();
 router.use(auth_1.authenticate);
@@ -214,6 +217,225 @@ router.get('/gstin-performance', async (req, res) => {
             };
         }));
         res.json({ success: true, data });
+    }
+    catch (err) {
+        res.status(500).json({ success: false, message: err.message });
+    }
+});
+// GET /api/analytics/perfume-performance — perfume-wise sell & return counts and metrics
+router.get('/perfume-performance', auth_1.enforceAccountAccess, async (req, res) => {
+    try {
+        const { accountId, startDate, endDate, categoryId, search } = req.query;
+        // 1. Fetch active products with filters
+        const productFilter = { isActive: true };
+        if (categoryId && categoryId !== 'all' && mongoose_1.default.Types.ObjectId.isValid(categoryId)) {
+            productFilter.category = new mongoose_1.default.Types.ObjectId(categoryId);
+        }
+        if (search && search.trim()) {
+            const q = search.trim();
+            productFilter.$or = [
+                { name: { $regex: q, $options: 'i' } },
+                { sku: { $regex: q, $options: 'i' } },
+            ];
+        }
+        const products = await Product_1.Product.find(productFilter)
+            .populate('category', 'name')
+            .sort({ name: 1 })
+            .lean();
+        const productIds = products.map(p => p._id);
+        // 2. Resolve account-specific stock if accountId is provided
+        const accountStockMap = new Map();
+        let isSharedStock = false;
+        if (accountId && accountId !== 'all' && mongoose_1.default.Types.ObjectId.isValid(accountId)) {
+            const resolved = await (0, inventory_service_1.resolveStockAccountIds)(accountId);
+            isSharedStock = resolved.isSharedStock;
+            const stockAgg = await StockMovement_1.StockMovement.aggregate([
+                {
+                    $match: {
+                        product: { $in: productIds },
+                        businessAccount: { $in: resolved.targetAccountIds },
+                        stockBucket: 'saleable',
+                    }
+                },
+                {
+                    $group: {
+                        _id: '$product',
+                        qty: { $sum: '$quantity' }
+                    }
+                }
+            ]);
+            stockAgg.forEach(item => {
+                accountStockMap.set(item._id.toString(), Math.max(0, item.qty));
+            });
+        }
+        // 3. Orders matching account & date filter
+        const orderFilter = {
+            isDeleted: false,
+            status: { $ne: 'cancelled' },
+            ...af(accountId),
+            ...df(startDate, endDate, 'orderDate'),
+        };
+        const orders = await Order_1.Order.find(orderFilter)
+            .select('_id businessAccount orderDate isCombo items product sku quantity grossAmount sellingPrice status')
+            .lean();
+        // 4. Returns matching account & date filter
+        const returnFilter = {
+            isDeleted: false,
+            ...af(accountId),
+            ...df(startDate, endDate, 'returnDate'),
+        };
+        const returns = await ReturnOrder_1.ReturnOrder.find(returnFilter)
+            .select('_id businessAccount returnDate returnType status originalOrder product returnedQuantity goodQuantity damagedQuantity returnAmount')
+            .lean();
+        // Map stats by product ID string
+        const statsMap = new Map();
+        for (const p of products) {
+            const pIdStr = p._id.toString();
+            const stock = accountId && accountId !== 'all'
+                ? (accountStockMap.get(pIdStr) ?? 0)
+                : Math.max(0, p.currentStock || 0);
+            statsMap.set(pIdStr, {
+                _id: pIdStr,
+                name: p.name,
+                sku: p.sku,
+                category: p.category?.name || 'Uncategorized',
+                sizeml: p.sizeml,
+                fragranceType: p.fragranceType,
+                brand: p.brand,
+                currentStock: stock,
+                isSharedStock,
+                defaultPurchaseCost: p.defaultPurchaseCost || 0,
+                sellingPrice: p.sellingPrice || 0,
+                soldCount: 0,
+                directSoldCount: 0,
+                comboSoldCount: 0,
+                soldOrdersCount: 0,
+                salesRevenue: 0,
+                returnCount: 0,
+                customerReturnCount: 0,
+                rtoReturnCount: 0,
+                damagedReturnCount: 0,
+                returnAmount: 0,
+                netSoldCount: 0,
+                returnRate: 0,
+                netRevenue: 0,
+            });
+        }
+        // Set of orders counted in ReturnOrder
+        const returnOrderOriginalIds = new Set();
+        for (const r of returns) {
+            if (r.originalOrder) {
+                returnOrderOriginalIds.add(r.originalOrder.toString());
+            }
+            const pid = r.product ? r.product.toString() : null;
+            if (pid && statsMap.has(pid)) {
+                const item = statsMap.get(pid);
+                const qty = r.returnedQuantity || 1;
+                item.returnCount += qty;
+                if (r.returnType === 'rto_return') {
+                    item.rtoReturnCount += qty;
+                }
+                else {
+                    item.customerReturnCount += qty;
+                }
+                item.damagedReturnCount += (r.damagedQuantity || 0);
+                item.returnAmount += (r.returnAmount || 0);
+            }
+        }
+        // Aggregate Orders
+        for (const o of orders) {
+            if (o.isCombo && Array.isArray(o.items) && o.items.length > 0) {
+                for (const it of o.items) {
+                    const pid = it.product ? it.product.toString() : null;
+                    if (pid && statsMap.has(pid)) {
+                        const item = statsMap.get(pid);
+                        const qty = it.quantity || 1;
+                        item.soldCount += qty;
+                        item.comboSoldCount += qty;
+                        item.soldOrdersCount += 1;
+                        const unitPrice = it.sellingPrice || Math.round((o.grossAmount || 0) / o.items.length);
+                        item.salesRevenue += unitPrice * qty;
+                        // If order itself is marked returned and not in ReturnOrder collection
+                        if (['returned', 'rto_received'].includes(o.status) && !returnOrderOriginalIds.has(o._id.toString())) {
+                            item.returnCount += qty;
+                            if (o.status === 'rto_received')
+                                item.rtoReturnCount += qty;
+                            else
+                                item.customerReturnCount += qty;
+                            item.returnAmount += unitPrice * qty;
+                        }
+                    }
+                }
+            }
+            else if (o.product) {
+                const pid = o.product.toString();
+                if (statsMap.has(pid)) {
+                    const item = statsMap.get(pid);
+                    const qty = o.quantity || 1;
+                    item.soldCount += qty;
+                    item.directSoldCount += qty;
+                    item.soldOrdersCount += 1;
+                    const rev = o.grossAmount || ((o.sellingPrice || 0) * qty) || 0;
+                    item.salesRevenue += rev;
+                    // If order itself is marked returned and not in ReturnOrder collection
+                    if (['returned', 'rto_received'].includes(o.status) && !returnOrderOriginalIds.has(o._id.toString())) {
+                        item.returnCount += qty;
+                        if (o.status === 'rto_received')
+                            item.rtoReturnCount += qty;
+                        else
+                            item.customerReturnCount += qty;
+                        item.returnAmount += rev;
+                    }
+                }
+            }
+        }
+        // Finalize calculated fields
+        const perfumeList = Array.from(statsMap.values()).map(item => {
+            const netSoldCount = item.soldCount - item.returnCount;
+            const returnRate = item.soldCount > 0
+                ? Number(((item.returnCount / item.soldCount) * 100).toFixed(1))
+                : 0;
+            const netRevenue = item.salesRevenue - item.returnAmount;
+            return {
+                ...item,
+                netSoldCount,
+                returnRate,
+                netRevenue,
+            };
+        });
+        // Summary totals
+        const totals = perfumeList.reduce((acc, p) => {
+            acc.totalSoldUnits += p.soldCount;
+            acc.totalReturnUnits += p.returnCount;
+            acc.totalNetSoldUnits += p.netSoldCount;
+            acc.totalSalesRevenue += p.salesRevenue;
+            acc.totalReturnAmount += p.returnAmount;
+            acc.totalNetRevenue += p.netRevenue;
+            acc.totalStockUnits += p.currentStock;
+            return acc;
+        }, {
+            totalSoldUnits: 0,
+            totalReturnUnits: 0,
+            totalNetSoldUnits: 0,
+            totalSalesRevenue: 0,
+            totalReturnAmount: 0,
+            totalNetRevenue: 0,
+            totalStockUnits: 0,
+        });
+        const overallReturnRate = totals.totalSoldUnits > 0
+            ? Number(((totals.totalReturnUnits / totals.totalSoldUnits) * 100).toFixed(1))
+            : 0;
+        res.json({
+            success: true,
+            data: {
+                perfumes: perfumeList,
+                summary: {
+                    ...totals,
+                    overallReturnRate,
+                    totalPerfumes: perfumeList.length,
+                }
+            }
+        });
     }
     catch (err) {
         res.status(500).json({ success: false, message: err.message });

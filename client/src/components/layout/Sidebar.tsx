@@ -13,6 +13,7 @@ const navItems = [
   { to: '/orders', icon: ShoppingCart, label: 'Orders' },
   { to: '/packing', icon: PackageCheck, label: 'Packing & Dispatch' },
   { to: '/returns', icon: RotateCcw, label: 'Returns' },
+  { to: '/perfume-sales', icon: Flame, label: 'Perfume Sell & Return' },
   { to: '/products', icon: Package, label: 'Products' },
   { to: '/inventory', icon: Warehouse, label: 'Inventory' },
   { to: '/stock-purchases', icon: TruckIcon, label: 'Stock Purchases' },
