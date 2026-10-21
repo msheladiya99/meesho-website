@@ -14,6 +14,8 @@ import {
   CheckCircle2,
   FileSpreadsheet,
   ExternalLink,
+  Share2,
+  Boxes,
 } from 'lucide-react';
 import { useForm } from 'react-hook-form';
 import { zodResolver } from '@hookform/resolvers/zod';
@@ -37,6 +39,8 @@ const schema = z.object({
   phone: z.string().optional(),
   email: z.string().email('Invalid email address').optional().or(z.literal('')),
   isActive: z.boolean(),
+  allowSharedStock: z.boolean().optional(),
+  sharedStockAccounts: z.array(z.string()).optional(),
 });
 
 type FormData = z.infer<typeof schema>;
@@ -121,16 +125,23 @@ const SettingsPage: React.FC = () => {
     register,
     handleSubmit,
     reset,
+    watch,
+    setValue,
     formState: { errors },
   } = useForm<FormData>({
     resolver: zodResolver(schema),
-    defaultValues: { isActive: true },
+    defaultValues: { isActive: true, allowSharedStock: false, sharedStockAccounts: [] },
   });
+
+  const watchedAllowSharedStock = watch('allowSharedStock') ?? false;
+  const watchedSharedAccounts = watch('sharedStockAccounts') || [];
 
   const createMut = useMutation({
     mutationFn: (d: Partial<BusinessAccount>) => accountsApi.create(d),
     onSuccess: (res) => {
       qc.invalidateQueries({ queryKey: ['accounts'] });
+      qc.invalidateQueries({ queryKey: ['inventory'] });
+      qc.invalidateQueries({ queryKey: ['products'] });
       toast.success('GSTIN account registered successfully!');
       setIsModalOpen(false);
       reset();
@@ -151,6 +162,8 @@ const SettingsPage: React.FC = () => {
       accountsApi.update(id, d),
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ['accounts'] });
+      qc.invalidateQueries({ queryKey: ['inventory'] });
+      qc.invalidateQueries({ queryKey: ['products'] });
       toast.success('GSTIN account updated successfully!');
       setIsModalOpen(false);
       setEditingAccount(null);
@@ -163,6 +176,20 @@ const SettingsPage: React.FC = () => {
       ),
   });
 
+  const updateStockSettingsMut = useMutation({
+    mutationFn: ({ id, allowSharedStock, sharedStockAccounts }: { id: string; allowSharedStock: boolean; sharedStockAccounts: string[] }) =>
+      accountsApi.update(id, { allowSharedStock, sharedStockAccounts }),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ['accounts'] });
+      qc.invalidateQueries({ queryKey: ['inventory'] });
+      qc.invalidateQueries({ queryKey: ['products'] });
+      toast.success('Stock sharing settings updated successfully!');
+    },
+    onError: (e: any) => {
+      toast.error(e?.response?.data?.message || 'Failed to update stock sharing settings');
+    }
+  });
+
   const onSubmit = (d: FormData) => {
     if (editingAccount) updateMut.mutate({ id: editingAccount._id, d });
     else createMut.mutate(d);
@@ -170,6 +197,7 @@ const SettingsPage: React.FC = () => {
 
   const openEdit = (a: BusinessAccount) => {
     setEditingAccount(a);
+    const existingShared = (a.sharedStockAccounts || []).map((acc: any) => typeof acc === 'object' ? acc._id : acc);
     reset({
       name: a.name,
       tradeName: a.tradeName,
@@ -178,6 +206,8 @@ const SettingsPage: React.FC = () => {
       phone: a.phone,
       email: a.email,
       isActive: a.isActive,
+      allowSharedStock: a.allowSharedStock ?? false,
+      sharedStockAccounts: existingShared,
     });
     setIsModalOpen(true);
   };
@@ -538,6 +568,153 @@ const SettingsPage: React.FC = () => {
             </div>
           </div>
 
+          {/* Available GST Accounts & Stock Sharing Settings Card */}
+          <div className="card p-5 bg-white border border-gray-100 shadow-sm space-y-4">
+            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 border-b border-gray-100 pb-3">
+              <div className="flex items-center gap-2.5">
+                <div className="w-8 h-8 rounded-lg bg-primary-50 text-primary-600 flex items-center justify-center">
+                  <Share2 className="w-4 h-4" />
+                </div>
+                <div>
+                  <h3 className="font-bold text-sm text-gray-900">
+                    Available GST Accounts & Stock Sharing Settings
+                  </h3>
+                  <p className="text-[11px] text-gray-500">
+                    Control whether {focusedAccount.tradeName} can use stock from other registered GST accounts.
+                  </p>
+                </div>
+              </div>
+
+              {focusedAccount.allowSharedStock ? (
+                <span className="badge badge-green flex items-center gap-1.5 self-start sm:self-center">
+                  <CheckCircle2 className="w-3.5 h-3.5" />
+                  Shared Stock Enabled
+                </span>
+              ) : (
+                <span className="badge badge-gray flex items-center gap-1.5 self-start sm:self-center">
+                  <Boxes className="w-3.5 h-3.5" />
+                  Own Account Stock Only (Default)
+                </span>
+              )}
+            </div>
+
+            {/* Explanation banner */}
+            <div className="p-3.5 bg-gradient-to-r from-amber-50 to-orange-50 border border-amber-200/80 rounded-xl text-xs space-y-1.5 text-amber-900">
+              <div className="flex items-center gap-2 font-semibold">
+                <Boxes className="w-4 h-4 text-amber-700 shrink-0" />
+                <span>How Stock Sharing Works:</span>
+              </div>
+              <ul className="list-disc list-inside space-y-1 text-amber-800 text-[11px] pl-1">
+                <li>
+                  <strong>Checked (Allow Shared Stock):</strong> Stock added under one account can also be used by the other checked account(s). Both accounts share the stock pool for packing and order dispatch.
+                </li>
+                <li>
+                  <strong>Unchecked (Own Stock Only):</strong> Until this option is enabled, orders and packing under <span className="font-semibold underline">{focusedAccount.tradeName}</span> will strictly use only its own purchased stock.
+                </li>
+              </ul>
+            </div>
+
+            {/* Interactive Toggle & Accounts Checklist */}
+            <div className="space-y-4 pt-1">
+              <label className="flex items-start gap-3 cursor-pointer p-3 rounded-xl border border-gray-200 hover:border-primary-300 hover:bg-gray-50/50 transition-all">
+                <input
+                  type="checkbox"
+                  checked={focusedAccount.allowSharedStock ?? false}
+                  disabled={!isAdmin || updateStockSettingsMut.isPending}
+                  onChange={(e) => {
+                    const newAllowed = e.target.checked;
+                    const otherIds = accounts.filter(a => a._id !== focusedAccount._id).map(a => a._id);
+                    const currentShared = (focusedAccount.sharedStockAccounts || []).map((a: any) => typeof a === 'object' ? a._id : a);
+                    const finalShared = newAllowed && currentShared.length === 0 ? otherIds : currentShared;
+
+                    updateStockSettingsMut.mutate({
+                      id: focusedAccount._id,
+                      allowSharedStock: newAllowed,
+                      sharedStockAccounts: finalShared,
+                    });
+                  }}
+                  className="mt-1 w-4 h-4 rounded text-primary-600 focus:ring-primary-500 cursor-pointer"
+                />
+                <div className="flex-1">
+                  <div className="flex items-center gap-2">
+                    <span className="font-semibold text-gray-900 text-xs">
+                      Enable Shared Stock with Other Available GST Accounts
+                    </span>
+                    {updateStockSettingsMut.isPending && <LoadingSpinner size="sm" />}
+                  </div>
+                  <p className="text-[11px] text-gray-500 mt-0.5">
+                    Allow {focusedAccount.tradeName} to draw stock from other registered GST accounts when creating and packing orders.
+                  </p>
+                </div>
+              </label>
+
+              {/* Sub-list of available accounts to share with */}
+              {focusedAccount.allowSharedStock && (
+                <div className="p-4 bg-gray-50/80 rounded-xl border border-gray-200 space-y-3">
+                  <div className="flex items-center justify-between">
+                    <span className="text-xs font-bold text-gray-700">
+                      Select Available GST Accounts to Share Stock With:
+                    </span>
+                    <span className="text-[11px] text-gray-400">
+                      {accounts.filter(a => a._id !== focusedAccount._id).length} other account(s) available
+                    </span>
+                  </div>
+
+                  {accounts.filter(a => a._id !== focusedAccount._id).length === 0 ? (
+                    <p className="text-xs text-gray-400 italic">No other GST accounts registered yet.</p>
+                  ) : (
+                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                      {accounts.filter(a => a._id !== focusedAccount._id).map((otherAcc) => {
+                        const currentShared = (focusedAccount.sharedStockAccounts || []).map((a: any) => typeof a === 'object' ? a._id : a);
+                        const isShared = currentShared.includes(otherAcc._id);
+
+                        return (
+                          <label
+                            key={otherAcc._id}
+                            className={`p-3 rounded-xl border flex items-center justify-between cursor-pointer transition-all ${
+                              isShared
+                                ? 'bg-primary-50/60 border-primary-300 ring-1 ring-primary-400/20'
+                                : 'bg-white border-gray-200 hover:bg-gray-50'
+                            } ${!isAdmin ? 'opacity-70 pointer-events-none' : ''}`}
+                          >
+                            <div className="flex items-center gap-2.5">
+                              <input
+                                type="checkbox"
+                                checked={isShared}
+                                disabled={!isAdmin || updateStockSettingsMut.isPending}
+                                onChange={(e) => {
+                                  const updated = e.target.checked
+                                    ? [...currentShared, otherAcc._id]
+                                    : currentShared.filter(id => id !== otherAcc._id);
+                                  updateStockSettingsMut.mutate({
+                                    id: focusedAccount._id,
+                                    allowSharedStock: true,
+                                    sharedStockAccounts: updated,
+                                  });
+                                }}
+                                className="rounded text-primary-600 focus:ring-primary-500 w-4 h-4 cursor-pointer"
+                              />
+                              <div>
+                                <p className="font-bold text-gray-900 text-xs">{otherAcc.tradeName}</p>
+                                <p className="font-mono text-[10px] text-gray-500">{otherAcc.gstin}</p>
+                              </div>
+                            </div>
+
+                            <span className={`text-[10px] font-semibold px-2 py-0.5 rounded-full ${
+                              isShared ? 'bg-emerald-100 text-emerald-800' : 'bg-gray-100 text-gray-500'
+                            }`}>
+                              {isShared ? 'Stock Shared' : 'Not Shared'}
+                            </span>
+                          </label>
+                        );
+                      })}
+                    </div>
+                  )}
+                </div>
+              )}
+            </div>
+          </div>
+
           {/* Quick Switch to Other Registered Accounts */}
           <div className="card p-5 bg-white border border-gray-100 shadow-sm space-y-3">
             <h3 className="text-xs font-bold uppercase tracking-wider text-gray-400">
@@ -689,9 +866,22 @@ const SettingsPage: React.FC = () => {
 
                   {/* Card Footer Actions */}
                   <div className="mt-5 pt-3 border-t border-gray-100 flex items-center justify-between">
-                    <span className={`badge ${a.isActive ? 'badge-green' : 'badge-gray'}`}>
-                      {a.isActive ? 'Active' : 'Inactive'}
-                    </span>
+                    <div className="flex items-center gap-2">
+                      <span className={`badge ${a.isActive ? 'badge-green' : 'badge-gray'}`}>
+                        {a.isActive ? 'Active' : 'Inactive'}
+                      </span>
+                      {a.allowSharedStock ? (
+                        <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-bold bg-purple-50 text-purple-700 border border-purple-200">
+                          <Share2 className="w-3 h-3" />
+                          Shared Stock
+                        </span>
+                      ) : (
+                        <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-medium bg-gray-50 text-gray-600 border border-gray-200">
+                          <Boxes className="w-3 h-3" />
+                          Own Stock Only
+                        </span>
+                      )}
+                    </div>
 
                     <button
                       type="button"
@@ -824,6 +1014,60 @@ const SettingsPage: React.FC = () => {
             <label htmlFor="isActive" className="text-xs font-medium text-gray-700">
               Active account (eligible for orders and stock transactions)
             </label>
+          </div>
+
+          {/* Stock Sharing in Modal */}
+          <div className="p-3.5 bg-amber-50/70 rounded-xl border border-amber-200/90 space-y-2.5">
+            <div className="flex items-start gap-2.5">
+              <input
+                type="checkbox"
+                id="modalAllowSharedStock"
+                {...register('allowSharedStock')}
+                className="mt-0.5 rounded text-primary-600 focus:ring-primary-500 w-4 h-4 cursor-pointer"
+              />
+              <div>
+                <label htmlFor="modalAllowSharedStock" className="text-xs font-bold text-gray-900 cursor-pointer">
+                  Allow using stock from other GST accounts (Shared Stock Pool)
+                </label>
+                <p className="text-[11px] text-gray-600 mt-0.5">
+                  When enabled, stock added in one account can also be used by other accounts. When unchecked, this account uses strictly its own stock.
+                </p>
+              </div>
+            </div>
+
+            {watchedAllowSharedStock && (
+              <div className="pl-6 pt-2 space-y-2 border-t border-amber-200/70">
+                <span className="text-[11px] font-bold text-gray-700 block">
+                  Select available accounts to share stock with:
+                </span>
+                {accounts
+                  .filter((a) => !editingAccount || a._id !== editingAccount._id)
+                  .map((otherAcc) => {
+                    const isChecked = watchedSharedAccounts.includes(otherAcc._id);
+                    return (
+                      <label key={otherAcc._id} className="flex items-center gap-2 text-xs text-gray-800 cursor-pointer">
+                        <input
+                          type="checkbox"
+                          checked={isChecked}
+                          onChange={(e) => {
+                            if (e.target.checked) {
+                              setValue('sharedStockAccounts', [...watchedSharedAccounts, otherAcc._id]);
+                            } else {
+                              setValue(
+                                'sharedStockAccounts',
+                                watchedSharedAccounts.filter((id: string) => id !== otherAcc._id)
+                              );
+                            }
+                          }}
+                          className="rounded text-primary-600 w-4 h-4"
+                        />
+                        <span className="font-semibold">{otherAcc.tradeName || otherAcc.name}</span>
+                        <span className="font-mono text-[10px] text-gray-500">({otherAcc.gstin})</span>
+                      </label>
+                    );
+                  })}
+              </div>
+            )}
           </div>
         </form>
       </Modal>

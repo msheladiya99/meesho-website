@@ -6,7 +6,7 @@ import {
   ChevronRight, Sparkles, Filter, Plus, Package, Tag, Building2
 } from 'lucide-react';
 import { packingApi, type PackingLookupResult } from '../services/packing.service';
-import { productsApi } from '../services/inventory.service';
+import { productsApi, inventoryApi } from '../services/inventory.service';
 import { ordersApi } from '../services/orders.service';
 import { useAccountStore } from '../store/accountStore';
 import { formatCurrency, formatDate, paiseToRupees, rupeesToPaise } from '../lib/utils';
@@ -86,10 +86,11 @@ export const PackingDispatchPage: React.FC = () => {
   });
   const filteredOrders: Order[] = ordersData?.data?.data || [];
 
-  // Fetch products for quick order creation
+  // Fetch products for quick order creation (scoped to selected GST account's available stock)
+  const currentTargetAccount = newOrderAccountId && newOrderAccountId !== 'all' ? newOrderAccountId : (activeAccountId !== 'all' ? activeAccountId : undefined);
   const { data: productsData } = useQuery({
-    queryKey: ['products'],
-    queryFn: () => productsApi.list({ limit: 100 }),
+    queryKey: ['products', currentTargetAccount],
+    queryFn: () => inventoryApi.list({ accountId: currentTargetAccount }),
   });
   const products: Product[] = productsData?.data?.data || [];
 
@@ -939,11 +940,24 @@ export const PackingDispatchPage: React.FC = () => {
                 <label className="font-semibold text-gray-700">
                   Select Perfume Product:
                 </label>
-                {newOrderProductId && (
-                  <span className="text-[11px] text-primary-600 font-medium">
-                    Stock: {products.find((p) => p._id === newOrderProductId)?.currentStock ?? 0} units
-                  </span>
-                )}
+                {newOrderProductId && (() => {
+                  const prod = products.find((p) => p._id === newOrderProductId);
+                  if (!prod) return null;
+                  return (
+                    <span className="text-[11px] font-medium flex items-center gap-1.5">
+                      <span className="text-primary-700 font-bold">Available: {prod.currentStock} units</span>
+                      {prod.isSharedStock ? (
+                        <span className="text-[10px] bg-purple-100 text-purple-700 px-1.5 py-0.2 rounded font-bold">
+                          Shared Stock
+                        </span>
+                      ) : (
+                        <span className="text-[10px] bg-gray-100 text-gray-600 px-1.5 py-0.2 rounded font-medium">
+                          Own Stock
+                        </span>
+                      )}
+                    </span>
+                  );
+                })()}
               </div>
               <select
                 value={newOrderProductId}
@@ -954,7 +968,7 @@ export const PackingDispatchPage: React.FC = () => {
                 <option value="">Select a perfume</option>
                 {products.map((p) => (
                   <option key={p._id} value={p._id}>
-                    {p.name} — SKU: {p.sku} (Available: {p.currentStock})
+                    {p.name} — SKU: {p.sku} (Available: {p.currentStock}{p.isSharedStock ? ' • Shared' : ''})
                   </option>
                 ))}
               </select>

@@ -43,6 +43,8 @@ const businessAccountSchema = new mongoose_1.Schema({
     phone: { type: String, trim: true },
     email: { type: String, trim: true, lowercase: true },
     isActive: { type: Boolean, default: true },
+    allowSharedStock: { type: Boolean, default: false },
+    sharedStockAccounts: [{ type: mongoose_1.Schema.Types.ObjectId, ref: 'BusinessAccount', default: [] }],
 }, { timestamps: true });
 // Note: gstin already has a unique index from schema definition
 exports.BusinessAccount = mongoose_1.default.model('BusinessAccount', businessAccountSchema);

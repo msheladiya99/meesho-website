@@ -93,7 +93,12 @@ const InventoryPage: React.FC = () => {
                       <td className="font-mono text-xs">{p.sku}</td>
                       <td>{(cat as { name?: string })?.name || '—'}</td>
                       <td className={outOfStock ? 'text-red-600 font-bold' : lowStock ? 'text-orange-600 font-semibold' : 'font-medium'}>
-                        {p.currentStock}
+                        <span>{p.currentStock}</span>
+                        {p.isSharedStock && (
+                          <span className="ml-1.5 px-1.5 py-0.5 rounded text-[10px] bg-purple-100 text-purple-700 font-bold" title="Shared stock from other GST accounts">
+                            Shared
+                          </span>
+                        )}
                         {lowStock && !outOfStock && <AlertTriangle className="inline w-3.5 h-3.5 ml-1" />}
                       </td>
                       <td className="text-gray-500">{p.reorderThreshold}</td>

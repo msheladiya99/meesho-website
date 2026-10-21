@@ -7,6 +7,12 @@ export interface IBusinessAccount extends Document {
     phone?: string;
     email?: string;
     isActive: boolean;
+    /**
+     * When false (default): This account only uses its own stock.
+     * When true: This account can use stock from the accounts specified in sharedStockAccounts.
+     */
+    allowSharedStock: boolean;
+    sharedStockAccounts: mongoose.Types.ObjectId[];
 }
 export declare const BusinessAccount: mongoose.Model<IBusinessAccount, {}, {}, {}, Document<unknown, {}, IBusinessAccount, {}, mongoose.DefaultSchemaOptions> & IBusinessAccount & Required<{
     _id: mongoose.Types.ObjectId;

@@ -8,6 +8,8 @@ const mongoose_1 = __importDefault(require("mongoose"));
 const Order_1 = require("../models/Order");
 const Product_1 = require("../models/Product");
 const PackingRecord_1 = require("../models/PackingRecord");
+const BusinessAccount_1 = require("../models/BusinessAccount");
+const StockMovement_1 = require("../models/StockMovement");
 const auth_1 = require("../middleware/auth");
 const audit_service_1 = require("../services/audit.service");
 const inventory_service_1 = require("../services/inventory.service");
@@ -33,6 +35,7 @@ router.get('/', auth_1.enforceAccountAccess, async (req, res) => {
         if (search) {
             filter.$or = [
                 { meeshoOrderId: { $regex: search, $options: 'i' } },
+                { subOrderId: { $regex: search, $options: 'i' } },
                 { shippingLabelId: { $regex: search, $options: 'i' } },
                 { internalQrCode: { $regex: search, $options: 'i' } },
                 { sku: { $regex: search, $options: 'i' } },
@@ -66,7 +69,7 @@ router.get('/:id', async (req, res) => {
 // POST /api/orders
 router.post('/', auth_1.requireManagerOrAdmin, auth_1.enforceAccountAccess, async (req, res) => {
     try {
-        const { businessAccount, orderDate, meeshoOrderId, product: productId, sellingPrice, quantity, notes, status, shippingLabelId, carrierName, } = req.body;
+        const { businessAccount, orderDate, meeshoOrderId, subOrderId, product: productId, sellingPrice, quantity, notes, status, shippingLabelId, carrierName, } = req.body;
         if (!businessAccount) {
             res.status(400).json({ success: false, message: 'businessAccount is required' });
             return;
@@ -85,12 +88,38 @@ router.post('/', auth_1.requireManagerOrAdmin, auth_1.enforceAccountAccess, asyn
             return;
         }
         const orderStatus = status || 'pending';
-        if (orderStatus !== 'cancelled' && product.currentStock < quantity) {
-            res.status(400).json({
-                success: false,
-                message: `Insufficient stock for product "${product.name}". Available: ${product.currentStock}, Requested: ${quantity}`
-            });
-            return;
+        if (orderStatus !== 'cancelled') {
+            const account = await BusinessAccount_1.BusinessAccount.findById(businessAccount);
+            const targetAccountIds = [new mongoose_1.default.Types.ObjectId(businessAccount)];
+            let isSharedStock = false;
+            if (account?.allowSharedStock && account.sharedStockAccounts && account.sharedStockAccounts.length > 0) {
+                targetAccountIds.push(...account.sharedStockAccounts.map((id) => new mongoose_1.default.Types.ObjectId(id)));
+                isSharedStock = true;
+            }
+            const stockAgg = await StockMovement_1.StockMovement.aggregate([
+                {
+                    $match: {
+                        product: product._id,
+                        businessAccount: { $in: targetAccountIds },
+                        stockBucket: 'saleable',
+                    }
+                },
+                {
+                    $group: {
+                        _id: null,
+                        totalStock: { $sum: '$quantity' }
+                    }
+                }
+            ]);
+            const availableStock = stockAgg.length > 0 ? Math.max(0, stockAgg[0].totalStock) : product.currentStock;
+            if (availableStock < quantity) {
+                const accLabel = account?.tradeName || account?.name || 'this account';
+                const msg = isSharedStock
+                    ? `Insufficient shared stock for "${product.name}". Available across shared accounts: ${availableStock}, Requested: ${quantity}`
+                    : `Insufficient stock for "${product.name}" in account "${accLabel}". Available own stock: ${availableStock}, Requested: ${quantity}. (You can enable "Share Stock with other GST accounts" in GST Settings to use other account stock).`;
+                res.status(400).json({ success: false, message: msg });
+                return;
+            }
         }
         const grossAmount = sellingPrice * quantity;
         const tempId = new mongoose_1.default.Types.ObjectId();
@@ -98,6 +127,7 @@ router.post('/', auth_1.requireManagerOrAdmin, auth_1.enforceAccountAccess, asyn
         const order = await Order_1.Order.create({
             _id: tempId,
             businessAccount, orderDate, meeshoOrderId: meeshoOrderId || undefined,
+            subOrderId: subOrderId || undefined,
             shippingLabelId: shippingLabelId || undefined,
             carrierName: carrierName || undefined,
             internalQrCode,

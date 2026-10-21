@@ -1,6 +1,8 @@
 import { Router, Response } from 'express';
+import mongoose from 'mongoose';
 import { Product } from '../models/Product';
 import { StockMovement } from '../models/StockMovement';
+import { BusinessAccount } from '../models/BusinessAccount';
 import { authenticate, requireManagerOrAdmin, AuthRequest } from '../middleware/auth';
 import { recordStockMovement } from '../services/inventory.service';
 import { createAuditLog } from '../services/audit.service';
@@ -11,12 +13,87 @@ router.use(authenticate);
 // GET /api/inventory — list products with current stock
 router.get('/', async (req: AuthRequest, res: Response): Promise<void> => {
   try {
-    const { search, categoryId } = req.query as Record<string, string>;
+    const { search, categoryId, accountId } = req.query as Record<string, string>;
     const filter: Record<string, unknown> = { isActive: true };
     if (search) filter.$or = [{ name: { $regex: search, $options: 'i' } }, { sku: { $regex: search, $options: 'i' } }];
     if (categoryId && categoryId !== 'all') filter.category = categoryId;
 
     const products = await Product.find(filter).populate('category', 'name').sort({ name: 1 });
+
+    // If accountId is provided and valid, calculate account-specific stock
+    if (accountId && accountId !== 'all' && mongoose.Types.ObjectId.isValid(accountId)) {
+      const account = await BusinessAccount.findById(accountId);
+      const targetAccountIds: mongoose.Types.ObjectId[] = [new mongoose.Types.ObjectId(accountId)];
+      let isSharedStock = false;
+      if (account?.allowSharedStock && account.sharedStockAccounts && account.sharedStockAccounts.length > 0) {
+        targetAccountIds.push(...account.sharedStockAccounts.map((id: any) => new mongoose.Types.ObjectId(id)));
+        isSharedStock = true;
+      }
+
+      const productIds = products.map(p => p._id);
+
+      // Aggregate movements for this account + shared accounts
+      const [allTargetMovements, ownMovements] = await Promise.all([
+        StockMovement.aggregate([
+          {
+            $match: {
+              product: { $in: productIds },
+              businessAccount: { $in: targetAccountIds },
+              stockBucket: 'saleable',
+            }
+          },
+          {
+            $group: {
+              _id: '$product',
+              qty: { $sum: '$quantity' }
+            }
+          }
+        ]),
+        StockMovement.aggregate([
+          {
+            $match: {
+              product: { $in: productIds },
+              businessAccount: new mongoose.Types.ObjectId(accountId),
+              stockBucket: 'saleable',
+            }
+          },
+          {
+            $group: {
+              _id: '$product',
+              qty: { $sum: '$quantity' }
+            }
+          }
+        ])
+      ]);
+
+      const targetStockMap = new Map<string, number>();
+      allTargetMovements.forEach(item => {
+        targetStockMap.set(item._id.toString(), item.qty);
+      });
+
+      const ownStockMap = new Map<string, number>();
+      ownMovements.forEach(item => {
+        ownStockMap.set(item._id.toString(), item.qty);
+      });
+
+      const mappedProducts = products.map(p => {
+        const pObj: any = p.toObject();
+        const hasAnyTargetMovement = targetStockMap.has(p._id.toString());
+        const ownStock = ownStockMap.get(p._id.toString()) ?? 0;
+        
+        // If account has movements or shared stock enabled, use calculated stock
+        if (hasAnyTargetMovement || isSharedStock || ownStockMap.has(p._id.toString())) {
+          pObj.currentStock = Math.max(0, targetStockMap.get(p._id.toString()) ?? 0);
+        }
+        pObj.ownStock = Math.max(0, ownStock);
+        pObj.isSharedStock = isSharedStock;
+        return pObj;
+      });
+
+      res.json({ success: true, data: mappedProducts });
+      return;
+    }
+
     res.json({ success: true, data: products });
   } catch (err) {
     res.status(500).json({ success: false, message: (err as Error).message });

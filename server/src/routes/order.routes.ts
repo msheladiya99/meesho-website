@@ -3,6 +3,8 @@ import mongoose from 'mongoose';
 import { Order } from '../models/Order';
 import { Product } from '../models/Product';
 import { PackingRecord } from '../models/PackingRecord';
+import { BusinessAccount } from '../models/BusinessAccount';
+import { StockMovement } from '../models/StockMovement';
 import { authenticate, requireManagerOrAdmin, enforceAccountAccess, AuthRequest } from '../middleware/auth';
 import { createAuditLog } from '../services/audit.service';
 import { recordStockMovement, reverseMovementsByReference } from '../services/inventory.service';
@@ -76,12 +78,41 @@ router.post('/', requireManagerOrAdmin, enforceAccountAccess, async (req: AuthRe
     if (!product) { res.status(404).json({ success: false, message: 'Product not found' }); return; }
 
     const orderStatus = status || 'pending';
-    if (orderStatus !== 'cancelled' && product.currentStock < quantity) {
-      res.status(400).json({
-        success: false,
-        message: `Insufficient stock for product "${product.name}". Available: ${product.currentStock}, Requested: ${quantity}`
-      });
-      return;
+    if (orderStatus !== 'cancelled') {
+      const account = await BusinessAccount.findById(businessAccount);
+      const targetAccountIds: mongoose.Types.ObjectId[] = [new mongoose.Types.ObjectId(businessAccount)];
+      let isSharedStock = false;
+      if (account?.allowSharedStock && account.sharedStockAccounts && account.sharedStockAccounts.length > 0) {
+        targetAccountIds.push(...account.sharedStockAccounts.map((id: any) => new mongoose.Types.ObjectId(id)));
+        isSharedStock = true;
+      }
+
+      const stockAgg = await StockMovement.aggregate([
+        {
+          $match: {
+            product: product._id,
+            businessAccount: { $in: targetAccountIds },
+            stockBucket: 'saleable',
+          }
+        },
+        {
+          $group: {
+            _id: null,
+            totalStock: { $sum: '$quantity' }
+          }
+        }
+      ]);
+
+      const availableStock = stockAgg.length > 0 ? Math.max(0, stockAgg[0].totalStock) : product.currentStock;
+
+      if (availableStock < quantity) {
+        const accLabel = account?.tradeName || account?.name || 'this account';
+        const msg = isSharedStock
+          ? `Insufficient shared stock for "${product.name}". Available across shared accounts: ${availableStock}, Requested: ${quantity}`
+          : `Insufficient stock for "${product.name}" in account "${accLabel}". Available own stock: ${availableStock}, Requested: ${quantity}. (You can enable "Share Stock with other GST accounts" in GST Settings to use other account stock).`;
+        res.status(400).json({ success: false, message: msg });
+        return;
+      }
     }
 
     const grossAmount = sellingPrice * quantity;

@@ -8,6 +8,12 @@ export interface IBusinessAccount extends Document {
   phone?: string;
   email?: string;
   isActive: boolean;
+  /**
+   * When false (default): This account only uses its own stock.
+   * When true: This account can use stock from the accounts specified in sharedStockAccounts.
+   */
+  allowSharedStock: boolean;
+  sharedStockAccounts: mongoose.Types.ObjectId[];
 }
 
 const businessAccountSchema = new Schema<IBusinessAccount>({
@@ -18,6 +24,8 @@ const businessAccountSchema = new Schema<IBusinessAccount>({
   phone: { type: String, trim: true },
   email: { type: String, trim: true, lowercase: true },
   isActive: { type: Boolean, default: true },
+  allowSharedStock: { type: Boolean, default: false },
+  sharedStockAccounts: [{ type: Schema.Types.ObjectId, ref: 'BusinessAccount', default: [] }],
 }, { timestamps: true });
 
 // Note: gstin already has a unique index from schema definition

@@ -4,6 +4,7 @@ export interface IOrder extends Document {
     businessAccount: mongoose.Types.ObjectId;
     orderDate: Date;
     meeshoOrderId?: string;
+    subOrderId?: string;
     shippingLabelId?: string;
     carrierName?: string;
     internalQrCode?: string;

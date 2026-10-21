@@ -24,6 +24,8 @@ export interface BusinessAccount {
   phone?: string;
   email?: string;
   isActive: boolean;
+  allowSharedStock?: boolean;
+  sharedStockAccounts?: string[];
 }
 
 // ─── Partner ────────────────────────────────────────────────────────────────
@@ -61,6 +63,8 @@ export interface Product {
   pendingInspectionStock?: number;
   weightedAvgCost?: number; // in paise
   isActive: boolean;
+  isSharedStock?: boolean;
+  ownStock?: number;
 }
 
 // ─── Vendor ──────────────────────────────────────────────────────────────────
