@@ -34,6 +34,7 @@ export const PackingDispatchPage: React.FC = () => {
   // Quick Add Order from Scan state
   const [isQuickOrderOpen, setIsQuickOrderOpen] = useState(false);
   const [newOrderCode, setNewOrderCode] = useState('');
+  const [newOrderDate, setNewOrderDate] = useState(new Date().toISOString().split('T')[0]);
   const [newOrderSubOrderId, setNewOrderSubOrderId] = useState('');
   const [newOrderAccountId, setNewOrderAccountId] = useState('');
   const [newOrderProductId, setNewOrderProductId] = useState('');
@@ -113,6 +114,7 @@ export const PackingDispatchPage: React.FC = () => {
       setNewOrderPriceRupees(paiseToRupees(targetProd.sellingPrice || 0));
     }
     setNewOrderQty(1);
+    setNewOrderDate(new Date().toISOString().split('T')[0]);
     setNewOrderSubOrderId('');
     setNewOrderCarrier('Shadowfax');
     setNewOrderNotes('');
@@ -174,7 +176,7 @@ export const PackingDispatchPage: React.FC = () => {
 
     const payload: any = {
       businessAccount: newOrderAccountId,
-      orderDate: new Date(),
+      orderDate: newOrderDate,
       meeshoOrderId: newOrderCode.trim() || undefined,
       subOrderId: newOrderSubOrderId.trim() || undefined,
       shippingLabelId: newOrderCode.trim() || undefined,
@@ -895,6 +897,22 @@ export const PackingDispatchPage: React.FC = () => {
                     </option>
                   ))}
                 </select>
+              </div>
+            </div>
+
+            {/* Order Date */}
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+              <div>
+                <label className="font-semibold text-gray-700 block mb-1">
+                  Order Date:
+                </label>
+                <input
+                  type="date"
+                  value={newOrderDate}
+                  onChange={(e) => setNewOrderDate(e.target.value)}
+                  className="input text-xs"
+                  required
+                />
               </div>
             </div>
 
