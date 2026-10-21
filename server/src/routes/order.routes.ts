@@ -398,13 +398,20 @@ router.put('/:id', requireManagerOrAdmin, enforceAccountAccess, async (req: Auth
       }
     }
 
+    if (req.body.product) {
+      const prod = await Product.findById(req.body.product);
+      if (prod) {
+        req.body.sku = prod.sku;
+      }
+    }
+
     // Reverse old stock movements for this order
     await reverseMovementsByReference(req.params.id as string, req.user?._id?.toString());
 
     const order = await Order.findByIdAndUpdate(req.params.id, req.body, { new: true, runValidators: true })
-      .populate('product', 'name sku')
-      .populate('items.product', 'name sku')
-      .populate('businessAccount', 'name gstin');
+      .populate('product', 'name sku sellingPrice category')
+      .populate('items.product', 'name sku sellingPrice category')
+      .populate('businessAccount', 'name tradeName gstin');
 
     if (!order) { res.status(404).json({ success: false, message: 'Order not found' }); return; }
 

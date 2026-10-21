@@ -374,12 +374,18 @@ router.put('/:id', auth_1.requireManagerOrAdmin, auth_1.enforceAccountAccess, as
                 }
             }
         }
+        if (req.body.product) {
+            const prod = await Product_1.Product.findById(req.body.product);
+            if (prod) {
+                req.body.sku = prod.sku;
+            }
+        }
         // Reverse old stock movements for this order
         await (0, inventory_service_1.reverseMovementsByReference)(req.params.id, req.user?._id?.toString());
         const order = await Order_1.Order.findByIdAndUpdate(req.params.id, req.body, { new: true, runValidators: true })
-            .populate('product', 'name sku')
-            .populate('items.product', 'name sku')
-            .populate('businessAccount', 'name gstin');
+            .populate('product', 'name sku sellingPrice category')
+            .populate('items.product', 'name sku sellingPrice category')
+            .populate('businessAccount', 'name tradeName gstin');
         if (!order) {
             res.status(404).json({ success: false, message: 'Order not found' });
             return;

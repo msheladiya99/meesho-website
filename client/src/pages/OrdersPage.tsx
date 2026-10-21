@@ -75,8 +75,25 @@ const OrdersPage: React.FC = () => {
 
   const createMut = useMutation({
     mutationFn: (data: Partial<Order>) => ordersApi.create(data),
-    onSuccess: () => {
+    onSuccess: (res) => {
+      const createdOrder = res?.data?.data;
+      if (createdOrder) {
+        qc.setQueriesData({ queryKey: ['orders'] }, (old: any) => {
+          if (!old?.data?.data || !Array.isArray(old.data.data)) return old;
+          const exists = old.data.data.some((o: Order) => o._id === createdOrder._id);
+          if (exists) return old;
+          return {
+            ...old,
+            data: {
+              ...old.data,
+              data: [createdOrder, ...old.data.data],
+              total: (old.data.total || old.data.data.length) + 1,
+            },
+          };
+        });
+      }
       qc.invalidateQueries({ queryKey: ['orders'] });
+      qc.refetchQueries({ queryKey: ['orders'] });
       qc.invalidateQueries({ queryKey: ['inventory'] });
       qc.invalidateQueries({ queryKey: ['products'] });
       qc.invalidateQueries({ queryKey: ['dashboard'] });
@@ -91,36 +108,76 @@ const OrdersPage: React.FC = () => {
 
   const updateMut = useMutation({
     mutationFn: ({ id, data }: { id: string; data: Partial<Order> }) => ordersApi.update(id, data),
-    onSuccess: () => {
+    onSuccess: (res) => {
+      const updatedOrder = res?.data?.data;
+      if (updatedOrder) {
+        qc.setQueriesData({ queryKey: ['orders'] }, (old: any) => {
+          if (!old?.data?.data || !Array.isArray(old.data.data)) return old;
+          return {
+            ...old,
+            data: {
+              ...old.data,
+              data: old.data.data.map((o: Order) => (o._id === updatedOrder._id ? updatedOrder : o)),
+            },
+          };
+        });
+      }
       qc.invalidateQueries({ queryKey: ['orders'] });
+      qc.refetchQueries({ queryKey: ['orders'] });
       qc.invalidateQueries({ queryKey: ['inventory'] });
       qc.invalidateQueries({ queryKey: ['products'] });
       qc.invalidateQueries({ queryKey: ['dashboard'] });
-      setIsModalOpen(false); setEditingOrder(null); reset();
+      setIsModalOpen(false);
+      setEditingOrder(null);
+      reset();
       toast.success('Order updated!');
+    },
+    onError: (err: unknown) => {
+      toast.error((err as { response?: { data?: { message?: string } } })?.response?.data?.message || 'Error updating order');
     },
   });
 
   const deleteMut = useMutation({
     mutationFn: (id: string) => ordersApi.delete(id),
-    onSuccess: () => {
+    onSuccess: (_, deletedId) => {
+      if (deletedId) {
+        qc.setQueriesData({ queryKey: ['orders'] }, (old: any) => {
+          if (!old?.data?.data || !Array.isArray(old.data.data)) return old;
+          return {
+            ...old,
+            data: {
+              ...old.data,
+              data: old.data.data.filter((o: Order) => o._id !== deletedId),
+              total: Math.max(0, (old.data.total || old.data.data.length) - 1),
+            },
+          };
+        });
+      }
       qc.invalidateQueries({ queryKey: ['orders'] });
+      qc.refetchQueries({ queryKey: ['orders'] });
       qc.invalidateQueries({ queryKey: ['inventory'] });
       qc.invalidateQueries({ queryKey: ['products'] });
       qc.invalidateQueries({ queryKey: ['dashboard'] });
       toast.success('Order deleted');
       setDeleteId(null);
     },
+    onError: (err: unknown) => {
+      toast.error((err as { response?: { data?: { message?: string } } })?.response?.data?.message || 'Error deleting order');
+    },
   });
 
   const onSubmit = (formData: FormData) => {
+    const targetAccountId = editingOrder
+      ? (typeof editingOrder.businessAccount === 'object' ? (editingOrder.businessAccount as any)._id : editingOrder.businessAccount)
+      : (activeAccountId === 'all' ? undefined : activeAccountId);
+
     const payload = {
       ...formData,
       meeshoOrderId: formData.meeshoOrderId?.trim() || undefined,
       subOrderId: formData.subOrderId?.trim() || undefined,
       sellingPrice: rupeesToPaise(formData.sellingPrice),
       grossAmount: rupeesToPaise(formData.sellingPrice * formData.quantity),
-      businessAccount: activeAccountId === 'all' ? undefined : activeAccountId,
+      businessAccount: targetAccountId,
     };
     if (editingOrder) {
       updateMut.mutate({ id: editingOrder._id, data: payload });
@@ -281,8 +338,19 @@ const OrdersPage: React.FC = () => {
             )}
             <div className="flex gap-2 ml-auto">
               <button onClick={() => setIsModalOpen(false)} className="btn-secondary">Cancel</button>
-              <button form="order-form" type="submit" disabled={isSubmitting || createMut.isPending || updateMut.isPending} className="btn-primary">
-                {editingOrder ? 'Update Order' : 'Save Order'}
+              <button
+                form="order-form"
+                type="submit"
+                disabled={isSubmitting || createMut.isPending || updateMut.isPending}
+                className="btn-primary min-w-[110px] justify-center"
+              >
+                {createMut.isPending || updateMut.isPending ? (
+                  <LoadingSpinner size="sm" />
+                ) : editingOrder ? (
+                  'Update Order'
+                ) : (
+                  'Save Order'
+                )}
               </button>
             </div>
           </div>
