@@ -3,10 +3,11 @@ var __importDefault = (this && this.__importDefault) || function (mod) {
     return (mod && mod.__esModule) ? mod : { "default": mod };
 };
 Object.defineProperty(exports, "__esModule", { value: true });
-exports.reverseMovementsByReference = exports.hasOrderDeductedStock = exports.recordStockMovement = exports.generateStockTransactionId = void 0;
+exports.resolveStockAccountIds = exports.reverseMovementsByReference = exports.hasOrderDeductedStock = exports.recordStockMovement = exports.generateStockTransactionId = void 0;
 const mongoose_1 = __importDefault(require("mongoose"));
 const Product_1 = require("../models/Product");
 const StockMovement_1 = require("../models/StockMovement");
+const BusinessAccount_1 = require("../models/BusinessAccount");
 const generateStockTransactionId = () => {
     const dateStr = new Date().toISOString().slice(0, 10).replace(/-/g, '');
     const rand = Math.random().toString(36).substring(2, 7).toUpperCase();
@@ -131,4 +132,47 @@ const reverseMovementsByReference = async (referenceId, createdBy, session) => {
     }
 };
 exports.reverseMovementsByReference = reverseMovementsByReference;
+/**
+ * Resolve the account IDs whose stock the given account is entitled to access.
+ * Returns { targetAccountIds, isSharedStock }.
+ *
+ * Rules:
+ * 1. An account always has access to its own stock.
+ * 2. If this account has allowSharedStock=true, it can access stock from accounts in its sharedStockAccounts.
+ * 3. If any OTHER active account has allowSharedStock=true and included THIS account in its sharedStockAccounts,
+ *    that other account has explicitly authorized this account to use its stock.
+ * 4. If neither condition 2 nor 3 is met, only this account's own stock is used (strict account isolation).
+ */
+const resolveStockAccountIds = async (accountId) => {
+    const currentObjId = typeof accountId === 'string' ? new mongoose_1.default.Types.ObjectId(accountId) : accountId;
+    const targetMap = new Map();
+    targetMap.set(currentObjId.toString(), currentObjId);
+    let isSharedStock = false;
+    const currentAccount = await BusinessAccount_1.BusinessAccount.findById(currentObjId);
+    // 1. If this account explicitly enabled shared stock, include its designated accounts
+    if (currentAccount?.allowSharedStock && currentAccount.sharedStockAccounts?.length) {
+        for (const accId of currentAccount.sharedStockAccounts) {
+            const objId = new mongoose_1.default.Types.ObjectId(accId);
+            targetMap.set(objId.toString(), objId);
+            isSharedStock = true;
+        }
+    }
+    // 2. Also check if any other active account has enabled shared stock with this account
+    const accountsSharingWithThis = await BusinessAccount_1.BusinessAccount.find({
+        _id: { $ne: currentObjId },
+        isActive: true,
+        allowSharedStock: true,
+        sharedStockAccounts: currentObjId,
+    });
+    for (const acc of accountsSharingWithThis) {
+        const objId = new mongoose_1.default.Types.ObjectId(acc._id);
+        targetMap.set(objId.toString(), objId);
+        isSharedStock = true;
+    }
+    return {
+        targetAccountIds: Array.from(targetMap.values()),
+        isSharedStock,
+    };
+};
+exports.resolveStockAccountIds = resolveStockAccountIds;
 //# sourceMappingURL=inventory.service.js.map

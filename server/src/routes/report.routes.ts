@@ -10,6 +10,7 @@ import { ScanException } from '../models/ScanException';
 import { BusinessAccount } from '../models/BusinessAccount';
 import { StockMovement } from '../models/StockMovement';
 import { authenticate, enforceAccountAccess, AuthRequest } from '../middleware/auth';
+import { resolveStockAccountIds } from '../services/inventory.service';
 
 const router = Router();
 router.use(authenticate);
@@ -27,11 +28,7 @@ const dateFilter = (startDate?: string, endDate?: string, field = 'orderDate') =
 
 const getAccountInventoryStats = async (accountId?: string, products: any[] = []) => {
   if (accountId && accountId !== 'all' && mongoose.Types.ObjectId.isValid(accountId)) {
-    const account = await BusinessAccount.findById(accountId);
-    const targetAccountIds: mongoose.Types.ObjectId[] = [new mongoose.Types.ObjectId(accountId)];
-    if (account?.allowSharedStock && account.sharedStockAccounts && account.sharedStockAccounts.length > 0) {
-      targetAccountIds.push(...account.sharedStockAccounts.map((id: any) => new mongoose.Types.ObjectId(id)));
-    }
+    const { targetAccountIds } = await resolveStockAccountIds(accountId);
 
     const movements = await StockMovement.aggregate([
       {

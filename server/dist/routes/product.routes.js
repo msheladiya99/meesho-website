@@ -6,10 +6,10 @@ Object.defineProperty(exports, "__esModule", { value: true });
 const express_1 = require("express");
 const mongoose_1 = __importDefault(require("mongoose"));
 const Product_1 = require("../models/Product");
-const BusinessAccount_1 = require("../models/BusinessAccount");
 const StockMovement_1 = require("../models/StockMovement");
 const auth_1 = require("../middleware/auth");
 const audit_service_1 = require("../services/audit.service");
+const inventory_service_1 = require("../services/inventory.service");
 const router = (0, express_1.Router)();
 router.use(auth_1.authenticate);
 router.get('/', async (req, res) => {
@@ -27,13 +27,7 @@ router.get('/', async (req, res) => {
         ]);
         // If accountId is provided, strictly isolate stock
         if (accountId && accountId !== 'all' && mongoose_1.default.Types.ObjectId.isValid(accountId)) {
-            const account = await BusinessAccount_1.BusinessAccount.findById(accountId);
-            const targetAccountIds = [new mongoose_1.default.Types.ObjectId(accountId)];
-            let isSharedStock = false;
-            if (account?.allowSharedStock && account.sharedStockAccounts && account.sharedStockAccounts.length > 0) {
-                targetAccountIds.push(...account.sharedStockAccounts.map((id) => new mongoose_1.default.Types.ObjectId(id)));
-                isSharedStock = true;
-            }
+            const { targetAccountIds, isSharedStock } = await (0, inventory_service_1.resolveStockAccountIds)(accountId);
             const productIds = products.map(p => p._id);
             const movements = await StockMovement_1.StockMovement.aggregate([
                 {

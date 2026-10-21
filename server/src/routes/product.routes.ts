@@ -5,6 +5,7 @@ import { BusinessAccount } from '../models/BusinessAccount';
 import { StockMovement } from '../models/StockMovement';
 import { authenticate, requireManagerOrAdmin, AuthRequest } from '../middleware/auth';
 import { createAuditLog } from '../services/audit.service';
+import { resolveStockAccountIds } from '../services/inventory.service';
 
 const router = Router();
 router.use(authenticate);
@@ -24,13 +25,7 @@ router.get('/', async (req: AuthRequest, res: Response): Promise<void> => {
 
     // If accountId is provided, strictly isolate stock
     if (accountId && accountId !== 'all' && mongoose.Types.ObjectId.isValid(accountId)) {
-      const account = await BusinessAccount.findById(accountId);
-      const targetAccountIds: mongoose.Types.ObjectId[] = [new mongoose.Types.ObjectId(accountId)];
-      let isSharedStock = false;
-      if (account?.allowSharedStock && account.sharedStockAccounts && account.sharedStockAccounts.length > 0) {
-        targetAccountIds.push(...account.sharedStockAccounts.map((id: any) => new mongoose.Types.ObjectId(id)));
-        isSharedStock = true;
-      }
+      const { targetAccountIds, isSharedStock } = await resolveStockAccountIds(accountId);
 
       const productIds = products.map(p => p._id);
       const movements = await StockMovement.aggregate([

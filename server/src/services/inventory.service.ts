@@ -1,6 +1,7 @@
 import mongoose from 'mongoose';
 import { Product } from '../models/Product';
 import { StockMovement, MovementType, StockBucket } from '../models/StockMovement';
+import { BusinessAccount } from '../models/BusinessAccount';
 
 interface RecordMovementParams {
   businessAccount: string;
@@ -158,4 +159,54 @@ export const reverseMovementsByReference = async (
     // Delete the original movement
     await StockMovement.findByIdAndDelete(mv._id).session(session || null);
   }
+};
+
+/**
+ * Resolve the account IDs whose stock the given account is entitled to access.
+ * Returns { targetAccountIds, isSharedStock }.
+ *
+ * Rules:
+ * 1. An account always has access to its own stock.
+ * 2. If this account has allowSharedStock=true, it can access stock from accounts in its sharedStockAccounts.
+ * 3. If any OTHER active account has allowSharedStock=true and included THIS account in its sharedStockAccounts,
+ *    that other account has explicitly authorized this account to use its stock.
+ * 4. If neither condition 2 nor 3 is met, only this account's own stock is used (strict account isolation).
+ */
+export const resolveStockAccountIds = async (
+  accountId: string | mongoose.Types.ObjectId
+): Promise<{ targetAccountIds: mongoose.Types.ObjectId[]; isSharedStock: boolean }> => {
+  const currentObjId = typeof accountId === 'string' ? new mongoose.Types.ObjectId(accountId) : accountId;
+  const targetMap = new Map<string, mongoose.Types.ObjectId>();
+  targetMap.set(currentObjId.toString(), currentObjId);
+
+  let isSharedStock = false;
+  const currentAccount = await BusinessAccount.findById(currentObjId);
+
+  // 1. If this account explicitly enabled shared stock, include its designated accounts
+  if (currentAccount?.allowSharedStock && currentAccount.sharedStockAccounts?.length) {
+    for (const accId of currentAccount.sharedStockAccounts) {
+      const objId = new mongoose.Types.ObjectId(accId as any);
+      targetMap.set(objId.toString(), objId);
+      isSharedStock = true;
+    }
+  }
+
+  // 2. Also check if any other active account has enabled shared stock with this account
+  const accountsSharingWithThis = await BusinessAccount.find({
+    _id: { $ne: currentObjId },
+    isActive: true,
+    allowSharedStock: true,
+    sharedStockAccounts: currentObjId,
+  });
+
+  for (const acc of accountsSharingWithThis) {
+    const objId = new mongoose.Types.ObjectId(acc._id as any);
+    targetMap.set(objId.toString(), objId);
+    isSharedStock = true;
+  }
+
+  return {
+    targetAccountIds: Array.from(targetMap.values()),
+    isSharedStock,
+  };
 };

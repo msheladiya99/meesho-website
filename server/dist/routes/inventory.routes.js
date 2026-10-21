@@ -7,7 +7,6 @@ const express_1 = require("express");
 const mongoose_1 = __importDefault(require("mongoose"));
 const Product_1 = require("../models/Product");
 const StockMovement_1 = require("../models/StockMovement");
-const BusinessAccount_1 = require("../models/BusinessAccount");
 const auth_1 = require("../middleware/auth");
 const inventory_service_1 = require("../services/inventory.service");
 const audit_service_1 = require("../services/audit.service");
@@ -25,13 +24,7 @@ router.get('/', async (req, res) => {
         const products = await Product_1.Product.find(filter).populate('category', 'name').sort({ name: 1 });
         // If accountId is provided and valid, calculate account-specific stock
         if (accountId && accountId !== 'all' && mongoose_1.default.Types.ObjectId.isValid(accountId)) {
-            const account = await BusinessAccount_1.BusinessAccount.findById(accountId);
-            const targetAccountIds = [new mongoose_1.default.Types.ObjectId(accountId)];
-            let isSharedStock = false;
-            if (account?.allowSharedStock && account.sharedStockAccounts && account.sharedStockAccounts.length > 0) {
-                targetAccountIds.push(...account.sharedStockAccounts.map((id) => new mongoose_1.default.Types.ObjectId(id)));
-                isSharedStock = true;
-            }
+            const { targetAccountIds, isSharedStock } = await (0, inventory_service_1.resolveStockAccountIds)(accountId);
             const productIds = products.map(p => p._id);
             // Aggregate movements for this account + shared accounts
             const [allTargetMovements, ownMovements] = await Promise.all([

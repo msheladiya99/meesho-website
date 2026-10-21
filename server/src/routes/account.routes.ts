@@ -1,4 +1,5 @@
 import { Router, Response } from 'express';
+import mongoose from 'mongoose';
 import { BusinessAccount } from '../models/BusinessAccount';
 import { authenticate, requireAdmin, AuthRequest } from '../middleware/auth';
 import { createAuditLog } from '../services/audit.service';
@@ -38,6 +39,26 @@ router.put('/:id', requireAdmin, async (req: AuthRequest, res: Response): Promis
     const id = req.params.id as string;
     const account = await BusinessAccount.findByIdAndUpdate(id, req.body, { new: true, runValidators: true });
     if (!account) { res.status(404).json({ success: false, message: 'Account not found' }); return; }
+
+    // Keep shared stock settings mutually synchronized between accounts
+    if (req.body.allowSharedStock !== undefined) {
+      if (req.body.allowSharedStock && Array.isArray(req.body.sharedStockAccounts)) {
+        for (const targetId of req.body.sharedStockAccounts) {
+          if (mongoose.Types.ObjectId.isValid(targetId)) {
+            await BusinessAccount.findByIdAndUpdate(targetId, {
+              $addToSet: { sharedStockAccounts: new mongoose.Types.ObjectId(id) },
+              $set: { allowSharedStock: true }
+            });
+          }
+        }
+      } else if (!req.body.allowSharedStock) {
+        await BusinessAccount.updateMany(
+          { sharedStockAccounts: new mongoose.Types.ObjectId(id) },
+          { $pull: { sharedStockAccounts: new mongoose.Types.ObjectId(id) } }
+        );
+      }
+    }
+
     await createAuditLog({ action: 'UPDATE', resource: 'BusinessAccount', resourceId: id, userId: req.user?._id });
     res.json({ success: true, data: account });
   } catch (err) {

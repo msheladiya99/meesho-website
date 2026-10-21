@@ -12,9 +12,9 @@ const Expense_1 = require("../models/Expense");
 const Product_1 = require("../models/Product");
 const PackingRecord_1 = require("../models/PackingRecord");
 const ScanException_1 = require("../models/ScanException");
-const BusinessAccount_1 = require("../models/BusinessAccount");
 const StockMovement_1 = require("../models/StockMovement");
 const auth_1 = require("../middleware/auth");
+const inventory_service_1 = require("../services/inventory.service");
 const router = (0, express_1.Router)();
 router.use(auth_1.authenticate);
 const acctFilter = (accountId) => accountId && accountId !== 'all' ? { businessAccount: new mongoose_1.default.Types.ObjectId(accountId) } : {};
@@ -30,11 +30,7 @@ const dateFilter = (startDate, endDate, field = 'orderDate') => {
 };
 const getAccountInventoryStats = async (accountId, products = []) => {
     if (accountId && accountId !== 'all' && mongoose_1.default.Types.ObjectId.isValid(accountId)) {
-        const account = await BusinessAccount_1.BusinessAccount.findById(accountId);
-        const targetAccountIds = [new mongoose_1.default.Types.ObjectId(accountId)];
-        if (account?.allowSharedStock && account.sharedStockAccounts && account.sharedStockAccounts.length > 0) {
-            targetAccountIds.push(...account.sharedStockAccounts.map((id) => new mongoose_1.default.Types.ObjectId(id)));
-        }
+        const { targetAccountIds } = await (0, inventory_service_1.resolveStockAccountIds)(accountId);
         const movements = await StockMovement_1.StockMovement.aggregate([
             {
                 $match: {

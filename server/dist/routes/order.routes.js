@@ -90,12 +90,7 @@ router.post('/', auth_1.requireManagerOrAdmin, auth_1.enforceAccountAccess, asyn
         const orderStatus = status || 'pending';
         if (orderStatus !== 'cancelled') {
             const account = await BusinessAccount_1.BusinessAccount.findById(businessAccount);
-            const targetAccountIds = [new mongoose_1.default.Types.ObjectId(businessAccount)];
-            let isSharedStock = false;
-            if (account?.allowSharedStock && account.sharedStockAccounts && account.sharedStockAccounts.length > 0) {
-                targetAccountIds.push(...account.sharedStockAccounts.map((id) => new mongoose_1.default.Types.ObjectId(id)));
-                isSharedStock = true;
-            }
+            const { targetAccountIds, isSharedStock } = await (0, inventory_service_1.resolveStockAccountIds)(businessAccount);
             const stockAgg = await StockMovement_1.StockMovement.aggregate([
                 {
                     $match: {

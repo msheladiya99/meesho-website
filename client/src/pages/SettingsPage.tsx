@@ -183,6 +183,7 @@ const SettingsPage: React.FC = () => {
       qc.invalidateQueries({ queryKey: ['accounts'] });
       qc.invalidateQueries({ queryKey: ['inventory'] });
       qc.invalidateQueries({ queryKey: ['products'] });
+      qc.invalidateQueries({ queryKey: ['dashboard'] });
       toast.success('Stock sharing settings updated successfully!');
     },
     onError: (e: any) => {

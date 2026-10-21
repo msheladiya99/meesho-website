@@ -1,6 +1,10 @@
 "use strict";
+var __importDefault = (this && this.__importDefault) || function (mod) {
+    return (mod && mod.__esModule) ? mod : { "default": mod };
+};
 Object.defineProperty(exports, "__esModule", { value: true });
 const express_1 = require("express");
+const mongoose_1 = __importDefault(require("mongoose"));
 const BusinessAccount_1 = require("../models/BusinessAccount");
 const auth_1 = require("../middleware/auth");
 const audit_service_1 = require("../services/audit.service");
@@ -40,6 +44,22 @@ router.put('/:id', auth_1.requireAdmin, async (req, res) => {
         if (!account) {
             res.status(404).json({ success: false, message: 'Account not found' });
             return;
+        }
+        // Keep shared stock settings mutually synchronized between accounts
+        if (req.body.allowSharedStock !== undefined) {
+            if (req.body.allowSharedStock && Array.isArray(req.body.sharedStockAccounts)) {
+                for (const targetId of req.body.sharedStockAccounts) {
+                    if (mongoose_1.default.Types.ObjectId.isValid(targetId)) {
+                        await BusinessAccount_1.BusinessAccount.findByIdAndUpdate(targetId, {
+                            $addToSet: { sharedStockAccounts: new mongoose_1.default.Types.ObjectId(id) },
+                            $set: { allowSharedStock: true }
+                        });
+                    }
+                }
+            }
+            else if (!req.body.allowSharedStock) {
+                await BusinessAccount_1.BusinessAccount.updateMany({ sharedStockAccounts: new mongoose_1.default.Types.ObjectId(id) }, { $pull: { sharedStockAccounts: new mongoose_1.default.Types.ObjectId(id) } });
+            }
         }
         await (0, audit_service_1.createAuditLog)({ action: 'UPDATE', resource: 'BusinessAccount', resourceId: id, userId: req.user?._id });
         res.json({ success: true, data: account });

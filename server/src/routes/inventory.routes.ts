@@ -4,7 +4,7 @@ import { Product } from '../models/Product';
 import { StockMovement } from '../models/StockMovement';
 import { BusinessAccount } from '../models/BusinessAccount';
 import { authenticate, requireManagerOrAdmin, AuthRequest } from '../middleware/auth';
-import { recordStockMovement } from '../services/inventory.service';
+import { recordStockMovement, resolveStockAccountIds } from '../services/inventory.service';
 import { createAuditLog } from '../services/audit.service';
 
 const router = Router();
@@ -22,13 +22,7 @@ router.get('/', async (req: AuthRequest, res: Response): Promise<void> => {
 
     // If accountId is provided and valid, calculate account-specific stock
     if (accountId && accountId !== 'all' && mongoose.Types.ObjectId.isValid(accountId)) {
-      const account = await BusinessAccount.findById(accountId);
-      const targetAccountIds: mongoose.Types.ObjectId[] = [new mongoose.Types.ObjectId(accountId)];
-      let isSharedStock = false;
-      if (account?.allowSharedStock && account.sharedStockAccounts && account.sharedStockAccounts.length > 0) {
-        targetAccountIds.push(...account.sharedStockAccounts.map((id: any) => new mongoose.Types.ObjectId(id)));
-        isSharedStock = true;
-      }
+      const { targetAccountIds, isSharedStock } = await resolveStockAccountIds(accountId);
 
       const productIds = products.map(p => p._id);
 

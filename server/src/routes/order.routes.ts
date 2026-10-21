@@ -7,7 +7,7 @@ import { BusinessAccount } from '../models/BusinessAccount';
 import { StockMovement } from '../models/StockMovement';
 import { authenticate, requireManagerOrAdmin, enforceAccountAccess, AuthRequest } from '../middleware/auth';
 import { createAuditLog } from '../services/audit.service';
-import { recordStockMovement, reverseMovementsByReference } from '../services/inventory.service';
+import { recordStockMovement, reverseMovementsByReference, resolveStockAccountIds } from '../services/inventory.service';
 import { generateInternalQrCode } from '../services/qrScanner.service';
 
 const router = Router();
@@ -80,12 +80,7 @@ router.post('/', requireManagerOrAdmin, enforceAccountAccess, async (req: AuthRe
     const orderStatus = status || 'pending';
     if (orderStatus !== 'cancelled') {
       const account = await BusinessAccount.findById(businessAccount);
-      const targetAccountIds: mongoose.Types.ObjectId[] = [new mongoose.Types.ObjectId(businessAccount)];
-      let isSharedStock = false;
-      if (account?.allowSharedStock && account.sharedStockAccounts && account.sharedStockAccounts.length > 0) {
-        targetAccountIds.push(...account.sharedStockAccounts.map((id: any) => new mongoose.Types.ObjectId(id)));
-        isSharedStock = true;
-      }
+      const { targetAccountIds, isSharedStock } = await resolveStockAccountIds(businessAccount);
 
       const stockAgg = await StockMovement.aggregate([
         {
