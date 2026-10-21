@@ -3,7 +3,7 @@ import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import {
   QrCode, Camera, CheckCircle2, AlertCircle, PackageCheck, Truck,
   Printer, Search, RotateCcw, Clock, Layers, ArrowRight, ShieldAlert,
-  ChevronRight, Sparkles, Filter, Plus, Package, Tag, Building2
+  ChevronRight, Sparkles, Filter, Plus, Package, Tag, Building2, Trash2
 } from 'lucide-react';
 import { packingApi, type PackingLookupResult } from '../services/packing.service';
 import { productsApi, inventoryApi } from '../services/inventory.service';
@@ -16,6 +16,13 @@ import { LoadingSpinner, EmptyState } from '../components/ui/Feedback';
 import Modal from '../components/ui/Modal';
 import toast from 'react-hot-toast';
 import type { Order, PackingRecord, Product } from '../types';
+
+export interface QuickOrderItem {
+  id: string;
+  productId: string;
+  quantity: number;
+  priceRupees: number;
+}
 
 export const PackingDispatchPage: React.FC = () => {
   const { activeAccountId, accounts, getActiveAccount } = useAccountStore();
@@ -31,15 +38,15 @@ export const PackingDispatchPage: React.FC = () => {
   const [packingNotes, setPackingNotes] = useState('');
   const [labelModalOrder, setLabelModalOrder] = useState<Order | null>(null);
 
-  // Quick Add Order from Scan state
+  // Quick Add Order from Scan state (supports single perfume and combo packs)
   const [isQuickOrderOpen, setIsQuickOrderOpen] = useState(false);
   const [newOrderCode, setNewOrderCode] = useState('');
   const [newOrderDate, setNewOrderDate] = useState(new Date().toISOString().split('T')[0]);
   const [newOrderSubOrderId, setNewOrderSubOrderId] = useState('');
   const [newOrderAccountId, setNewOrderAccountId] = useState('');
-  const [newOrderProductId, setNewOrderProductId] = useState('');
-  const [newOrderQty, setNewOrderQty] = useState(1);
-  const [newOrderPriceRupees, setNewOrderPriceRupees] = useState(0);
+  const [comboItems, setComboItems] = useState<QuickOrderItem[]>([
+    { id: 'item-1', productId: '', quantity: 1, priceRupees: 0 },
+  ]);
   const [newOrderCarrier, setNewOrderCarrier] = useState('Shadowfax');
   const [newOrderNotes, setNewOrderNotes] = useState('');
   const [newOrderAutoPack, setNewOrderAutoPack] = useState(true);
@@ -110,11 +117,14 @@ export const PackingDispatchPage: React.FC = () => {
     const matched = products.find((p) => p._id === savedId);
     const targetProd = matched || products[0];
 
-    if (targetProd) {
-      setNewOrderProductId(targetProd._id);
-      setNewOrderPriceRupees(paiseToRupees(targetProd.sellingPrice || 0));
-    }
-    setNewOrderQty(1);
+    const initialItem: QuickOrderItem = {
+      id: `item-${Date.now()}-1`,
+      productId: targetProd?._id || '',
+      quantity: 1,
+      priceRupees: targetProd ? paiseToRupees(targetProd.sellingPrice || 0) : 0,
+    };
+    setComboItems([initialItem]);
+
     setNewOrderDate(new Date().toISOString().split('T')[0]);
     setNewOrderSubOrderId('');
     setNewOrderCarrier('Shadowfax');
@@ -123,14 +133,52 @@ export const PackingDispatchPage: React.FC = () => {
     setIsQuickOrderOpen(true);
   };
 
-  const handleProductSelect = (prodId: string) => {
-    setNewOrderProductId(prodId);
-    setLastSelectedProductId(prodId);
-    localStorage.setItem('last_packed_product_id', prodId);
-    const prod = products.find((p) => p._id === prodId);
-    if (prod) {
-      setNewOrderPriceRupees(paiseToRupees(prod.sellingPrice || 0));
-    }
+  const handleAddComboItem = () => {
+    const selectedIds = new Set(comboItems.map((it) => it.productId));
+    const nextProd = products.find((p) => !selectedIds.has(p._id)) || products[0];
+    const newItem: QuickOrderItem = {
+      id: `item-${Date.now()}-${comboItems.length + 1}`,
+      productId: nextProd?._id || '',
+      quantity: 1,
+      priceRupees: nextProd ? paiseToRupees(nextProd.sellingPrice || 0) : 0,
+    };
+    setComboItems((prev) => [...prev, newItem]);
+  };
+
+  const handleRemoveComboItem = (itemId: string) => {
+    if (comboItems.length <= 1) return;
+    setComboItems((prev) => prev.filter((it) => it.id !== itemId));
+  };
+
+  const handleItemProductChange = (itemId: string, newProdId: string) => {
+    const prod = products.find((p) => p._id === newProdId);
+    setLastSelectedProductId(newProdId);
+    localStorage.setItem('last_packed_product_id', newProdId);
+
+    setComboItems((prev) =>
+      prev.map((it) => {
+        if (it.id === itemId) {
+          return {
+            ...it,
+            productId: newProdId,
+            priceRupees: prod ? paiseToRupees(prod.sellingPrice || 0) : it.priceRupees,
+          };
+        }
+        return it;
+      })
+    );
+  };
+
+  const handleItemQuantityChange = (itemId: string, qty: number) => {
+    setComboItems((prev) =>
+      prev.map((it) => (it.id === itemId ? { ...it, quantity: Math.max(1, qty) } : it))
+    );
+  };
+
+  const handleItemPriceChange = (itemId: string, price: number) => {
+    setComboItems((prev) =>
+      prev.map((it) => (it.id === itemId ? { ...it, priceRupees: Math.max(0, price) } : it))
+    );
   };
 
   const createOrderMutation = useMutation({
@@ -166,14 +214,26 @@ export const PackingDispatchPage: React.FC = () => {
       toast.error('Please select a GSTIN account');
       return;
     }
-    if (!newOrderProductId) {
-      toast.error('Please select a product');
+    if (comboItems.length === 0 || !comboItems[0].productId) {
+      toast.error('Please select at least one perfume product');
       return;
     }
-    if (newOrderQty <= 0) {
-      toast.error('Quantity must be greater than 0');
-      return;
+    for (let i = 0; i < comboItems.length; i++) {
+      const it = comboItems[i];
+      if (!it.productId) {
+        toast.error(`Please select a perfume for item #${i + 1}`);
+        return;
+      }
+      if (it.quantity <= 0) {
+        toast.error(`Quantity for perfume #${i + 1} must be greater than 0`);
+        return;
+      }
     }
+
+    const totalQty = comboItems.reduce((acc, it) => acc + it.quantity, 0);
+    const totalGrossPaise = comboItems.reduce((acc, it) => acc + rupeesToPaise(it.priceRupees * it.quantity), 0);
+    const avgSellingPricePaise = Math.round(totalGrossPaise / (totalQty || 1));
+    const isCombo = comboItems.length > 1;
 
     const payload: any = {
       businessAccount: newOrderAccountId,
@@ -182,11 +242,18 @@ export const PackingDispatchPage: React.FC = () => {
       subOrderId: newOrderSubOrderId.trim() || undefined,
       shippingLabelId: newOrderCode.trim() || undefined,
       carrierName: newOrderCarrier,
-      product: newOrderProductId,
-      sellingPrice: rupeesToPaise(newOrderPriceRupees),
-      quantity: newOrderQty,
+      product: comboItems[0].productId,
+      quantity: totalQty,
+      sellingPrice: avgSellingPricePaise,
+      grossAmount: totalGrossPaise,
       notes: newOrderNotes.trim() || undefined,
       status: newOrderAutoPack ? 'packed' : 'pending',
+      isCombo,
+      items: comboItems.map((it) => ({
+        product: it.productId,
+        quantity: it.quantity,
+        sellingPrice: rupeesToPaise(it.priceRupees),
+      })),
     };
 
     createOrderMutation.mutate(payload);
@@ -479,17 +546,55 @@ export const PackingDispatchPage: React.FC = () => {
                 </div>
                 <div>
                   <span className="text-gray-400">Product:</span>
-                  <p className="font-bold text-gray-900 truncate">{(activeLookup.order.product as any)?.name || 'Product'}</p>
+                  <p className="font-bold text-gray-900 truncate">
+                    {activeLookup.order.isCombo ? 'Combo Pack (Multiple Fragrances)' : ((activeLookup.order.product as any)?.name || 'Product')}
+                  </p>
                 </div>
                 <div>
                   <span className="text-gray-400">SKU:</span>
-                  <p className="font-mono font-bold text-primary-700">{activeLookup.order.sku}</p>
+                  <p className="font-mono font-bold text-primary-700 truncate" title={activeLookup.order.sku}>
+                    {activeLookup.order.sku}
+                  </p>
                 </div>
                 <div>
                   <span className="text-gray-400">Selling Price:</span>
                   <p className="font-semibold text-gray-900">{formatCurrency(activeLookup.order.sellingPrice)}</p>
                 </div>
               </div>
+
+              {/* Combo Fragrances Breakdown */}
+              {activeLookup.order.isCombo && activeLookup.order.items && activeLookup.order.items.length > 0 && (
+                <div className="p-3.5 bg-purple-50/80 border border-purple-200 rounded-xl space-y-2.5">
+                  <div className="flex items-center justify-between">
+                    <span className="font-bold text-xs text-purple-900 flex items-center gap-1.5">
+                      <Sparkles className="w-4 h-4 text-purple-600" />
+                      Combo Fragrance Breakdown ({activeLookup.order.items.length} Perfumes):
+                    </span>
+                    <span className="text-[10px] bg-purple-200 text-purple-900 px-2 py-0.5 rounded-full font-bold">
+                      COMBO PACK
+                    </span>
+                  </div>
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+                    {activeLookup.order.items.map((it: any, idx: number) => {
+                      const itemProd = typeof it.product === 'object' ? it.product : null;
+                      return (
+                        <div key={idx} className="bg-white p-2.5 rounded-lg border border-purple-100 flex items-center justify-between text-xs shadow-2xs">
+                          <div className="min-w-0 mr-2">
+                            <p className="font-bold text-gray-900 truncate">{itemProd?.name || it.sku || `Perfume #${idx + 1}`}</p>
+                            <p className="text-[11px] font-mono text-purple-700 truncate">SKU: {it.sku || itemProd?.sku}</p>
+                          </div>
+                          <div className="text-right flex-shrink-0">
+                            <span className="badge badge-purple text-xs font-bold">{it.quantity} unit{it.quantity > 1 ? 's' : ''}</span>
+                            {it.sellingPrice ? (
+                              <p className="text-[10px] text-gray-500 mt-0.5">{formatCurrency(it.sellingPrice * it.quantity)}</p>
+                            ) : null}
+                          </div>
+                        </div>
+                      );
+                    })}
+                  </div>
+                </div>
+              )}
 
               {/* Quantities Status Bar */}
               <div className="grid grid-cols-3 gap-3 text-center">
@@ -677,8 +782,32 @@ export const PackingDispatchPage: React.FC = () => {
                       <td className="whitespace-nowrap">{formatDate(order.orderDate)}</td>
                       <td className="font-mono font-bold text-xs text-gray-900">{order.meeshoOrderId || '—'}</td>
                       <td>
-                        <div className="font-medium text-gray-900 truncate max-w-[180px]">{(prod as any)?.name || '—'}</div>
-                        <div className="font-mono text-[11px] text-gray-400">{order.sku}</div>
+                        {order.isCombo && order.items && order.items.length > 0 ? (
+                          <div className="space-y-1">
+                            <div className="flex items-center gap-1.5">
+                              <span className="font-bold text-gray-900 text-xs">Combo Pack</span>
+                              <span className="text-[10px] bg-purple-100 text-purple-700 font-bold px-1.5 py-0.5 rounded border border-purple-200">
+                                Combo ({order.items.length})
+                              </span>
+                            </div>
+                            <div className="space-y-0.5">
+                              {order.items.map((it: any, idx: number) => {
+                                const itemProd = typeof it.product === 'object' ? it.product : null;
+                                return (
+                                  <div key={idx} className="text-[11px] text-gray-600 truncate max-w-[200px] flex items-center gap-1">
+                                    <span className="font-semibold text-purple-700">{it.quantity}x</span>
+                                    <span className="truncate">{itemProd?.name || it.sku}</span>
+                                  </div>
+                                );
+                              })}
+                            </div>
+                          </div>
+                        ) : (
+                          <div>
+                            <div className="font-medium text-gray-900 truncate max-w-[180px]">{(prod as any)?.name || '—'}</div>
+                            <div className="font-mono text-[11px] text-gray-400">{order.sku}</div>
+                          </div>
+                        )}
                       </td>
                       <td className="font-semibold">{order.quantity}</td>
                       <td className="text-emerald-700 font-semibold">{packed}</td>
@@ -826,7 +955,7 @@ export const PackingDispatchPage: React.FC = () => {
         <Modal
           isOpen={true}
           onClose={() => setIsQuickOrderOpen(false)}
-          title="📦 Fresh Label Scanned — Add & Pack"
+          title={comboItems.length > 1 ? "📦 Fresh Label Scanned — Combo Pack (Multiple Perfumes)" : "📦 Fresh Label Scanned — Add & Pack"}
           size="lg"
           footer={
             <div className="flex flex-col sm:flex-row items-center justify-between gap-3 w-full">
@@ -850,13 +979,13 @@ export const PackingDispatchPage: React.FC = () => {
                 <button
                   type="button"
                   onClick={handleCreateQuickOrderSubmit}
-                  disabled={createOrderMutation.isPending || !newOrderProductId || !newOrderAccountId}
+                  disabled={createOrderMutation.isPending || comboItems.length === 0 || comboItems.some(it => !it.productId || it.quantity <= 0) || !newOrderAccountId}
                   className="btn-primary text-xs font-semibold flex-1 sm:flex-initial justify-center"
                 >
                   {createOrderMutation.isPending ? (
                     <LoadingSpinner size="sm" />
                   ) : newOrderAutoPack ? (
-                    'Create & Pack Now'
+                    comboItems.length > 1 ? 'Create & Pack Combo Now' : 'Create & Pack Now'
                   ) : (
                     'Save Order'
                   )}
@@ -934,94 +1063,183 @@ export const PackingDispatchPage: React.FC = () => {
               </p>
             </div>
 
-            {/* Product selection */}
-            <div>
-              <div className="flex items-center justify-between mb-1">
-                <label className="font-semibold text-gray-700">
-                  Select Perfume Product:
-                </label>
-                {newOrderProductId && (() => {
-                  const prod = products.find((p) => p._id === newOrderProductId);
-                  if (!prod) return null;
-                  return (
-                    <span className="text-[11px] font-medium flex items-center gap-1.5">
-                      <span className="text-primary-700 font-bold">Available: {prod.currentStock} units</span>
-                      {prod.isSharedStock ? (
-                        <span className="text-[10px] bg-purple-100 text-purple-700 px-1.5 py-0.2 rounded font-bold">
-                          Shared Stock
-                        </span>
-                      ) : (
-                        <span className="text-[10px] bg-gray-100 text-gray-600 px-1.5 py-0.2 rounded font-medium">
-                          Own Stock
-                        </span>
-                      )}
-                    </span>
-                  );
-                })()}
-              </div>
-              <select
-                value={newOrderProductId}
-                onChange={(e) => handleProductSelect(e.target.value)}
-                className="input text-xs font-medium"
-                required
-              >
-                <option value="">Select a perfume</option>
-                {products.map((p) => (
-                  <option key={p._id} value={p._id}>
-                    {p.name} — SKU: {p.sku} (Available: {p.currentStock}{p.isSharedStock ? ' • Shared' : ''})
-                  </option>
-                ))}
-              </select>
+            {/* Perfume Products Section (Single or Multi-item Combo) */}
+            <div className="space-y-3 pt-1">
+              <div className="flex items-center justify-between border-b pb-2">
+                <div>
+                  <div className="font-bold text-gray-900 text-xs flex items-center gap-1.5">
+                    <Sparkles className="w-3.5 h-3.5 text-purple-600" />
+                    Perfumes / Fragrances in this Parcel:
+                    {comboItems.length > 1 && (
+                      <span className="text-[10px] bg-purple-100 text-purple-700 font-bold px-2 py-0.5 rounded-full border border-purple-200">
+                        COMBO ({comboItems.length} Fragrances)
+                      </span>
+                    )}
+                  </div>
+                  <p className="text-[11px] text-gray-400">
+                    Add one or more perfumes under this label. Stock will be deducted individually for each perfume.
+                  </p>
+                </div>
 
-              {/* Quick 1-tap product chips */}
-              {products.length > 0 && (
-                <div className="flex flex-wrap gap-1.5 pt-2">
-                  <span className="text-[11px] text-gray-400 self-center">Quick pick:</span>
-                  {products.slice(0, 6).map((p) => (
-                    <button
-                      key={p._id}
-                      type="button"
-                      onClick={() => handleProductSelect(p._id)}
-                      className={`px-2 py-1 rounded-md text-[11px] font-medium border transition-all ${
-                        newOrderProductId === p._id
-                          ? 'bg-primary-50 border-primary-500 text-primary-700 font-bold shadow-xs ring-1 ring-primary-500'
-                          : 'bg-white border-gray-200 text-gray-700 hover:bg-gray-50'
-                      }`}
+                <button
+                  type="button"
+                  onClick={handleAddComboItem}
+                  className="inline-flex items-center gap-1 px-2.5 py-1.5 bg-purple-50 hover:bg-purple-100 text-purple-700 border border-purple-200 rounded-lg text-xs font-semibold shadow-2xs transition-all cursor-pointer"
+                >
+                  <Plus className="w-3.5 h-3.5 text-purple-600" />
+                  + Add Another Perfume (Combo)
+                </button>
+              </div>
+
+              {/* Items List */}
+              <div className="space-y-3">
+                {comboItems.map((item, index) => {
+                  const prod = products.find((p) => p._id === item.productId);
+                  return (
+                    <div
+                      key={item.id}
+                      className="p-3.5 rounded-xl border border-gray-200 bg-gray-50/60 hover:bg-white hover:border-primary-300 transition-all space-y-2.5"
                     >
-                      {p.name} ({p.currentStock})
-                    </button>
-                  ))}
+                      <div className="flex items-center justify-between">
+                        <div className="flex items-center gap-2">
+                          <span className="w-5 h-5 rounded-full bg-primary-100 text-primary-700 flex items-center justify-center font-bold text-[11px]">
+                            {index + 1}
+                          </span>
+                          <span className="font-bold text-gray-800 text-xs">
+                            {index === 0 ? 'Primary Fragrance' : `Combo Fragrance #${index + 1}`}
+                          </span>
+                        </div>
+
+                        <div className="flex items-center gap-2">
+                          {prod && (
+                            <span className="text-[11px] font-medium flex items-center gap-1">
+                              <span className="text-primary-700 font-bold">Available: {prod.currentStock} units</span>
+                              {prod.isSharedStock ? (
+                                <span className="text-[9px] bg-purple-100 text-purple-700 px-1.5 py-0.2 rounded font-bold">
+                                  Shared
+                                </span>
+                              ) : (
+                                <span className="text-[9px] bg-gray-100 text-gray-600 px-1.5 py-0.2 rounded font-medium">
+                                  Own Stock
+                                </span>
+                              )}
+                            </span>
+                          )}
+
+                          {comboItems.length > 1 && (
+                            <button
+                              type="button"
+                              onClick={() => handleRemoveComboItem(item.id)}
+                              className="p-1 text-gray-400 hover:text-red-600 hover:bg-red-50 rounded transition-all cursor-pointer"
+                              title="Remove this perfume from combo"
+                            >
+                              <Trash2 className="w-4 h-4" />
+                            </button>
+                          )}
+                        </div>
+                      </div>
+
+                      {/* Dropdown Selector */}
+                      <div>
+                        <select
+                          value={item.productId}
+                          onChange={(e) => handleItemProductChange(item.id, e.target.value)}
+                          className="input text-xs font-medium bg-white"
+                          required
+                        >
+                          <option value="">Select a perfume / fragrance</option>
+                          {products.map((p) => (
+                            <option key={p._id} value={p._id}>
+                              {p.name} — SKU: {p.sku} (Available: {p.currentStock}{p.isSharedStock ? ' • Shared' : ''})
+                            </option>
+                          ))}
+                        </select>
+
+                        {/* Quick 1-tap product chips */}
+                        {products.length > 0 && (
+                          <div className="flex flex-wrap gap-1.5 pt-1.5">
+                            <span className="text-[10px] text-gray-400 self-center">Quick pick:</span>
+                            {products.slice(0, 8).map((p) => (
+                              <button
+                                key={p._id}
+                                type="button"
+                                onClick={() => handleItemProductChange(item.id, p._id)}
+                                className={`px-2 py-0.5 rounded text-[10px] font-medium border transition-all cursor-pointer ${
+                                  item.productId === p._id
+                                    ? 'bg-primary-50 border-primary-500 text-primary-700 font-bold ring-1 ring-primary-500'
+                                    : 'bg-white border-gray-200 text-gray-700 hover:bg-gray-100'
+                                }`}
+                              >
+                                {p.name} ({p.currentStock})
+                              </button>
+                            ))}
+                          </div>
+                        )}
+                      </div>
+
+                      {/* Quantity & Selling Price Inputs */}
+                      <div className="grid grid-cols-2 gap-3 pt-0.5">
+                        <div>
+                          <label className="font-semibold text-gray-600 block text-[11px] mb-1">
+                            Quantity for this Perfume:
+                          </label>
+                          <input
+                            type="number"
+                            min="1"
+                            value={item.quantity}
+                            onChange={(e) => handleItemQuantityChange(item.id, parseInt(e.target.value) || 1)}
+                            className="input text-xs font-bold bg-white"
+                            required
+                          />
+                        </div>
+
+                        <div>
+                          <label className="font-semibold text-gray-600 block text-[11px] mb-1">
+                            Selling Price (₹):
+                          </label>
+                          <input
+                            type="number"
+                            step="0.01"
+                            min="0"
+                            value={item.priceRupees}
+                            onChange={(e) => handleItemPriceChange(item.id, parseFloat(e.target.value) || 0)}
+                            className="input text-xs font-bold bg-white"
+                            required
+                          />
+                        </div>
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+
+              {/* Dashed button to add another perfume */}
+              <button
+                type="button"
+                onClick={handleAddComboItem}
+                className="w-full py-2.5 border-2 border-dashed border-purple-300 hover:border-purple-500 hover:bg-purple-50/60 text-purple-700 rounded-xl text-xs font-semibold flex items-center justify-center gap-1.5 transition-all cursor-pointer shadow-2xs"
+              >
+                <Plus className="w-4 h-4 text-purple-600" />
+                + Add Another Perfume / Fragrance (Combo)
+              </button>
+
+              {/* Combo summary bar */}
+              {comboItems.length > 1 && (
+                <div className="p-3 bg-purple-50 border border-purple-200 rounded-xl flex items-center justify-between text-xs text-purple-900 shadow-2xs">
+                  <div className="flex items-center gap-2">
+                    <Sparkles className="w-4 h-4 text-purple-600" />
+                    <span className="font-bold">Combo Pack Summary:</span>
+                    <span>{comboItems.length} Fragrances ({comboItems.reduce((acc, it) => acc + it.quantity, 0)} units total)</span>
+                  </div>
+                  <div className="font-bold">
+                    Total Order Value: {formatCurrency(comboItems.reduce((acc, it) => acc + rupeesToPaise(it.priceRupees * it.quantity), 0))}
+                  </div>
                 </div>
               )}
             </div>
 
-            {/* Quantity, Selling Price & Carrier */}
-            <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
-              <div>
-                <label className="font-semibold text-gray-700 block mb-1">Quantity:</label>
-                <input
-                  type="number"
-                  min="1"
-                  value={newOrderQty}
-                  onChange={(e) => setNewOrderQty(Math.max(1, parseInt(e.target.value) || 1))}
-                  className="input text-xs font-bold"
-                  required
-                />
-              </div>
-
-              <div>
-                <label className="font-semibold text-gray-700 block mb-1">Selling Price (₹):</label>
-                <input
-                  type="number"
-                  step="0.01"
-                  min="0"
-                  value={newOrderPriceRupees}
-                  onChange={(e) => setNewOrderPriceRupees(parseFloat(e.target.value) || 0)}
-                  className="input text-xs font-bold"
-                  required
-                />
-              </div>
-
+            {/* Carrier Name & Notes */}
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 pt-1">
               <div>
                 <label className="font-semibold text-gray-700 block mb-1">Carrier Name:</label>
                 <select
@@ -1038,18 +1256,17 @@ export const PackingDispatchPage: React.FC = () => {
                   <option value="Other">Other</option>
                 </select>
               </div>
-            </div>
 
-            {/* Notes */}
-            <div>
-              <label className="font-semibold text-gray-700 block mb-1">Order Notes (Optional):</label>
-              <input
-                type="text"
-                value={newOrderNotes}
-                onChange={(e) => setNewOrderNotes(e.target.value)}
-                placeholder="Operator remarks / shipping batch"
-                className="input text-xs"
-              />
+              <div>
+                <label className="font-semibold text-gray-700 block mb-1">Order Notes (Optional):</label>
+                <input
+                  type="text"
+                  value={newOrderNotes}
+                  onChange={(e) => setNewOrderNotes(e.target.value)}
+                  placeholder="Operator remarks / combo packaging notes"
+                  className="input text-xs"
+                />
+              </div>
             </div>
           </form>
         </Modal>

@@ -132,7 +132,7 @@ export const findOrderByScannedCode = async (
     isDeleted: false,
     internalQrCode: { $in: candidates },
     ...accountFilter,
-  }).populate('product').populate('businessAccount');
+  }).populate('product').populate('items.product').populate('businessAccount');
 
   if (order) return { order, matchedBy: 'internalQrCode' };
 
@@ -141,7 +141,7 @@ export const findOrderByScannedCode = async (
     isDeleted: false,
     shippingLabelId: { $in: candidates },
     ...accountFilter,
-  }).populate('product').populate('businessAccount');
+  }).populate('product').populate('items.product').populate('businessAccount');
 
   if (order) return { order, matchedBy: 'shippingLabelId' };
 
@@ -150,9 +150,18 @@ export const findOrderByScannedCode = async (
     isDeleted: false,
     meeshoOrderId: { $in: candidates },
     ...accountFilter,
-  }).populate('product').populate('businessAccount');
+  }).populate('product').populate('items.product').populate('businessAccount');
 
   if (order) return { order, matchedBy: 'meeshoOrderId' };
+
+  // 3b. Check subOrderId
+  order = await Order.findOne({
+    isDeleted: false,
+    subOrderId: { $in: candidates },
+    ...accountFilter,
+  }).populate('product').populate('items.product').populate('businessAccount');
+
+  if (order) return { order, matchedBy: 'subOrderId' };
 
   // 4. Check internal MongoDB _id if valid
   for (const cand of candidates) {
@@ -161,7 +170,7 @@ export const findOrderByScannedCode = async (
         _id: new mongoose.Types.ObjectId(cand),
         isDeleted: false,
         ...accountFilter,
-      }).populate('product').populate('businessAccount');
+      }).populate('product').populate('items.product').populate('businessAccount');
       if (order) return { order, matchedBy: '_id' };
     }
   }
@@ -173,6 +182,7 @@ export const findOrderByScannedCode = async (
       { internalQrCode: { $in: candidates } },
       { shippingLabelId: { $in: candidates } },
       { meeshoOrderId: { $in: candidates } },
+      { subOrderId: { $in: candidates } },
     ],
   }).populate('businessAccount');
 

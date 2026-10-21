@@ -10,6 +10,13 @@ export type OrderStatus =
   | 'rto_in_transit'
   | 'rto_received';
 
+export interface IOrderItem {
+  product: mongoose.Types.ObjectId;
+  sku: string;
+  quantity: number;
+  sellingPrice?: number; // paise
+}
+
 export interface IOrder extends Document {
   businessAccount: mongoose.Types.ObjectId;
   orderDate: Date;
@@ -20,6 +27,8 @@ export interface IOrder extends Document {
   internalQrCode?: string;  // Unique internal QR code e.g. PKG-ORD-...
   product: mongoose.Types.ObjectId;
   sku: string;
+  items?: IOrderItem[];     // Multiple perfumes for combo packages
+  isCombo?: boolean;        // True when multiple perfumes are packed in the same parcel
   sellingPrice: number;     // paise
   quantity: number;
   packedQuantity: number;
@@ -36,6 +45,13 @@ export interface IOrder extends Document {
   createdBy: mongoose.Types.ObjectId;
 }
 
+const orderItemSchema = new Schema<IOrderItem>({
+  product: { type: Schema.Types.ObjectId, ref: 'Product', required: true },
+  sku: { type: String, required: true, uppercase: true },
+  quantity: { type: Number, required: true, min: 1 },
+  sellingPrice: { type: Number, default: 0 },
+}, { _id: false });
+
 const orderSchema = new Schema<IOrder>({
   businessAccount: { type: Schema.Types.ObjectId, ref: 'BusinessAccount', required: true },
   orderDate: { type: Date, required: true },
@@ -46,6 +62,8 @@ const orderSchema = new Schema<IOrder>({
   internalQrCode: { type: String, trim: true },
   product: { type: Schema.Types.ObjectId, ref: 'Product', required: true },
   sku: { type: String, required: true, uppercase: true },
+  items: { type: [orderItemSchema], default: undefined },
+  isCombo: { type: Boolean, default: false },
   sellingPrice: { type: Number, required: true }, // paise
   quantity: { type: Number, required: true, min: 1 },
   packedQuantity: { type: Number, default: 0, min: 0 },

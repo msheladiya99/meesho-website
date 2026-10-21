@@ -35,6 +35,12 @@ var __importStar = (this && this.__importStar) || (function () {
 Object.defineProperty(exports, "__esModule", { value: true });
 exports.Order = void 0;
 const mongoose_1 = __importStar(require("mongoose"));
+const orderItemSchema = new mongoose_1.Schema({
+    product: { type: mongoose_1.Schema.Types.ObjectId, ref: 'Product', required: true },
+    sku: { type: String, required: true, uppercase: true },
+    quantity: { type: Number, required: true, min: 1 },
+    sellingPrice: { type: Number, default: 0 },
+}, { _id: false });
 const orderSchema = new mongoose_1.Schema({
     businessAccount: { type: mongoose_1.Schema.Types.ObjectId, ref: 'BusinessAccount', required: true },
     orderDate: { type: Date, required: true },
@@ -45,6 +51,8 @@ const orderSchema = new mongoose_1.Schema({
     internalQrCode: { type: String, trim: true },
     product: { type: mongoose_1.Schema.Types.ObjectId, ref: 'Product', required: true },
     sku: { type: String, required: true, uppercase: true },
+    items: { type: [orderItemSchema], default: undefined },
+    isCombo: { type: Boolean, default: false },
     sellingPrice: { type: Number, required: true }, // paise
     quantity: { type: Number, required: true, min: 1 },
     packedQuantity: { type: Number, default: 0, min: 0 },

@@ -80,6 +80,13 @@ export interface Vendor {
   isActive: boolean;
 }
 
+export interface OrderItem {
+  product: Product | string;
+  sku: string;
+  quantity: number;
+  sellingPrice?: number; // paise
+}
+
 // ─── Order ───────────────────────────────────────────────────────────────────
 export interface Order {
   _id: string;
@@ -92,6 +99,8 @@ export interface Order {
   internalQrCode?: string;
   product: Product | string;
   sku: string;
+  items?: OrderItem[];
+  isCombo?: boolean;
   sellingPrice: number; // paise
   quantity: number;
   packedQuantity?: number;

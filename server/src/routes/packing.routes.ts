@@ -91,7 +91,7 @@ router.post('/pack', requireManagerOrAdmin, enforceAccountAccess, async (req: Au
       return;
     }
 
-    const order = await Order.findById(orderId).populate('product').populate('businessAccount');
+    const order = await Order.findById(orderId).populate('product').populate('items.product').populate('businessAccount');
     if (!order || order.isDeleted) {
       res.status(404).json({ success: false, message: 'Order not found' });
       return;
@@ -154,21 +154,40 @@ router.post('/pack', requireManagerOrAdmin, enforceAccountAccess, async (req: Au
     const newPackedTotal = currentPacked + packQty;
     const newStatus = newPackedTotal >= order.quantity ? 'packed' : 'pending';
 
-    const packingTxId = generatePackingTransactionId();
-
-    // Create immutable packing record
-    const packingRecord = await PackingRecord.create({
-      transactionId: packingTxId,
-      businessAccount: order.businessAccount._id,
-      order: order._id,
-      product: (order.product as any)?._id || order.product,
-      sku: order.sku,
-      packedQuantity: packQty,
-      scannedCode: scannedCode || order.shippingLabelId || order.meeshoOrderId || order._id.toString(),
-      scanType,
-      operator: req.user?._id,
-      notes,
-    });
+    // Create immutable packing record(s)
+    let packingRecord;
+    if (order.items && order.items.length > 0) {
+      for (const it of order.items) {
+        const packingTxId = generatePackingTransactionId();
+        const rec = await PackingRecord.create({
+          transactionId: packingTxId,
+          businessAccount: order.businessAccount._id,
+          order: order._id,
+          product: (it.product as any)?._id || it.product,
+          sku: it.sku,
+          packedQuantity: it.quantity,
+          scannedCode: scannedCode || order.shippingLabelId || order.meeshoOrderId || order._id.toString(),
+          scanType,
+          operator: req.user?._id,
+          notes: notes || (order.isCombo ? `Combo item packed (${it.sku})` : undefined),
+        });
+        if (!packingRecord) packingRecord = rec;
+      }
+    } else {
+      const packingTxId = generatePackingTransactionId();
+      packingRecord = await PackingRecord.create({
+        transactionId: packingTxId,
+        businessAccount: order.businessAccount._id,
+        order: order._id,
+        product: (order.product as any)?._id || order.product,
+        sku: order.sku,
+        packedQuantity: packQty,
+        scannedCode: scannedCode || order.shippingLabelId || order.meeshoOrderId || order._id.toString(),
+        scanType,
+        operator: req.user?._id,
+        notes,
+      });
+    }
 
     // Update order
     order.packedQuantity = newPackedTotal;
@@ -180,12 +199,15 @@ router.post('/pack', requireManagerOrAdmin, enforceAccountAccess, async (req: Au
     await createAuditLog({
       action: 'UPDATE',
       resource: 'PackingRecord',
-      resourceId: packingRecord._id.toString(),
+      resourceId: packingRecord?._id?.toString() || order._id.toString(),
       userId: req.user?._id,
-      details: `Packed ${packQty} units of SKU ${order.sku} for order ${order.meeshoOrderId || order._id} (Tx: ${packingTxId})`,
+      details: `Packed ${packQty} units for order ${order.meeshoOrderId || order._id}`,
     });
 
-    const populated = await Order.findById(order._id).populate('product').populate('businessAccount');
+    const populated = await Order.findById(order._id)
+      .populate('product')
+      .populate('items.product')
+      .populate('businessAccount');
 
     res.json({
       success: true,
@@ -210,7 +232,7 @@ router.post('/dispatch', requireManagerOrAdmin, enforceAccountAccess, async (req
       return;
     }
 
-    const order = await Order.findById(orderId).populate('product').populate('businessAccount');
+    const order = await Order.findById(orderId).populate('product').populate('items.product').populate('businessAccount');
     if (!order || order.isDeleted) {
       res.status(404).json({ success: false, message: 'Order not found' });
       return;
@@ -311,7 +333,10 @@ router.post('/assign-label', requireManagerOrAdmin, enforceAccountAccess, async 
       details: `Assigned label ${order.shippingLabelId || ''} / internal QR ${order.internalQrCode} to order ${order.meeshoOrderId || order._id}`,
     });
 
-    const populated = await Order.findById(order._id).populate('product').populate('businessAccount');
+    const populated = await Order.findById(order._id)
+      .populate('product')
+      .populate('items.product')
+      .populate('businessAccount');
     res.json({ success: true, message: 'Shipping label / QR assigned successfully', data: populated });
   } catch (err) {
     res.status(500).json({ success: false, message: (err as Error).message });
@@ -397,6 +422,7 @@ router.get('/orders', enforceAccountAccess, async (req: AuthRequest, res: Respon
     const [orders, total] = await Promise.all([
       Order.find(filter)
         .populate('product', 'name sku currentStock')
+        .populate('items.product', 'name sku currentStock')
         .populate('businessAccount', 'name tradeName gstin')
         .populate('packedBy', 'name email')
         .populate('dispatchedBy', 'name email')

@@ -208,8 +208,27 @@ const OrdersPage: React.FC = () => {
                     <tr key={order._id}>
                       <td className="whitespace-nowrap">{formatDate(order.orderDate)}</td>
                       <td className="font-mono text-xs">{order.meeshoOrderId || '—'}</td>
-                      <td>{prod?.name || '—'}</td>
-                      <td className="font-mono text-xs">{order.sku}</td>
+                      <td>
+                        {order.isCombo && order.items && order.items.length > 0 ? (
+                          <div className="space-y-0.5">
+                            <div className="flex items-center gap-1">
+                              <span className="font-semibold text-gray-900 text-xs">Combo Pack</span>
+                              <span className="badge badge-purple text-[10px]">COMBO ({order.items.length})</span>
+                            </div>
+                            {order.items.map((it: any, idx: number) => {
+                              const itemProd = typeof it.product === 'object' ? it.product : null;
+                              return (
+                                <div key={idx} className="text-[11px] text-gray-500 truncate max-w-[200px]">
+                                  • {it.quantity}x {itemProd?.name || it.sku}
+                                </div>
+                              );
+                            })}
+                          </div>
+                        ) : (
+                          prod?.name || '—'
+                        )}
+                      </td>
+                      <td className="font-mono text-xs truncate max-w-[150px]" title={order.sku}>{order.sku}</td>
                       <td>{formatCurrency(order.sellingPrice)}</td>
                       <td>{order.quantity}</td>
                       <td className="font-semibold">{formatCurrency(order.grossAmount)}</td>

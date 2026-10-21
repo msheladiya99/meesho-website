@@ -41,7 +41,13 @@ router.get('/', enforceAccountAccess, async (req: AuthRequest, res: Response): P
 
     const skip = (parseInt(page) - 1) * parseInt(limit);
     const [orders, total] = await Promise.all([
-      Order.find(filter).populate('product', 'name sku sellingPrice category').populate('businessAccount', 'name tradeName gstin').sort({ orderDate: -1 }).skip(skip).limit(parseInt(limit)),
+      Order.find(filter)
+        .populate('product', 'name sku sellingPrice category')
+        .populate('items.product', 'name sku sellingPrice category')
+        .populate('businessAccount', 'name tradeName gstin')
+        .sort({ orderDate: -1 })
+        .skip(skip)
+        .limit(parseInt(limit)),
       Order.countDocuments(filter),
     ]);
 
@@ -54,7 +60,10 @@ router.get('/', enforceAccountAccess, async (req: AuthRequest, res: Response): P
 // GET /api/orders/:id
 router.get('/:id', async (req, res: Response): Promise<void> => {
   try {
-    const order = await Order.findById(req.params.id).populate('product').populate('businessAccount');
+    const order = await Order.findById(req.params.id)
+      .populate('product')
+      .populate('items.product')
+      .populate('businessAccount');
     if (!order || order.isDeleted) { res.status(404).json({ success: false, message: 'Order not found' }); return; }
     res.json({ success: true, data: order });
   } catch (err) {
@@ -68,107 +77,188 @@ router.post('/', requireManagerOrAdmin, enforceAccountAccess, async (req: AuthRe
     const {
       businessAccount, orderDate, meeshoOrderId, subOrderId, product: productId,
       sellingPrice, quantity, notes, status, shippingLabelId, carrierName,
+      items, // array of { product, quantity, sellingPrice, sku }
     } = req.body;
 
     if (!businessAccount) { res.status(400).json({ success: false, message: 'businessAccount is required' }); return; }
-    if (!productId) { res.status(400).json({ success: false, message: 'product is required' }); return; }
-    if (!quantity || quantity <= 0) { res.status(400).json({ success: false, message: 'quantity must be greater than 0' }); return; }
 
-    const product = await Product.findById(productId);
-    if (!product) { res.status(404).json({ success: false, message: 'Product not found' }); return; }
+    type OrderItemInput = {
+      product: string;
+      quantity: number;
+      sellingPrice?: number;
+      sku?: string;
+    };
 
-    const orderStatus = status || 'pending';
-    if (orderStatus !== 'cancelled') {
-      const account = await BusinessAccount.findById(businessAccount);
-      const { targetAccountIds, isSharedStock } = await resolveStockAccountIds(businessAccount);
-
-      const stockAgg = await StockMovement.aggregate([
-        {
-          $match: {
-            product: product._id,
-            businessAccount: { $in: targetAccountIds },
-            stockBucket: 'saleable',
-          }
-        },
-        {
-          $group: {
-            _id: null,
-            totalStock: { $sum: '$quantity' }
-          }
-        }
-      ]);
-
-      // STRICT: If no movements exist for this account (and shared stock is not checked), stock is 0.
-      const availableStock = stockAgg.length > 0 ? Math.max(0, stockAgg[0].totalStock) : 0;
-
-      if (availableStock < quantity) {
-        const accLabel = account?.tradeName || account?.name || 'this account';
-        const msg = isSharedStock
-          ? `Insufficient shared stock for "${product.name}". Available across shared accounts: ${availableStock}, Requested: ${quantity}`
-          : `Insufficient stock for "${product.name}" in account "${accLabel}". Available own stock: ${availableStock}, Requested: ${quantity}. (You can enable "Share Stock with other GST accounts" in GST Settings to use other account stock).`;
-        res.status(400).json({ success: false, message: msg });
-        return;
-      }
+    let inputItems: OrderItemInput[] = [];
+    if (Array.isArray(items) && items.length > 0) {
+      inputItems = items.map((it: any) => ({
+        product: (it.product || it.productId || '')?.toString(),
+        quantity: Math.max(1, parseInt(it.quantity, 10) || 1),
+        sellingPrice: it.sellingPrice !== undefined ? Number(it.sellingPrice) : undefined,
+        sku: it.sku,
+      })).filter((it: OrderItemInput) => Boolean(it.product));
+    } else if (productId) {
+      inputItems = [{
+        product: productId.toString(),
+        quantity: Math.max(1, parseInt(quantity, 10) || 1),
+        sellingPrice: sellingPrice !== undefined ? Number(sellingPrice) : undefined,
+      }];
     }
 
-    const grossAmount = sellingPrice * quantity;
+    if (inputItems.length === 0) {
+      res.status(400).json({ success: false, message: 'At least one product item is required' });
+      return;
+    }
+
+    const isCombo = inputItems.length > 1;
+    const account = await BusinessAccount.findById(businessAccount);
+    const { targetAccountIds, isSharedStock } = await resolveStockAccountIds(businessAccount);
+
+    const resolvedItems = [];
+    let totalQuantity = 0;
+    let totalGrossAmount = 0;
+    const orderStatus = status || 'pending';
+
+    for (const item of inputItems) {
+      const prod = await Product.findById(item.product);
+      if (!prod) {
+        res.status(404).json({ success: false, message: `Product ${item.product} not found` });
+        return;
+      }
+
+      const itemQty = item.quantity;
+      const itemPrice = item.sellingPrice !== undefined ? item.sellingPrice : (sellingPrice || prod.sellingPrice || 0);
+
+      // Validate stock if not cancelled
+      if (orderStatus !== 'cancelled') {
+        const stockAgg = await StockMovement.aggregate([
+          {
+            $match: {
+              product: prod._id,
+              businessAccount: { $in: targetAccountIds },
+              stockBucket: 'saleable',
+            }
+          },
+          {
+            $group: {
+              _id: null,
+              totalStock: { $sum: '$quantity' }
+            }
+          }
+        ]);
+
+        const availableStock = stockAgg.length > 0 ? Math.max(0, stockAgg[0].totalStock) : 0;
+        if (availableStock < itemQty) {
+          const accLabel = account?.tradeName || account?.name || 'this account';
+          const msg = isSharedStock
+            ? `Insufficient shared stock for "${prod.name}". Available across shared accounts: ${availableStock}, Requested: ${itemQty}`
+            : `Insufficient stock for "${prod.name}" in account "${accLabel}". Available own stock: ${availableStock}, Requested: ${itemQty}. (You can enable "Share Stock with other GST accounts" in GST Settings to use other account stock).`;
+          res.status(400).json({ success: false, message: msg });
+          return;
+        }
+      }
+
+      totalQuantity += itemQty;
+      totalGrossAmount += itemPrice * itemQty;
+
+      resolvedItems.push({
+        product: prod._id,
+        sku: prod.sku,
+        quantity: itemQty,
+        sellingPrice: itemPrice,
+        prodDoc: prod,
+      });
+    }
+
+    const mainProduct = resolvedItems[0];
+    const orderSku = isCombo
+      ? `COMBO (${resolvedItems.map(i => `${i.quantity}x ${i.sku}`).join(' + ')})`
+      : mainProduct.sku;
+    const finalSellingPrice = isCombo
+      ? Math.round(totalGrossAmount / (totalQuantity || 1))
+      : (mainProduct.sellingPrice || sellingPrice || 0);
+
     const tempId = new mongoose.Types.ObjectId();
-    const internalQrCode = generateInternalQrCode(tempId.toString(), product.sku);
+    const internalQrCode = generateInternalQrCode(tempId.toString(), mainProduct.sku);
 
     const order = await Order.create({
       _id: tempId,
-      businessAccount, orderDate, meeshoOrderId: meeshoOrderId || undefined,
+      businessAccount,
+      orderDate,
+      meeshoOrderId: meeshoOrderId || undefined,
       subOrderId: subOrderId || undefined,
       shippingLabelId: shippingLabelId || undefined,
       carrierName: carrierName || undefined,
       internalQrCode,
-      product: productId, sku: product.sku, sellingPrice, quantity, grossAmount,
-      status: orderStatus, notes, createdBy: req.user?._id,
-      packedQuantity: orderStatus === 'packed' ? quantity : 0,
+      product: mainProduct.product,
+      sku: orderSku,
+      sellingPrice: finalSellingPrice,
+      quantity: totalQuantity,
+      grossAmount: totalGrossAmount,
+      isCombo,
+      items: resolvedItems.map(i => ({
+        product: i.product,
+        sku: i.sku,
+        quantity: i.quantity,
+        sellingPrice: i.sellingPrice,
+      })),
+      status: orderStatus,
+      notes,
+      createdBy: req.user?._id,
+      packedQuantity: orderStatus === 'packed' ? totalQuantity : 0,
       packedAt: orderStatus === 'packed' ? new Date() : undefined,
       packedBy: orderStatus === 'packed' ? req.user?._id : undefined,
     });
 
     if (orderStatus === 'packed') {
       const dateStr = new Date().toISOString().slice(0, 10).replace(/-/g, '');
-      const rand = Math.random().toString(36).substring(2, 7).toUpperCase();
-      await PackingRecord.create({
-        transactionId: `PCK-${dateStr}-${rand}`,
-        businessAccount,
-        order: order._id,
-        product: productId,
-        sku: product.sku,
-        packedQuantity: quantity,
-        scannedCode: shippingLabelId || meeshoOrderId || internalQrCode,
-        scanType: shippingLabelId ? 'carrier_label' : meeshoOrderId ? 'meesho_order_id' : 'internal_qr',
-        operator: req.user?._id,
-        notes: notes || 'Auto-packed on order creation',
-      });
+      for (const item of resolvedItems) {
+        const rand = Math.random().toString(36).substring(2, 7).toUpperCase();
+        await PackingRecord.create({
+          transactionId: `PCK-${dateStr}-${rand}`,
+          businessAccount,
+          order: order._id,
+          product: item.product,
+          sku: item.sku,
+          packedQuantity: item.quantity,
+          scannedCode: shippingLabelId || meeshoOrderId || internalQrCode,
+          scanType: shippingLabelId ? 'carrier_label' : meeshoOrderId ? 'meesho_order_id' : 'internal_qr',
+          operator: req.user?._id,
+          notes: notes || (isCombo ? `Combo item packed on order creation (${item.sku})` : 'Auto-packed on order creation'),
+        });
+      }
     }
 
-    // Record stock deduction if not cancelled
+    // Record stock deduction for each product if not cancelled
     if (orderStatus !== 'cancelled') {
-      await recordStockMovement({
-        businessAccount,
-        productId,
-        movementType: 'sale',
-        quantity: -quantity,
-        unitCost: product.weightedAvgCost || product.defaultPurchaseCost,
-        referenceType: 'Order',
-        referenceId: order._id.toString(),
-        reason: `Order placed: ${meeshoOrderId || order._id}`,
-        createdBy: req.user?._id?.toString(),
-      });
+      for (const item of resolvedItems) {
+        await recordStockMovement({
+          businessAccount,
+          productId: item.product.toString(),
+          movementType: 'sale',
+          quantity: -item.quantity,
+          unitCost: item.prodDoc.weightedAvgCost || item.prodDoc.defaultPurchaseCost,
+          referenceType: 'Order',
+          referenceId: order._id.toString(),
+          reason: isCombo
+            ? `Combo order placed: ${meeshoOrderId || order._id} (${item.sku} x${item.quantity})`
+            : `Order placed: ${meeshoOrderId || order._id}`,
+          createdBy: req.user?._id?.toString(),
+        });
+      }
     }
 
-    await createAuditLog({ action: 'CREATE', resource: 'Order', resourceId: order._id.toString(), userId: req.user?._id?.toString(), details: `Order ${meeshoOrderId || order._id}` });
+    await createAuditLog({ action: 'CREATE', resource: 'Order', resourceId: order._id.toString(), userId: req.user?._id?.toString(), details: `Order ${meeshoOrderId || order._id}${isCombo ? ' (COMBO)' : ''}` });
 
-    const populated = await Order.findById(order._id).populate('product', 'name sku').populate('businessAccount', 'name gstin');
+    const populated = await Order.findById(order._id)
+      .populate('product', 'name sku')
+      .populate('items.product', 'name sku')
+      .populate('businessAccount', 'name gstin');
     res.status(201).json({ success: true, data: populated });
   } catch (err) {
     const msg = (err as Error).message;
     if (msg.includes('duplicate') || msg.includes('11000')) {
-      res.status(400).json({ success: false, message: 'This Meesho order ID already exists for this account' });
+      res.status(400).json({ success: false, message: 'This Meesho order ID or Shipping Label already exists for this account' });
     } else {
       res.status(400).json({ success: false, message: msg });
     }
@@ -190,25 +280,46 @@ router.put('/:id', requireManagerOrAdmin, enforceAccountAccess, async (req: Auth
     await reverseMovementsByReference(req.params.id as string, req.user?._id?.toString());
 
     const order = await Order.findByIdAndUpdate(req.params.id, req.body, { new: true, runValidators: true })
-      .populate('product', 'name sku').populate('businessAccount', 'name gstin');
+      .populate('product', 'name sku')
+      .populate('items.product', 'name sku')
+      .populate('businessAccount', 'name gstin');
 
     if (!order) { res.status(404).json({ success: false, message: 'Order not found' }); return; }
 
     // Re-record stock deduction if not cancelled
     if (order.status !== 'cancelled') {
-      const prod = await Product.findById(order.product);
-      if (prod) {
-        await recordStockMovement({
-          businessAccount: order.businessAccount.toString(),
-          productId: order.product.toString(),
-          movementType: 'sale',
-          quantity: -order.quantity,
-          unitCost: prod.weightedAvgCost || prod.defaultPurchaseCost,
-          referenceType: 'Order',
-          referenceId: order._id.toString(),
-          reason: `Order updated: ${order.meeshoOrderId || order._id}`,
-          createdBy: req.user?._id?.toString(),
-        });
+      if (order.items && order.items.length > 0) {
+        for (const it of order.items) {
+          const prod = await Product.findById(it.product);
+          if (prod) {
+            await recordStockMovement({
+              businessAccount: order.businessAccount.toString(),
+              productId: it.product.toString(),
+              movementType: 'sale',
+              quantity: -it.quantity,
+              unitCost: prod.weightedAvgCost || prod.defaultPurchaseCost,
+              referenceType: 'Order',
+              referenceId: order._id.toString(),
+              reason: `Order updated: ${order.meeshoOrderId || order._id} (${it.sku} x${it.quantity})`,
+              createdBy: req.user?._id?.toString(),
+            });
+          }
+        }
+      } else {
+        const prod = await Product.findById(order.product);
+        if (prod) {
+          await recordStockMovement({
+            businessAccount: order.businessAccount.toString(),
+            productId: order.product.toString(),
+            movementType: 'sale',
+            quantity: -order.quantity,
+            unitCost: prod.weightedAvgCost || prod.defaultPurchaseCost,
+            referenceType: 'Order',
+            referenceId: order._id.toString(),
+            reason: `Order updated: ${order.meeshoOrderId || order._id}`,
+            createdBy: req.user?._id?.toString(),
+          });
+        }
       }
     }
 

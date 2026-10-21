@@ -1,5 +1,11 @@
 import mongoose, { Document } from 'mongoose';
 export type OrderStatus = 'pending' | 'packed' | 'dispatched' | 'delivered' | 'cancelled' | 'returned' | 'rto_in_transit' | 'rto_received';
+export interface IOrderItem {
+    product: mongoose.Types.ObjectId;
+    sku: string;
+    quantity: number;
+    sellingPrice?: number;
+}
 export interface IOrder extends Document {
     businessAccount: mongoose.Types.ObjectId;
     orderDate: Date;
@@ -10,6 +16,8 @@ export interface IOrder extends Document {
     internalQrCode?: string;
     product: mongoose.Types.ObjectId;
     sku: string;
+    items?: IOrderItem[];
+    isCombo?: boolean;
     sellingPrice: number;
     quantity: number;
     packedQuantity: number;

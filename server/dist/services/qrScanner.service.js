@@ -124,7 +124,7 @@ const findOrderByScannedCode = async (rawInput, businessAccountId, userAllowedAc
         isDeleted: false,
         internalQrCode: { $in: candidates },
         ...accountFilter,
-    }).populate('product').populate('businessAccount');
+    }).populate('product').populate('items.product').populate('businessAccount');
     if (order)
         return { order, matchedBy: 'internalQrCode' };
     // 2. Check shippingLabelId (AWB or barcode)
@@ -132,7 +132,7 @@ const findOrderByScannedCode = async (rawInput, businessAccountId, userAllowedAc
         isDeleted: false,
         shippingLabelId: { $in: candidates },
         ...accountFilter,
-    }).populate('product').populate('businessAccount');
+    }).populate('product').populate('items.product').populate('businessAccount');
     if (order)
         return { order, matchedBy: 'shippingLabelId' };
     // 3. Check meeshoOrderId
@@ -140,9 +140,17 @@ const findOrderByScannedCode = async (rawInput, businessAccountId, userAllowedAc
         isDeleted: false,
         meeshoOrderId: { $in: candidates },
         ...accountFilter,
-    }).populate('product').populate('businessAccount');
+    }).populate('product').populate('items.product').populate('businessAccount');
     if (order)
         return { order, matchedBy: 'meeshoOrderId' };
+    // 3b. Check subOrderId
+    order = await Order_1.Order.findOne({
+        isDeleted: false,
+        subOrderId: { $in: candidates },
+        ...accountFilter,
+    }).populate('product').populate('items.product').populate('businessAccount');
+    if (order)
+        return { order, matchedBy: 'subOrderId' };
     // 4. Check internal MongoDB _id if valid
     for (const cand of candidates) {
         if (mongoose_1.default.Types.ObjectId.isValid(cand) && cand.length === 24) {
@@ -150,7 +158,7 @@ const findOrderByScannedCode = async (rawInput, businessAccountId, userAllowedAc
                 _id: new mongoose_1.default.Types.ObjectId(cand),
                 isDeleted: false,
                 ...accountFilter,
-            }).populate('product').populate('businessAccount');
+            }).populate('product').populate('items.product').populate('businessAccount');
             if (order)
                 return { order, matchedBy: '_id' };
         }
@@ -162,6 +170,7 @@ const findOrderByScannedCode = async (rawInput, businessAccountId, userAllowedAc
             { internalQrCode: { $in: candidates } },
             { shippingLabelId: { $in: candidates } },
             { meeshoOrderId: { $in: candidates } },
+            { subOrderId: { $in: candidates } },
         ],
     }).populate('businessAccount');
     if (orderInOtherAccount) {
