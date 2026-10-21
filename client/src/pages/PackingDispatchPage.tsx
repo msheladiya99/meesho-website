@@ -238,7 +238,7 @@ export const PackingDispatchPage: React.FC = () => {
     const payload: any = {
       businessAccount: newOrderAccountId,
       orderDate: newOrderDate,
-      meeshoOrderId: newOrderCode.trim() || undefined,
+      meeshoOrderId: newOrderCode.trim() || newOrderSubOrderId.trim() || undefined,
       subOrderId: newOrderSubOrderId.trim() || undefined,
       shippingLabelId: newOrderCode.trim() || undefined,
       carrierName: newOrderCarrier,

@@ -84,21 +84,21 @@ const orderSchema = new mongoose_1.Schema({
 // Prevent duplicate Meesho order IDs within the same business account
 orderSchema.index({ businessAccount: 1, meeshoOrderId: 1 }, {
     unique: true,
-    partialFilterExpression: { meeshoOrderId: { $exists: true, $ne: null }, isDeleted: false },
+    partialFilterExpression: { meeshoOrderId: { $type: 'string', $gt: '' }, isDeleted: false },
 });
 // Index for shipping label and internal QR lookup
 orderSchema.index({ businessAccount: 1, shippingLabelId: 1 }, {
     unique: true,
-    partialFilterExpression: { shippingLabelId: { $exists: true, $ne: null }, isDeleted: false },
+    partialFilterExpression: { shippingLabelId: { $type: 'string', $gt: '' }, isDeleted: false },
 });
-// Index for Sub Order ID lookup (used when shipping label is unavailable)
-orderSchema.index({ businessAccount: 1, subOrderId: 1 }, {
+// Index for Sub Order ID (globally unique across active orders so same sub-order ID cannot be repeated)
+orderSchema.index({ subOrderId: 1 }, {
     unique: true,
-    partialFilterExpression: { subOrderId: { $exists: true, $ne: null }, isDeleted: false },
+    partialFilterExpression: { subOrderId: { $type: 'string', $gt: '' }, isDeleted: false },
 });
 orderSchema.index({ internalQrCode: 1 }, {
     unique: true,
-    partialFilterExpression: { internalQrCode: { $exists: true, $ne: null } },
+    partialFilterExpression: { internalQrCode: { $type: 'string', $gt: '' } },
 });
 orderSchema.index({ businessAccount: 1, orderDate: -1 });
 orderSchema.index({ businessAccount: 1, status: 1 });

@@ -116,6 +116,8 @@ const OrdersPage: React.FC = () => {
   const onSubmit = (formData: FormData) => {
     const payload = {
       ...formData,
+      meeshoOrderId: formData.meeshoOrderId?.trim() || undefined,
+      subOrderId: formData.subOrderId?.trim() || undefined,
       sellingPrice: rupeesToPaise(formData.sellingPrice),
       grossAmount: rupeesToPaise(formData.sellingPrice * formData.quantity),
       businessAccount: activeAccountId === 'all' ? undefined : activeAccountId,

@@ -82,6 +82,61 @@ router.post('/', requireManagerOrAdmin, enforceAccountAccess, async (req: AuthRe
 
     if (!businessAccount) { res.status(400).json({ success: false, message: 'businessAccount is required' }); return; }
 
+    const cleanSubOrderId = typeof subOrderId === 'string' && subOrderId.trim() ? subOrderId.trim() : undefined;
+    const cleanMeeshoOrderId = typeof meeshoOrderId === 'string' && meeshoOrderId.trim() ? meeshoOrderId.trim() : undefined;
+    const cleanShippingLabelId = typeof shippingLabelId === 'string' && shippingLabelId.trim() ? shippingLabelId.trim() : undefined;
+
+    // 1. Strict Duplicate Check: Sub Order ID cannot be repeated across orders
+    if (cleanSubOrderId) {
+      const existingSubOrder = await Order.findOne({
+        isDeleted: false,
+        subOrderId: cleanSubOrderId,
+      }).populate('businessAccount');
+
+      if (existingSubOrder) {
+        const isSameAccount = existingSubOrder.businessAccount?._id?.toString() === businessAccount.toString();
+        const acc = existingSubOrder.businessAccount as any;
+        const accName = acc?.tradeName || acc?.name || 'this account';
+        const msg = isSameAccount
+          ? `Sub Order ID "${cleanSubOrderId}" already exists in this account. Duplicate orders are not allowed.`
+          : `Sub Order ID "${cleanSubOrderId}" already exists in account "${accName}". Duplicate orders are not allowed.`;
+        res.status(400).json({ success: false, message: msg });
+        return;
+      }
+    }
+
+    // 2. Strict Duplicate Check: Meesho Order ID within same account
+    if (cleanMeeshoOrderId) {
+      const existingMeeshoOrder = await Order.findOne({
+        isDeleted: false,
+        businessAccount,
+        meeshoOrderId: cleanMeeshoOrderId,
+      });
+      if (existingMeeshoOrder) {
+        res.status(400).json({
+          success: false,
+          message: `Meesho Order ID "${cleanMeeshoOrderId}" already exists for this account. Duplicate orders are not allowed.`,
+        });
+        return;
+      }
+    }
+
+    // 3. Strict Duplicate Check: Shipping Label ID within same account
+    if (cleanShippingLabelId) {
+      const existingLabelOrder = await Order.findOne({
+        isDeleted: false,
+        businessAccount,
+        shippingLabelId: cleanShippingLabelId,
+      });
+      if (existingLabelOrder) {
+        res.status(400).json({
+          success: false,
+          message: `Shipping Label "${cleanShippingLabelId}" already exists for this account. Duplicate orders are not allowed.`,
+        });
+        return;
+      }
+    }
+
     type OrderItemInput = {
       product: string;
       quantity: number;
@@ -185,9 +240,9 @@ router.post('/', requireManagerOrAdmin, enforceAccountAccess, async (req: AuthRe
       _id: tempId,
       businessAccount,
       orderDate,
-      meeshoOrderId: meeshoOrderId || undefined,
-      subOrderId: subOrderId || undefined,
-      shippingLabelId: shippingLabelId || undefined,
+      meeshoOrderId: cleanMeeshoOrderId,
+      subOrderId: cleanSubOrderId,
+      shippingLabelId: cleanShippingLabelId,
       carrierName: carrierName || undefined,
       internalQrCode,
       product: mainProduct.product,
@@ -221,8 +276,8 @@ router.post('/', requireManagerOrAdmin, enforceAccountAccess, async (req: AuthRe
           product: item.product,
           sku: item.sku,
           packedQuantity: item.quantity,
-          scannedCode: shippingLabelId || meeshoOrderId || internalQrCode,
-          scanType: shippingLabelId ? 'carrier_label' : meeshoOrderId ? 'meesho_order_id' : 'internal_qr',
+          scannedCode: cleanShippingLabelId || cleanMeeshoOrderId || cleanSubOrderId || internalQrCode,
+          scanType: cleanShippingLabelId ? 'carrier_label' : cleanMeeshoOrderId ? 'meesho_order_id' : 'internal_qr',
           operator: req.user?._id,
           notes: notes || (isCombo ? `Combo item packed on order creation (${item.sku})` : 'Auto-packed on order creation'),
         });
@@ -241,14 +296,14 @@ router.post('/', requireManagerOrAdmin, enforceAccountAccess, async (req: AuthRe
           referenceType: 'Order',
           referenceId: order._id.toString(),
           reason: isCombo
-            ? `Combo order placed: ${meeshoOrderId || order._id} (${item.sku} x${item.quantity})`
-            : `Order placed: ${meeshoOrderId || order._id}`,
+            ? `Combo order placed: ${cleanMeeshoOrderId || cleanSubOrderId || order._id} (${item.sku} x${item.quantity})`
+            : `Order placed: ${cleanMeeshoOrderId || cleanSubOrderId || order._id}`,
           createdBy: req.user?._id?.toString(),
         });
       }
     }
 
-    await createAuditLog({ action: 'CREATE', resource: 'Order', resourceId: order._id.toString(), userId: req.user?._id?.toString(), details: `Order ${meeshoOrderId || order._id}${isCombo ? ' (COMBO)' : ''}` });
+    await createAuditLog({ action: 'CREATE', resource: 'Order', resourceId: order._id.toString(), userId: req.user?._id?.toString(), details: `Order ${cleanMeeshoOrderId || cleanSubOrderId || order._id}${isCombo ? ' (COMBO)' : ''}` });
 
     const populated = await Order.findById(order._id)
       .populate('product', 'name sku')
@@ -258,7 +313,13 @@ router.post('/', requireManagerOrAdmin, enforceAccountAccess, async (req: AuthRe
   } catch (err) {
     const msg = (err as Error).message;
     if (msg.includes('duplicate') || msg.includes('11000')) {
-      res.status(400).json({ success: false, message: 'This Meesho order ID or Shipping Label already exists for this account' });
+      if (msg.includes('subOrderId')) {
+        res.status(400).json({ success: false, message: 'This Sub Order ID already exists. Duplicate orders are not allowed.' });
+      } else if (msg.includes('shippingLabelId')) {
+        res.status(400).json({ success: false, message: 'This Shipping Label already exists for this account.' });
+      } else {
+        res.status(400).json({ success: false, message: 'This Meesho Order ID already exists for this account.' });
+      }
     } else {
       res.status(400).json({ success: false, message: msg });
     }
@@ -271,9 +332,70 @@ router.put('/:id', requireManagerOrAdmin, enforceAccountAccess, async (req: Auth
     const existing = await Order.findById(req.params.id);
     if (!existing || existing.isDeleted) { res.status(404).json({ success: false, message: 'Order not found' }); return; }
 
-    const { sellingPrice, quantity } = req.body;
+    const { sellingPrice, quantity, subOrderId, meeshoOrderId, shippingLabelId } = req.body;
     if (sellingPrice && quantity) {
       req.body.grossAmount = sellingPrice * quantity;
+    }
+
+    if (subOrderId !== undefined) {
+      const cleanSub = typeof subOrderId === 'string' && subOrderId.trim() ? subOrderId.trim() : undefined;
+      req.body.subOrderId = cleanSub;
+      if (cleanSub) {
+        const duplicateSub = await Order.findOne({
+          _id: { $ne: req.params.id },
+          isDeleted: false,
+          subOrderId: cleanSub,
+        }).populate('businessAccount');
+        if (duplicateSub) {
+          const acc = duplicateSub.businessAccount as any;
+          const accName = acc?.tradeName || acc?.name || 'an account';
+          res.status(400).json({
+            success: false,
+            message: `Sub Order ID "${cleanSub}" already exists in ${accName}. Cannot use duplicate Sub Order ID.`,
+          });
+          return;
+        }
+      }
+    }
+
+    if (shippingLabelId !== undefined) {
+      const cleanLabel = typeof shippingLabelId === 'string' && shippingLabelId.trim() ? shippingLabelId.trim() : undefined;
+      req.body.shippingLabelId = cleanLabel;
+      if (cleanLabel) {
+        const duplicateLabel = await Order.findOne({
+          _id: { $ne: req.params.id },
+          isDeleted: false,
+          businessAccount: existing.businessAccount,
+          shippingLabelId: cleanLabel,
+        });
+        if (duplicateLabel) {
+          res.status(400).json({
+            success: false,
+            message: `Shipping Label "${cleanLabel}" already exists in this account. Cannot use duplicate Shipping Label.`,
+          });
+          return;
+        }
+      }
+    }
+
+    if (meeshoOrderId !== undefined) {
+      const cleanMeesho = typeof meeshoOrderId === 'string' && meeshoOrderId.trim() ? meeshoOrderId.trim() : undefined;
+      req.body.meeshoOrderId = cleanMeesho;
+      if (cleanMeesho) {
+        const duplicateMeesho = await Order.findOne({
+          _id: { $ne: req.params.id },
+          isDeleted: false,
+          businessAccount: existing.businessAccount,
+          meeshoOrderId: cleanMeesho,
+        });
+        if (duplicateMeesho) {
+          res.status(400).json({
+            success: false,
+            message: `Meesho Order ID "${cleanMeesho}" already exists in this account. Cannot use duplicate Meesho Order ID.`,
+          });
+          return;
+        }
+      }
     }
 
     // Reverse old stock movements for this order
@@ -330,7 +452,18 @@ router.put('/:id', requireManagerOrAdmin, enforceAccountAccess, async (req: Auth
 
     res.json({ success: true, data: order });
   } catch (err) {
-    res.status(400).json({ success: false, message: (err as Error).message });
+    const msg = (err as Error).message;
+    if (msg.includes('duplicate') || msg.includes('11000')) {
+      if (msg.includes('subOrderId')) {
+        res.status(400).json({ success: false, message: 'This Sub Order ID already exists. Duplicate orders are not allowed.' });
+      } else if (msg.includes('shippingLabelId')) {
+        res.status(400).json({ success: false, message: 'This Shipping Label already exists for this account.' });
+      } else {
+        res.status(400).json({ success: false, message: 'This Meesho Order ID already exists for this account.' });
+      }
+    } else {
+      res.status(400).json({ success: false, message: msg });
+    }
   }
 });
 
