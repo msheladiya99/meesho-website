@@ -193,14 +193,30 @@ export const PackingDispatchPage: React.FC = () => {
 
       const created = res.data.data;
       toast.success(newOrderAutoPack ? '🎉 Order created & marked as PACKED!' : 'Order created successfully!');
+      
+      // Close modal immediately and cleanly reset modal form state
       setIsQuickOrderOpen(false);
       setScanInput('');
       setLookupError(null);
+      setNewOrderCode('');
+      setNewOrderSubOrderId('');
+      setNewOrderNotes('');
 
-      // Automatically look up the newly created order
-      const codeToLookup = newOrderCode || created.meeshoOrderId || created.shippingLabelId || created._id;
-      if (codeToLookup) {
-        lookupMutation.mutate(codeToLookup);
+      // Directly display the created order in activeLookup without making a redundant lookup request
+      if (created) {
+        const isPacked = newOrderAutoPack || created.status === 'packed';
+        const packedQty = isPacked ? created.quantity : (created.packedQuantity || 0);
+        const remainingQty = Math.max(0, created.quantity - packedQty);
+
+        setActiveLookup({
+          order: created,
+          matchedBy: created.shippingLabelId ? 'shippingLabelId' : (created.subOrderId ? 'subOrderId' : 'meeshoOrderId'),
+          orderedQuantity: created.quantity,
+          previouslyPacked: packedQty,
+          remainingQuantity: remainingQty,
+          isFullyPacked: remainingQty === 0,
+        });
+        setPackQuantity(remainingQty > 0 ? remainingQty : 1);
       }
     },
     onError: (err: any) => {
@@ -274,13 +290,18 @@ export const PackingDispatchPage: React.FC = () => {
       setLookupError(msg);
       setActiveLookup(null);
 
-      // Directly open Quick Add Order popup with the fresh scanned code prefilled!
+      // Only open quick order modal if it's truly an unrecognised barcode and not a wrong-account error
+      const isWrongAccount = msg.toLowerCase().includes('belongs to');
       const targetCode = (variables || scanInput).trim();
-      handleOpenQuickOrder(targetCode);
-      toast('📦 Fresh QR detected! Select product to create & pack.', {
-        icon: '✨',
-        duration: 4000,
-      });
+      if (!isWrongAccount && targetCode) {
+        handleOpenQuickOrder(targetCode);
+        toast('📦 Fresh QR detected! Select product to create & pack.', {
+          icon: '✨',
+          duration: 4000,
+        });
+      } else if (isWrongAccount) {
+        toast.error(msg);
+      }
     },
   });
 
