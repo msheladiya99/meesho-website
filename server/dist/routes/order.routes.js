@@ -390,15 +390,17 @@ router.put('/:id', auth_1.requireManagerOrAdmin, auth_1.enforceAccountAccess, as
             res.status(404).json({ success: false, message: 'Order not found' });
             return;
         }
+        const businessAccountId = order.businessAccount?._id?.toString() || order.businessAccount?.toString();
         // Re-record stock deduction if not cancelled
         if (order.status !== 'cancelled') {
             if (order.items && order.items.length > 0) {
                 for (const it of order.items) {
-                    const prod = await Product_1.Product.findById(it.product);
+                    const targetProdId = it.product?._id?.toString() || it.product?.toString();
+                    const prod = await Product_1.Product.findById(targetProdId);
                     if (prod) {
                         await (0, inventory_service_1.recordStockMovement)({
-                            businessAccount: order.businessAccount.toString(),
-                            productId: it.product.toString(),
+                            businessAccount: businessAccountId,
+                            productId: targetProdId,
                             movementType: 'sale',
                             quantity: -it.quantity,
                             unitCost: prod.weightedAvgCost || prod.defaultPurchaseCost,
@@ -411,11 +413,12 @@ router.put('/:id', auth_1.requireManagerOrAdmin, auth_1.enforceAccountAccess, as
                 }
             }
             else {
-                const prod = await Product_1.Product.findById(order.product);
+                const targetProdId = order.product?._id?.toString() || order.product?.toString();
+                const prod = await Product_1.Product.findById(targetProdId);
                 if (prod) {
                     await (0, inventory_service_1.recordStockMovement)({
-                        businessAccount: order.businessAccount.toString(),
-                        productId: order.product.toString(),
+                        businessAccount: businessAccountId,
+                        productId: targetProdId,
                         movementType: 'sale',
                         quantity: -order.quantity,
                         unitCost: prod.weightedAvgCost || prod.defaultPurchaseCost,

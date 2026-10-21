@@ -415,15 +415,18 @@ router.put('/:id', requireManagerOrAdmin, enforceAccountAccess, async (req: Auth
 
     if (!order) { res.status(404).json({ success: false, message: 'Order not found' }); return; }
 
+    const businessAccountId = (order.businessAccount as any)?._id?.toString() || order.businessAccount?.toString();
+
     // Re-record stock deduction if not cancelled
     if (order.status !== 'cancelled') {
       if (order.items && order.items.length > 0) {
         for (const it of order.items) {
-          const prod = await Product.findById(it.product);
+          const targetProdId = (it.product as any)?._id?.toString() || it.product?.toString();
+          const prod = await Product.findById(targetProdId);
           if (prod) {
             await recordStockMovement({
-              businessAccount: order.businessAccount.toString(),
-              productId: it.product.toString(),
+              businessAccount: businessAccountId,
+              productId: targetProdId,
               movementType: 'sale',
               quantity: -it.quantity,
               unitCost: prod.weightedAvgCost || prod.defaultPurchaseCost,
@@ -435,11 +438,12 @@ router.put('/:id', requireManagerOrAdmin, enforceAccountAccess, async (req: Auth
           }
         }
       } else {
-        const prod = await Product.findById(order.product);
+        const targetProdId = (order.product as any)?._id?.toString() || order.product?.toString();
+        const prod = await Product.findById(targetProdId);
         if (prod) {
           await recordStockMovement({
-            businessAccount: order.businessAccount.toString(),
-            productId: order.product.toString(),
+            businessAccount: businessAccountId,
+            productId: targetProdId,
             movementType: 'sale',
             quantity: -order.quantity,
             unitCost: prod.weightedAvgCost || prod.defaultPurchaseCost,

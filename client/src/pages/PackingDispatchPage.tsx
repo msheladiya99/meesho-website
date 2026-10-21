@@ -190,6 +190,7 @@ export const PackingDispatchPage: React.FC = () => {
       qc.invalidateQueries({ queryKey: ['orders'] });
       qc.invalidateQueries({ queryKey: ['dashboard'] });
       qc.invalidateQueries({ queryKey: ['products'] });
+      qc.invalidateQueries({ queryKey: ['inventory'] });
 
       const created = res.data.data;
       toast.success(newOrderAutoPack ? '🎉 Order created & marked as PACKED!' : 'Order created successfully!');
@@ -322,6 +323,8 @@ export const PackingDispatchPage: React.FC = () => {
       qc.invalidateQueries({ queryKey: ['packing-orders'] });
       qc.invalidateQueries({ queryKey: ['orders'] });
       qc.invalidateQueries({ queryKey: ['dashboard'] });
+      qc.invalidateQueries({ queryKey: ['products'] });
+      qc.invalidateQueries({ queryKey: ['inventory'] });
 
       toast.success(res.data.message || 'Order successfully packed!');
       setActiveLookup(null);
