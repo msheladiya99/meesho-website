@@ -34,6 +34,7 @@ export const PackingDispatchPage: React.FC = () => {
   // Quick Add Order from Scan state
   const [isQuickOrderOpen, setIsQuickOrderOpen] = useState(false);
   const [newOrderCode, setNewOrderCode] = useState('');
+  const [newOrderSubOrderId, setNewOrderSubOrderId] = useState('');
   const [newOrderAccountId, setNewOrderAccountId] = useState('');
   const [newOrderProductId, setNewOrderProductId] = useState('');
   const [newOrderQty, setNewOrderQty] = useState(1);
@@ -112,6 +113,7 @@ export const PackingDispatchPage: React.FC = () => {
       setNewOrderPriceRupees(paiseToRupees(targetProd.sellingPrice || 0));
     }
     setNewOrderQty(1);
+    setNewOrderSubOrderId('');
     setNewOrderCarrier('Shadowfax');
     setNewOrderNotes('');
     setNewOrderAutoPack(true);
@@ -174,6 +176,7 @@ export const PackingDispatchPage: React.FC = () => {
       businessAccount: newOrderAccountId,
       orderDate: new Date(),
       meeshoOrderId: newOrderCode.trim() || undefined,
+      subOrderId: newOrderSubOrderId.trim() || undefined,
       shippingLabelId: newOrderCode.trim() || undefined,
       carrierName: newOrderCarrier,
       product: newOrderProductId,
@@ -872,7 +875,6 @@ export const PackingDispatchPage: React.FC = () => {
                   onChange={(e) => setNewOrderCode(e.target.value)}
                   placeholder="e.g. 811709477610"
                   className="input font-mono text-xs font-semibold bg-gray-50 border-primary-200"
-                  required
                 />
               </div>
 
@@ -894,6 +896,23 @@ export const PackingDispatchPage: React.FC = () => {
                   ))}
                 </select>
               </div>
+            </div>
+
+            {/* Sub Order ID — shown when shipping label is not available */}
+            <div className="p-3 rounded-xl border border-dashed border-amber-300 bg-amber-50 space-y-1.5">
+              <label className="font-semibold text-amber-800 block text-[11px] uppercase tracking-wide">
+                📦 No Shipping Label? Enter Sub Order ID Instead:
+              </label>
+              <input
+                type="text"
+                value={newOrderSubOrderId}
+                onChange={(e) => setNewOrderSubOrderId(e.target.value)}
+                placeholder="e.g. Meesho Sub Order ID"
+                className="input font-mono text-xs bg-white border-amber-200 focus:border-amber-400"
+              />
+              <p className="text-[10px] text-amber-600">
+                Use the Meesho Sub Order ID as an alternative identifier when the carrier shipping label is not yet available.
+              </p>
             </div>
 
             {/* Product selection */}

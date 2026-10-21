@@ -18,6 +18,7 @@ import type { DateRange, Order } from '../types';
 const schema = z.object({
   orderDate: z.string().min(1, 'Required'),
   meeshoOrderId: z.string().optional(),
+  subOrderId: z.string().optional(),
   product: z.string().min(1, 'Required'),
   sellingPrice: z.number().positive('Must be positive'),
   quantity: z.number().int().positive('Must be positive'),
@@ -131,6 +132,7 @@ const OrdersPage: React.FC = () => {
     reset({
       orderDate: order.orderDate.split('T')[0],
       meeshoOrderId: order.meeshoOrderId,
+      subOrderId: order.subOrderId,
       product: typeof order.product === 'string' ? order.product : order.product._id,
       sellingPrice: paiseToRupees(order.sellingPrice),
       quantity: order.quantity,
@@ -276,6 +278,17 @@ const OrdersPage: React.FC = () => {
               <label className="label">Meesho Order ID</label>
               <input {...register('meeshoOrderId')} className="input" placeholder="Optional" />
             </div>
+          </div>
+
+          <div>
+            <label className="label">Sub Order ID
+              <span className="ml-1.5 text-[10px] font-normal text-gray-400">(Use when shipping label is not available)</span>
+            </label>
+            <input
+              {...register('subOrderId')}
+              className="input font-mono"
+              placeholder="e.g. Meesho sub-order ID"
+            />
           </div>
 
           <div>

@@ -30,6 +30,7 @@ router.get('/', enforceAccountAccess, async (req: AuthRequest, res: Response): P
     if (search) {
       filter.$or = [
         { meeshoOrderId: { $regex: search, $options: 'i' } },
+        { subOrderId: { $regex: search, $options: 'i' } },
         { shippingLabelId: { $regex: search, $options: 'i' } },
         { internalQrCode: { $regex: search, $options: 'i' } },
         { sku: { $regex: search, $options: 'i' } },
@@ -63,7 +64,7 @@ router.get('/:id', async (req, res: Response): Promise<void> => {
 router.post('/', requireManagerOrAdmin, enforceAccountAccess, async (req: AuthRequest, res: Response): Promise<void> => {
   try {
     const {
-      businessAccount, orderDate, meeshoOrderId, product: productId,
+      businessAccount, orderDate, meeshoOrderId, subOrderId, product: productId,
       sellingPrice, quantity, notes, status, shippingLabelId, carrierName,
     } = req.body;
 
@@ -90,6 +91,7 @@ router.post('/', requireManagerOrAdmin, enforceAccountAccess, async (req: AuthRe
     const order = await Order.create({
       _id: tempId,
       businessAccount, orderDate, meeshoOrderId: meeshoOrderId || undefined,
+      subOrderId: subOrderId || undefined,
       shippingLabelId: shippingLabelId || undefined,
       carrierName: carrierName || undefined,
       internalQrCode,

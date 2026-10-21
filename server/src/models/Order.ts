@@ -14,6 +14,7 @@ export interface IOrder extends Document {
   businessAccount: mongoose.Types.ObjectId;
   orderDate: Date;
   meeshoOrderId?: string;
+  subOrderId?: string;      // Meesho Sub Order ID (alternative when shipping label not available)
   shippingLabelId?: string; // Carrier AWB or barcode identifier from label
   carrierName?: string;     // e.g. Shadowfax, Delhivery, Xpressbees, Ecom Express
   internalQrCode?: string;  // Unique internal QR code e.g. PKG-ORD-...
@@ -39,6 +40,7 @@ const orderSchema = new Schema<IOrder>({
   businessAccount: { type: Schema.Types.ObjectId, ref: 'BusinessAccount', required: true },
   orderDate: { type: Date, required: true },
   meeshoOrderId: { type: String, trim: true },
+  subOrderId: { type: String, trim: true },
   shippingLabelId: { type: String, trim: true },
   carrierName: { type: String, trim: true },
   internalQrCode: { type: String, trim: true },
@@ -83,6 +85,11 @@ orderSchema.index({ businessAccount: 1, meeshoOrderId: 1 }, {
 orderSchema.index({ businessAccount: 1, shippingLabelId: 1 }, {
   unique: true,
   partialFilterExpression: { shippingLabelId: { $exists: true, $ne: null }, isDeleted: false },
+});
+// Index for Sub Order ID lookup (used when shipping label is unavailable)
+orderSchema.index({ businessAccount: 1, subOrderId: 1 }, {
+  unique: true,
+  partialFilterExpression: { subOrderId: { $exists: true, $ne: null }, isDeleted: false },
 });
 orderSchema.index({ internalQrCode: 1 }, {
   unique: true,

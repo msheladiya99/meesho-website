@@ -82,6 +82,7 @@ export interface Order {
   businessAccount: BusinessAccount | string;
   orderDate: string;
   meeshoOrderId?: string;
+  subOrderId?: string;       // Meesho Sub Order ID (used when shipping label is not available)
   shippingLabelId?: string;
   carrierName?: string;
   internalQrCode?: string;
