@@ -1,33 +1,31 @@
 import React, { useState, useMemo, useRef } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import {
-  Plus, Edit2, Trash2, TruckIcon, X, Search, Eye,
-  ChevronDown, ChevronUp, Package, CreditCard, ShoppingBag,
-  Calendar, AlertCircle, CheckCircle2, Receipt, Loader2
+  Plus, Edit2, Trash2, TruckIcon, Search, Eye,
+  Package, CreditCard, Calendar, AlertCircle, Loader2
 } from 'lucide-react';
 import { useForm } from 'react-hook-form';
-import { z } from 'zod';
-import { stockPurchasesApi, vendorsApi, productsApi, categoriesApi } from '../services/inventory.service';
+import { stockPurchasesApi, vendorsApi } from '../services/inventory.service';
 import { useAccountStore } from '../store/accountStore';
 import { formatCurrency, formatDate, rupeesToPaise, paiseToRupees, dateRangePresets } from '../lib/utils';
 import DateRangePicker from '../components/ui/DateRangePicker';
 import Modal from '../components/ui/Modal';
 import { EmptyState, LoadingSpinner, ConfirmDialog } from '../components/ui/Feedback';
 import toast from 'react-hot-toast';
-import type { DateRange, StockPurchase, Vendor, Product, Category } from '../types';
+import type { DateRange, StockPurchase, Vendor } from '../types';
 
-const schema = z.object({
-  purchaseDate: z.string().min(1, 'Required'),
-  vendor: z.string().min(1, 'Required'),
-  vendorInvoiceNumber: z.string().optional(),
-  discount: z.number().min(0).default(0),
-  additionalCosts: z.number().min(0).default(0),
-  taxAmount: z.number().min(0).default(0),
-  paymentStatus: z.enum(['paid', 'partial', 'unpaid']),
-  notes: z.string().optional(),
-});
-
-type FormData = z.infer<typeof schema>;
+interface FormData {
+  purchaseDate: string;
+  vendor: string;
+  vendorInvoiceNumber?: string;
+  totalQuantity: number;
+  purchasePricePerUnit: number;
+  discount: number;
+  additionalCosts: number;
+  taxAmount: number;
+  paymentStatus: 'paid' | 'partial' | 'unpaid';
+  notes?: string;
+}
 
 const StockPurchasesPage: React.FC = () => {
   const { activeAccountId } = useAccountStore();
@@ -35,14 +33,10 @@ const StockPurchasesPage: React.FC = () => {
   const [dateRange, setDateRange] = useState<DateRange>(dateRangePresets().thisMonth);
   const [search, setSearch] = useState('');
   const [paymentFilter, setPaymentFilter] = useState<string>('all');
-  const [expandedRowId, setExpandedRowId] = useState<string | null>(null);
   const [viewingPurchase, setViewingPurchase] = useState<StockPurchase | null>(null);
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [editingPurchase, setEditingPurchase] = useState<StockPurchase | null>(null);
   const [deleteId, setDeleteId] = useState<string | null>(null);
-  const [items, setItems] = useState<Array<{ id: string; category?: string; product: string; quantityPurchased: number; purchasePricePerUnit: number; totalAmount: number }>>([
-    { id: Date.now().toString(), category: '', product: '', quantityPurchased: 1, purchasePricePerUnit: 0, totalAmount: 0 }
-  ]);
 
   const params = {
     accountId: activeAccountId === 'all' ? undefined : activeAccountId,
@@ -56,13 +50,9 @@ const StockPurchasesPage: React.FC = () => {
   });
 
   const { data: vendorsData } = useQuery({ queryKey: ['vendors'], queryFn: () => vendorsApi.list() });
-  const { data: productsData } = useQuery({ queryKey: ['products'], queryFn: () => productsApi.list() });
-  const { data: categoriesData } = useQuery({ queryKey: ['categories'], queryFn: () => categoriesApi.list() });
 
   const rawPurchases: StockPurchase[] = data?.data?.data || [];
   const vendors: Vendor[] = vendorsData?.data?.data || [];
-  const products: Product[] = productsData?.data?.data || [];
-  const categories: Category[] = categoriesData?.data?.data || [];
 
   // Filter purchases by search and payment status
   const purchases = useMemo(() => {
@@ -72,24 +62,18 @@ const StockPurchasesPage: React.FC = () => {
       const invoiceNo = (p.vendorInvoiceNumber || '').toLowerCase();
       const s = search.toLowerCase().trim();
 
-      const matchesSearch = !s ||
-        vendorName.includes(s) ||
-        invoiceNo.includes(s) ||
-        (Array.isArray(p.items) && p.items.some((it: any) => {
-          const pr = typeof it.product === 'object' ? it.product : products.find(prod => prod._id === it.product);
-          return pr?.name?.toLowerCase().includes(s) || pr?.sku?.toLowerCase().includes(s);
-        }));
-
+      const matchesSearch = !s || vendorName.includes(s) || invoiceNo.includes(s);
       const matchesPayment = paymentFilter === 'all' || p.paymentStatus === paymentFilter;
 
       return matchesSearch && matchesPayment;
     });
-  }, [rawPurchases, search, paymentFilter, vendors, products]);
+  }, [rawPurchases, search, paymentFilter, vendors]);
 
   // Overall Statistics
   const totalSpend = useMemo(() => rawPurchases.reduce((s, p) => s + (p.totalAmount || 0), 0), [rawPurchases]);
   const totalUnits = useMemo(() => {
     return rawPurchases.reduce((sum, p) => {
+      if (p.totalQuantity) return sum + p.totalQuantity;
       const pItems = Array.isArray(p.items) ? p.items : [];
       return sum + pItems.reduce((iSum: number, item: any) => iSum + (item.quantityPurchased || 0), 0);
     }, 0);
@@ -97,70 +81,27 @@ const StockPurchasesPage: React.FC = () => {
   const unpaidCount = useMemo(() => rawPurchases.filter(p => p.paymentStatus === 'unpaid').length, [rawPurchases]);
   const paidCount = useMemo(() => rawPurchases.filter(p => p.paymentStatus === 'paid').length, [rawPurchases]);
 
-  const { register, handleSubmit, watch, reset } = useForm<FormData>({
-    defaultValues: { purchaseDate: new Date().toISOString().split('T')[0], paymentStatus: 'paid', discount: 0, additionalCosts: 0, taxAmount: 0 },
+  const { register, handleSubmit, watch, reset, formState: { errors } } = useForm<FormData>({
+    defaultValues: {
+      purchaseDate: new Date().toISOString().split('T')[0],
+      paymentStatus: 'paid',
+      totalQuantity: 1,
+      purchasePricePerUnit: 0,
+      discount: 0,
+      additionalCosts: 0,
+      taxAmount: 0,
+      notes: '',
+      vendorInvoiceNumber: '',
+    },
   });
 
+  const qty = watch('totalQuantity') || 0;
+  const unitPrice = watch('purchasePricePerUnit') || 0;
   const disc = watch('discount') || 0;
   const addCosts = watch('additionalCosts') || 0;
   const tax = watch('taxAmount') || 0;
-  const itemsSubtotal = items.reduce((sum, item) => sum + item.totalAmount, 0);
-  const total = itemsSubtotal - disc + addCosts + tax;
-
-  const addItem = () => {
-    setItems([...items, { id: Date.now().toString() + Math.random(), category: '', product: '', quantityPurchased: 1, purchasePricePerUnit: 0, totalAmount: 0 }]);
-  };
-
-  const removeItem = (index: number) => {
-    if (items.length > 1) {
-      setItems(items.filter((_, i) => i !== index));
-    }
-  };
-
-  const updateItem = (index: number, field: string, value: any) => {
-    const newItems = [...items];
-    const currentItem = { ...newItems[index] };
-
-    if (field === 'category') {
-      currentItem.category = value;
-      // If the current product doesn't belong to this category, reset product and price
-      if (value && currentItem.product) {
-        const prod = products.find(p => p._id === currentItem.product);
-        const prodCatId = prod ? (typeof prod.category === 'object' ? prod.category._id : prod.category) : '';
-        if (prodCatId !== value) {
-          currentItem.product = '';
-          currentItem.purchasePricePerUnit = 0;
-          currentItem.totalAmount = 0;
-        }
-      }
-    } else if (field === 'product') {
-      currentItem.product = value;
-      const selectedProd = products.find(p => p._id === value);
-      if (selectedProd) {
-        // Auto-fill category
-        const catId = typeof selectedProd.category === 'object' ? selectedProd.category._id : selectedProd.category;
-        if (catId) {
-          currentItem.category = catId;
-        }
-        // Auto-fill unit price from product purchase cost or weightedAvgCost
-        const unitCostRupees = paiseToRupees(selectedProd.defaultPurchaseCost || selectedProd.weightedAvgCost || 0);
-        currentItem.purchasePricePerUnit = unitCostRupees;
-        currentItem.totalAmount = Math.round((currentItem.quantityPurchased || 1) * unitCostRupees * 100) / 100;
-      }
-    } else if (field === 'quantityPurchased' || field === 'purchasePricePerUnit') {
-      (currentItem as any)[field] = Number(value);
-      const qty = field === 'quantityPurchased' ? Number(value) : currentItem.quantityPurchased;
-      const price = field === 'purchasePricePerUnit' ? Number(value) : currentItem.purchasePricePerUnit;
-      currentItem.totalAmount = Math.round(qty * price * 100) / 100;
-    } else if (field === 'totalAmount') {
-      currentItem.totalAmount = Number(value);
-    } else {
-      (currentItem as any)[field] = value;
-    }
-
-    newItems[index] = currentItem;
-    setItems(newItems);
-  };
+  const itemsSubtotal = Math.round(qty * unitPrice * 100) / 100;
+  const total = Math.max(0, itemsSubtotal - disc + addCosts + tax);
 
   const invalidateAll = () => {
     qc.invalidateQueries({ queryKey: ['stock-purchases'] });
@@ -175,9 +116,8 @@ const StockPurchasesPage: React.FC = () => {
     mutationFn: (d: Partial<StockPurchase>) => stockPurchasesApi.create(d),
     onSuccess: () => {
       invalidateAll();
-      toast.success('Purchase recorded successfully!');
+      toast.success('Stock purchase recorded successfully!');
       setIsModalOpen(false);
-      setItems([{ id: Date.now().toString(), category: '', product: '', quantityPurchased: 1, purchasePricePerUnit: 0, totalAmount: 0 }]);
       reset();
     },
     onError: (e: unknown) => toast.error((e as { response?: { data?: { message?: string } } })?.response?.data?.message || 'Error recording purchase'),
@@ -190,10 +130,9 @@ const StockPurchasesPage: React.FC = () => {
     mutationFn: ({ id, d }: { id: string; d: Partial<StockPurchase> }) => stockPurchasesApi.update(id, d),
     onSuccess: () => {
       invalidateAll();
-      toast.success('Purchase updated successfully!');
+      toast.success('Stock purchase updated successfully!');
       setIsModalOpen(false);
       setEditingPurchase(null);
-      setItems([{ id: Date.now().toString(), category: '', product: '', quantityPurchased: 1, purchasePricePerUnit: 0, totalAmount: 0 }]);
       reset();
     },
     onError: (e: unknown) => toast.error((e as { response?: { data?: { message?: string } } })?.response?.data?.message || 'Error updating purchase'),
@@ -208,7 +147,7 @@ const StockPurchasesPage: React.FC = () => {
     mutationFn: (id: string) => stockPurchasesApi.delete(id),
     onSuccess: () => {
       invalidateAll();
-      toast.success('Purchase deleted and stock restored');
+      toast.success('Purchase deleted and inventory stock restored');
       setDeleteId(null);
     },
     onError: (e: unknown) => toast.error((e as { response?: { data?: { message?: string } } })?.response?.data?.message || 'Error deleting purchase'),
@@ -217,32 +156,28 @@ const StockPurchasesPage: React.FC = () => {
   const onSubmit = (d: FormData) => {
     if (isSubmittingRef.current || createMut.isPending || updateMut.isPending) return;
 
-    const invalidItem = items.find(item => !item.product || item.quantityPurchased <= 0 || item.purchasePricePerUnit <= 0);
-    if (invalidItem) {
-      toast.error('Please ensure all items have a product, quantity and price');
-      return;
-    }
-
-    const productIds = items.map(item => item.product).filter(Boolean);
-    const uniqueProductIds = new Set(productIds);
-    if (productIds.length !== uniqueProductIds.size) {
-      toast.error('Please remove duplicate products from the items list');
+    if (!d.totalQuantity || d.totalQuantity <= 0) {
+      toast.error('Please enter a valid total quantity');
       return;
     }
 
     isSubmittingRef.current = true;
 
+    const subtotal = d.totalQuantity * (d.purchasePricePerUnit || 0);
+    const calculatedTotal = Math.max(0, subtotal - (d.discount || 0) + (d.additionalCosts || 0) + (d.taxAmount || 0));
+
     const payload = {
-      ...d,
-      items: items.map(({ id, category, ...item }) => ({
-        ...item,
-        purchasePricePerUnit: rupeesToPaise(item.purchasePricePerUnit),
-        totalAmount: rupeesToPaise(item.totalAmount),
-      })),
-      discount: rupeesToPaise(d.discount),
-      additionalCosts: rupeesToPaise(d.additionalCosts),
-      taxAmount: rupeesToPaise(d.taxAmount),
-      totalAmount: rupeesToPaise(total),
+      purchaseDate: d.purchaseDate,
+      vendor: d.vendor,
+      vendorInvoiceNumber: d.vendorInvoiceNumber || '',
+      totalQuantity: d.totalQuantity,
+      purchasePricePerUnit: rupeesToPaise(d.purchasePricePerUnit),
+      discount: rupeesToPaise(d.discount || 0),
+      additionalCosts: rupeesToPaise(d.additionalCosts || 0),
+      taxAmount: rupeesToPaise(d.taxAmount || 0),
+      totalAmount: rupeesToPaise(calculatedTotal),
+      paymentStatus: d.paymentStatus,
+      notes: d.notes || '',
       businessAccount: activeAccountId === 'all' ? undefined : activeAccountId,
     };
 
@@ -252,30 +187,20 @@ const StockPurchasesPage: React.FC = () => {
 
   const openEdit = (p: StockPurchase) => {
     setEditingPurchase(p);
-    const purchaseItems = Array.isArray(p.items) ? p.items : [];
-    const formattedItems = purchaseItems.map((item: any) => {
-      const prodId = typeof item.product === 'string' ? item.product : item.product?._id;
-      const prodObj = products.find(prod => prod._id === prodId) || (typeof item.product === 'object' ? item.product : null);
-      const catId = prodObj ? (typeof prodObj.category === 'object' ? prodObj.category._id : prodObj.category) : '';
+    const parsedQty = p.totalQuantity || (Array.isArray(p.items) ? p.items.reduce((s, it) => s + (it.quantityPurchased || 0), 0) : 1);
+    const parsedUnitPrice = p.purchasePricePerUnit !== undefined && p.purchasePricePerUnit > 0
+      ? paiseToRupees(p.purchasePricePerUnit)
+      : (parsedQty > 0 ? paiseToRupees(Math.round(p.totalAmount / parsedQty)) : 0);
 
-      return {
-        id: Date.now().toString() + Math.random(),
-        category: catId || '',
-        product: prodId || '',
-        quantityPurchased: item.quantityPurchased,
-        purchasePricePerUnit: paiseToRupees(item.purchasePricePerUnit),
-        totalAmount: paiseToRupees(item.totalAmount),
-      };
-    });
-
-    setItems(formattedItems.length > 0 ? formattedItems : [{ id: Date.now().toString(), category: '', product: '', quantityPurchased: 1, purchasePricePerUnit: 0, totalAmount: 0 }]);
     reset({
       purchaseDate: p.purchaseDate.split('T')[0],
       vendor: typeof p.vendor === 'string' ? p.vendor : (p.vendor as Vendor)._id,
       vendorInvoiceNumber: p.vendorInvoiceNumber || '',
-      discount: paiseToRupees(p.discount),
-      additionalCosts: paiseToRupees(p.additionalCosts),
-      taxAmount: paiseToRupees(p.taxAmount),
+      totalQuantity: parsedQty,
+      purchasePricePerUnit: parsedUnitPrice,
+      discount: paiseToRupees(p.discount || 0),
+      additionalCosts: paiseToRupees(p.additionalCosts || 0),
+      taxAmount: paiseToRupees(p.taxAmount || 0),
       paymentStatus: p.paymentStatus,
       notes: p.notes || '',
     });
@@ -284,13 +209,18 @@ const StockPurchasesPage: React.FC = () => {
 
   const openAdd = () => {
     setEditingPurchase(null);
-    setItems([{ id: Date.now().toString(), category: '', product: '', quantityPurchased: 1, purchasePricePerUnit: 0, totalAmount: 0 }]);
-    reset({ purchaseDate: new Date().toISOString().split('T')[0], paymentStatus: 'paid', discount: 0, additionalCosts: 0, taxAmount: 0, notes: '', vendorInvoiceNumber: '' });
+    reset({
+      purchaseDate: new Date().toISOString().split('T')[0],
+      paymentStatus: 'paid',
+      totalQuantity: 1,
+      purchasePricePerUnit: 0,
+      discount: 0,
+      additionalCosts: 0,
+      taxAmount: 0,
+      notes: '',
+      vendorInvoiceNumber: '',
+    });
     setIsModalOpen(true);
-  };
-
-  const toggleExpand = (id: string) => {
-    setExpandedRowId(prev => prev === id ? null : id);
   };
 
   const paymentColors: Record<string, string> = {
@@ -300,23 +230,28 @@ const StockPurchasesPage: React.FC = () => {
   };
 
   return (
-    <div className="space-y-5">
-      {/* Page Header */}
-      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
+    <div className="space-y-6">
+      {/* Top Header */}
+      <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
         <div>
-          <h1 className="text-xl font-bold text-gray-900 tracking-tight">Stock Purchases</h1>
-          <p className="text-sm text-gray-500">Track and manage inventory purchase invoices from vendors</p>
+          <h1 className="text-2xl font-bold text-gray-900 tracking-tight">Stock Purchases</h1>
+          <p className="text-sm text-gray-500 mt-1">
+            Directly add total stock quantities and costs without needing to select perfume names or categories.
+          </p>
         </div>
-        <button onClick={openAdd} className="btn-primary shrink-0 shadow-sm hover:shadow">
-          <Plus className="w-4 h-4" /> Add Purchase
+        <button
+          onClick={openAdd}
+          className="btn-primary shrink-0 inline-flex items-center gap-2 px-4 py-2 text-sm shadow-sm hover:shadow"
+        >
+          <Plus className="w-4 h-4" /> Add Stock Purchase
         </button>
       </div>
 
-      {/* Metric Cards */}
+      {/* KPI Cards */}
       <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
         <div className="card p-4 flex items-center gap-3.5">
           <div className="w-10 h-10 rounded-lg bg-blue-50 text-blue-600 flex items-center justify-center shrink-0">
-            <ShoppingBag className="w-5 h-5" />
+            <TruckIcon className="w-5 h-5" />
           </div>
           <div>
             <p className="text-xs font-semibold text-gray-500 uppercase tracking-wider">Total Purchases</p>
@@ -330,7 +265,7 @@ const StockPurchasesPage: React.FC = () => {
           </div>
           <div>
             <p className="text-xs font-semibold text-gray-500 uppercase tracking-wider">Total Units</p>
-            <p className="text-xl font-bold text-gray-900 mt-0.5">{totalUnits.toLocaleString()} pcs</p>
+            <p className="text-xl font-bold text-gray-900 mt-0.5">{totalUnits.toLocaleString()} units</p>
           </div>
         </div>
 
@@ -364,7 +299,7 @@ const StockPurchasesPage: React.FC = () => {
             <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-400" />
             <input
               type="text"
-              placeholder="Search by vendor, invoice #, product..."
+              placeholder="Search by vendor, invoice #..."
               value={search}
               onChange={e => setSearch(e.target.value)}
               className="input pl-9"
@@ -395,8 +330,13 @@ const StockPurchasesPage: React.FC = () => {
         ) : purchases.length === 0 ? (
           <EmptyState
             title="No purchases found"
-            description="Record your stock purchase to intake inventory and update costs."
+            description="Add your first stock purchase to intake total quantity and track costs."
             icon={<TruckIcon className="w-12 h-12 text-gray-400" />}
+            action={
+              <button onClick={openAdd} className="btn-primary mt-3">
+                <Plus className="w-4 h-4 mr-1" /> Add Stock Purchase
+              </button>
+            }
           />
         ) : (
           <div className="table-container">
@@ -406,7 +346,8 @@ const StockPurchasesPage: React.FC = () => {
                   <th className="w-28">Date</th>
                   <th>Vendor</th>
                   <th>Invoice #</th>
-                  <th>Purchased Items</th>
+                  <th className="text-center">Total Quantity</th>
+                  <th className="text-right">Price / Unit</th>
                   <th className="text-right">Total Amount</th>
                   <th className="text-center">Payment</th>
                   <th className="text-right pr-5">Actions</th>
@@ -415,179 +356,97 @@ const StockPurchasesPage: React.FC = () => {
               <tbody>
                 {purchases.map(p => {
                   const vend = typeof p.vendor === 'object' ? p.vendor : vendors.find(v => v._id === p.vendor);
-                  const itemsList = Array.isArray(p.items) ? p.items : [];
-                  const totalItemsQty = itemsList.reduce((acc: number, it: any) => acc + (it.quantityPurchased || 0), 0);
-                  const isExpanded = expandedRowId === p._id;
-
-                  // Product summary preview
-                  const previewNames = itemsList.slice(0, 2).map((it: any) => {
-                    const pr = typeof it.product === 'object' ? it.product : products.find(prod => prod._id === it.product);
-                    return `${pr?.name || 'Item'} (${it.quantityPurchased})`;
-                  });
-                  const remainingCount = itemsList.length - 2;
+                  const rowQty = p.totalQuantity || (Array.isArray(p.items) ? p.items.reduce((acc: number, it: any) => acc + (it.quantityPurchased || 0), 0) : 0);
+                  const rowUnitPrice = p.purchasePricePerUnit !== undefined && p.purchasePricePerUnit > 0
+                    ? p.purchasePricePerUnit
+                    : (rowQty > 0 ? Math.round(p.totalAmount / rowQty) : 0);
 
                   return (
-                    <React.Fragment key={p._id}>
-                      <tr className={`transition-colors hover:bg-gray-50/80 ${isExpanded ? 'bg-primary-50/20' : ''}`}>
-                        {/* Date */}
-                        <td className="whitespace-nowrap font-medium text-gray-900 align-middle">
-                          <div className="flex items-center gap-1.5">
-                            <Calendar className="w-3.5 h-3.5 text-gray-400" />
-                            <span>{formatDate(p.purchaseDate)}</span>
-                          </div>
-                        </td>
+                    <tr key={p._id} className="transition-colors hover:bg-gray-50/80">
+                      {/* Date */}
+                      <td className="whitespace-nowrap font-medium text-gray-900 align-middle">
+                        <div className="flex items-center gap-1.5">
+                          <Calendar className="w-3.5 h-3.5 text-gray-400" />
+                          <span>{formatDate(p.purchaseDate)}</span>
+                        </div>
+                      </td>
 
-                        {/* Vendor */}
-                        <td className="align-middle">
-                          <div className="font-semibold text-gray-900">{(vend as Vendor)?.name || '—'}</div>
-                          {(vend as Vendor)?.company && (
-                            <div className="text-xs text-gray-500">{(vend as Vendor)?.company}</div>
-                          )}
-                        </td>
+                      {/* Vendor */}
+                      <td className="align-middle">
+                        <div className="font-semibold text-gray-900">{(vend as Vendor)?.name || '—'}</div>
+                        {(vend as Vendor)?.company && (
+                          <div className="text-xs text-gray-500">{(vend as Vendor)?.company}</div>
+                        )}
+                      </td>
 
-                        {/* Invoice Number */}
-                        <td className="align-middle font-mono text-xs">
-                          {p.vendorInvoiceNumber ? (
-                            <span className="inline-block px-2 py-0.5 bg-gray-100 rounded text-gray-700 font-semibold">
-                              #{p.vendorInvoiceNumber}
-                            </span>
-                          ) : (
-                            <span className="text-gray-400">—</span>
-                          )}
-                        </td>
-
-                        {/* Items Column - Compact & Expandable */}
-                        <td className="align-middle">
-                          <button
-                            type="button"
-                            onClick={() => toggleExpand(p._id)}
-                            className="inline-flex items-center gap-2 px-2.5 py-1.5 bg-gray-100 hover:bg-gray-200/80 text-gray-800 text-xs font-medium rounded-lg transition-colors border border-gray-200"
-                            title="Click to view full items breakdown"
-                          >
-                            <Package className="w-3.5 h-3.5 text-primary-600" />
-                            <span><strong>{itemsList.length} items</strong> ({totalItemsQty} units)</span>
-                            {isExpanded ? <ChevronUp className="w-3.5 h-3.5 text-gray-500" /> : <ChevronDown className="w-3.5 h-3.5 text-gray-500" />}
-                          </button>
-                          <div className="text-[11px] text-gray-500 mt-1 truncate max-w-xs">
-                            {previewNames.join(', ')}
-                            {remainingCount > 0 && <span className="text-primary-600 font-medium"> +{remainingCount} more</span>}
-                          </div>
-                        </td>
-
-                        {/* Total Amount */}
-                        <td className="text-right align-middle font-bold text-gray-900 text-sm">
-                          {formatCurrency(p.totalAmount)}
-                          {(p.discount > 0 || p.taxAmount > 0 || p.additionalCosts > 0) && (
-                            <div className="text-[10px] text-gray-400 font-normal">
-                              {p.discount > 0 && <span>-Disc </span>}
-                              {p.taxAmount > 0 && <span>+Tax </span>}
-                            </div>
-                          )}
-                        </td>
-
-                        {/* Payment Status */}
-                        <td className="text-center align-middle">
-                          <span className={`inline-flex items-center px-2 py-0.5 rounded-full text-xs font-semibold capitalize border ${paymentColors[p.paymentStatus] || 'bg-gray-100 text-gray-800'}`}>
-                            {p.paymentStatus}
+                      {/* Invoice Number */}
+                      <td className="align-middle font-mono text-xs">
+                        {p.vendorInvoiceNumber ? (
+                          <span className="inline-block px-2 py-0.5 bg-gray-100 rounded text-gray-700 font-semibold">
+                            #{p.vendorInvoiceNumber}
                           </span>
-                        </td>
+                        ) : (
+                          <span className="text-gray-400">—</span>
+                        )}
+                      </td>
 
-                        {/* Actions */}
-                        <td className="text-right pr-5 align-middle">
-                          <div className="flex items-center justify-end gap-1">
-                            <button
-                              onClick={() => setViewingPurchase(p)}
-                              className="p-1.5 rounded-lg hover:bg-primary-50 text-gray-400 hover:text-primary-600 transition-colors"
-                              title="View Invoice Details"
-                            >
-                              <Eye className="w-4 h-4" />
-                            </button>
-                            <button
-                              onClick={() => openEdit(p)}
-                              className="p-1.5 rounded-lg hover:bg-gray-100 text-gray-400 hover:text-gray-700 transition-colors"
-                              title="Edit Purchase"
-                            >
-                              <Edit2 className="w-4 h-4" />
-                            </button>
-                            <button
-                              onClick={() => setDeleteId(p._id)}
-                              className="p-1.5 rounded-lg hover:bg-red-50 text-gray-400 hover:text-red-600 transition-colors"
-                              title="Delete Purchase"
-                            >
-                              <Trash2 className="w-4 h-4" />
-                            </button>
+                      {/* Total Quantity */}
+                      <td className="text-center align-middle">
+                        <span className="inline-flex items-center px-2.5 py-1 rounded-full text-xs font-bold bg-primary-50 text-primary-700 border border-primary-200">
+                          {rowQty.toLocaleString()} units
+                        </span>
+                      </td>
+
+                      {/* Price Per Unit */}
+                      <td className="text-right align-middle font-medium text-gray-700 text-sm">
+                        {formatCurrency(rowUnitPrice)}
+                      </td>
+
+                      {/* Total Amount */}
+                      <td className="text-right align-middle font-bold text-gray-900 text-sm">
+                        {formatCurrency(p.totalAmount)}
+                        {(p.discount > 0 || p.taxAmount > 0 || p.additionalCosts > 0) && (
+                          <div className="text-[10px] text-gray-400 font-normal">
+                            {p.discount > 0 && <span>-Disc </span>}
+                            {p.taxAmount > 0 && <span>+Tax </span>}
                           </div>
-                        </td>
-                      </tr>
+                        )}
+                      </td>
 
-                      {/* Expandable Breakdown Drawer Row */}
-                      {isExpanded && (
-                        <tr className="bg-gray-50/70 border-b border-gray-200">
-                          <td colSpan={7} className="px-6 py-4">
-                            <div className="bg-white rounded-lg border border-gray-200 p-4 shadow-xs space-y-3">
-                              <div className="flex items-center justify-between border-b border-gray-100 pb-2">
-                                <h4 className="text-xs font-bold text-gray-800 uppercase tracking-wider flex items-center gap-1.5">
-                                  <Receipt className="w-4 h-4 text-primary-600" />
-                                  Items Breakdown ({itemsList.length} Products)
-                                </h4>
-                                <span className="text-xs text-gray-500 font-medium">
-                                  Total: <strong>{totalItemsQty} units</strong>
-                                </span>
-                              </div>
+                      {/* Payment Status */}
+                      <td className="text-center align-middle">
+                        <span className={`inline-flex items-center px-2 py-0.5 rounded-full text-xs font-semibold capitalize border ${paymentColors[p.paymentStatus] || 'bg-gray-100 text-gray-800'}`}>
+                          {p.paymentStatus}
+                        </span>
+                      </td>
 
-                              <div className="overflow-x-auto">
-                                <table className="w-full text-xs">
-                                  <thead>
-                                    <tr className="text-gray-500 border-b border-gray-100">
-                                      <th className="text-left py-1.5 font-semibold">#</th>
-                                      <th className="text-left py-1.5 font-semibold">Product Name</th>
-                                      <th className="text-left py-1.5 font-semibold">SKU</th>
-                                      <th className="text-left py-1.5 font-semibold">Category</th>
-                                      <th className="text-right py-1.5 font-semibold">Qty</th>
-                                      <th className="text-right py-1.5 font-semibold">Price / Unit</th>
-                                      <th className="text-right py-1.5 font-semibold">Item Total</th>
-                                    </tr>
-                                  </thead>
-                                  <tbody className="divide-y divide-gray-50">
-                                    {itemsList.map((it: any, idx: number) => {
-                                      const prod = typeof it.product === 'object' ? it.product : products.find(pr => pr._id === it.product);
-                                      const prodCat = prod && typeof prod.category === 'object' ? prod.category : categories.find(c => c._id === prod?.category);
-                                      const catName = prodCat?.name;
-
-                                      return (
-                                        <tr key={idx} className="hover:bg-gray-50/50">
-                                          <td className="py-2 text-gray-400">{idx + 1}</td>
-                                          <td className="py-2 font-medium text-gray-900">{prod?.name || '—'}</td>
-                                          <td className="py-2 font-mono text-[11px] text-gray-500">{prod?.sku || '—'}</td>
-                                          <td className="py-2 text-gray-600">
-                                            {catName && catName.toLowerCase() !== prod?.name?.toLowerCase() ? (
-                                              <span className="bg-gray-100 px-1.5 py-0.5 rounded text-[10px] text-gray-700">
-                                                {catName}
-                                              </span>
-                                            ) : (
-                                              <span className="text-gray-400">—</span>
-                                            )}
-                                          </td>
-                                          <td className="py-2 text-right font-medium text-gray-800">{it.quantityPurchased}</td>
-                                          <td className="py-2 text-right text-gray-600">{formatCurrency(it.purchasePricePerUnit)}</td>
-                                          <td className="py-2 text-right font-semibold text-gray-900">{formatCurrency(it.totalAmount)}</td>
-                                        </tr>
-                                      );
-                                    })}
-                                  </tbody>
-                                </table>
-                              </div>
-
-                              {p.notes && (
-                                <div className="text-xs text-gray-500 bg-gray-50 p-2.5 rounded border border-gray-100">
-                                  <strong>Notes:</strong> {p.notes}
-                                </div>
-                              )}
-                            </div>
-                          </td>
-                        </tr>
-                      )}
-                    </React.Fragment>
+                      {/* Actions */}
+                      <td className="text-right pr-5 align-middle">
+                        <div className="flex items-center justify-end gap-1">
+                          <button
+                            onClick={() => setViewingPurchase(p)}
+                            className="p-1.5 rounded-lg hover:bg-primary-50 text-gray-400 hover:text-primary-600 transition-colors"
+                            title="View Invoice Details"
+                          >
+                            <Eye className="w-4 h-4" />
+                          </button>
+                          <button
+                            onClick={() => openEdit(p)}
+                            className="p-1.5 rounded-lg hover:bg-gray-100 text-gray-400 hover:text-gray-700 transition-colors"
+                            title="Edit Purchase"
+                          >
+                            <Edit2 className="w-4 h-4" />
+                          </button>
+                          <button
+                            onClick={() => setDeleteId(p._id)}
+                            className="p-1.5 rounded-lg hover:bg-red-50 text-gray-400 hover:text-red-600 transition-colors"
+                            title="Delete Purchase"
+                          >
+                            <Trash2 className="w-4 h-4" />
+                          </button>
+                        </div>
+                      </td>
+                    </tr>
                   );
                 })}
               </tbody>
@@ -600,25 +459,19 @@ const StockPurchasesPage: React.FC = () => {
       <Modal
         isOpen={isModalOpen}
         onClose={() => {
-          if (!isSubmitting) {
-            setIsModalOpen(false);
-            setEditingPurchase(null);
-          }
+          setIsModalOpen(false);
+          setEditingPurchase(null);
         }}
         title={editingPurchase ? 'Edit Stock Purchase' : 'Add Stock Purchase'}
-        size="lg"
+        size="md"
         footer={
           <div className="flex gap-2 justify-end">
             <button
-              type="button"
               onClick={() => {
-                if (!isSubmitting) {
-                  setIsModalOpen(false);
-                  setEditingPurchase(null);
-                }
+                setIsModalOpen(false);
+                setEditingPurchase(null);
               }}
-              className="btn-secondary disabled:opacity-50"
-              disabled={isSubmitting}
+              className="btn-secondary"
             >
               Cancel
             </button>
@@ -626,7 +479,7 @@ const StockPurchasesPage: React.FC = () => {
               form="purchase-form"
               type="submit"
               disabled={isSubmitting}
-              className="btn-primary flex items-center justify-center gap-2 min-w-[150px] disabled:opacity-50 disabled:cursor-not-allowed"
+              className="btn-primary min-w-[140px] flex items-center justify-center gap-1.5"
             >
               {isSubmitting && <Loader2 className="w-4 h-4 animate-spin" />}
               {isSubmitting
@@ -637,10 +490,15 @@ const StockPurchasesPage: React.FC = () => {
         }
       >
         <form id="purchase-form" onSubmit={handleSubmit(onSubmit)} className="space-y-4">
+          <div className="bg-primary-50/70 border border-primary-200 rounded-xl p-3 text-xs text-primary-800">
+            <span className="font-bold">⚡ Direct Total Quantity Mode:</span> Simply enter the total quantity and price. No need to select perfume names or categories. The purchased units add straight to your total stock pool.
+          </div>
+
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
             <div>
               <label className="label">Purchase Date *</label>
               <input type="date" {...register('purchaseDate')} className="input" />
+              {errors.purchaseDate && <p className="text-xs text-red-500 mt-1">{errors.purchaseDate.message}</p>}
             </div>
             <div>
               <label className="label">Vendor *</label>
@@ -648,13 +506,14 @@ const StockPurchasesPage: React.FC = () => {
                 <option value="">Select vendor</option>
                 {vendors.map(v => <option key={v._id} value={v._id}>{v.name}</option>)}
               </select>
+              {errors.vendor && <p className="text-xs text-red-500 mt-1">{errors.vendor.message}</p>}
             </div>
           </div>
 
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
             <div>
               <label className="label">Invoice Number</label>
-              <input {...register('vendorInvoiceNumber')} className="input" placeholder="e.g. INV-2026-001" />
+              <input {...register('vendorInvoiceNumber')} className="input font-mono" placeholder="e.g. INV-2026-001" />
             </div>
             <div>
               <label className="label">Payment Status</label>
@@ -666,113 +525,34 @@ const StockPurchasesPage: React.FC = () => {
             </div>
           </div>
 
-          {/* Items Section */}
-          <div className="border-t border-gray-200 pt-4">
-            <div className="flex items-center justify-between mb-2.5">
+          {/* Direct Quantity & Unit Price */}
+          <div className="p-4 bg-gray-50 rounded-xl border border-gray-200 space-y-4">
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
               <div>
-                <label className="label mb-0">Purchase Items *</label>
-                <p className="text-xs text-gray-500">Select product, specify quantity and purchase price per unit</p>
+                <label className="label font-bold text-gray-800">Total Quantity Purchased *</label>
+                <input
+                  type="number"
+                  min="1"
+                  step="1"
+                  {...register('totalQuantity', { valueAsNumber: true })}
+                  className="input font-bold text-base bg-white"
+                  placeholder="e.g. 100"
+                />
+                {errors.totalQuantity && <p className="text-xs text-red-500 mt-1">{errors.totalQuantity.message}</p>}
               </div>
-              <button
-                type="button"
-                onClick={addItem}
-                className="inline-flex items-center gap-1 text-xs font-semibold text-primary-600 hover:text-primary-700 bg-primary-50 px-2.5 py-1 rounded-md transition-colors"
-              >
-                <Plus className="w-3.5 h-3.5" /> Add Another Item
-              </button>
-            </div>
 
-            <div className="space-y-3">
-              {items.map((item, index) => {
-                const filteredProducts = item.category
-                  ? products.filter(p => {
-                      const prodCatId = typeof p.category === 'object' ? p.category._id : p.category;
-                      return prodCatId === item.category;
-                    })
-                  : products;
-
-                return (
-                  <div key={item.id} className="p-3.5 bg-gray-50 rounded-xl border border-gray-200 space-y-3 relative group">
-                    <div className="flex items-center justify-between">
-                      <span className="text-xs font-bold text-gray-500 uppercase tracking-wider">Item #{index + 1}</span>
-                      {items.length > 1 && (
-                        <button
-                          type="button"
-                          onClick={() => removeItem(index)}
-                          className="text-gray-400 hover:text-red-600 p-1 rounded hover:bg-red-50 transition-colors"
-                          title="Remove item"
-                        >
-                          <X className="w-4 h-4" />
-                        </button>
-                      )}
-                    </div>
-
-                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-                      <div>
-                        <label className="label text-xs">Filter by Category</label>
-                        <select
-                          value={item.category || ''}
-                          onChange={(e) => updateItem(index, 'category', e.target.value)}
-                          className="select text-sm bg-white"
-                        >
-                          <option value="">All Categories</option>
-                          {categories.map(c => (
-                            <option key={c._id} value={c._id}>{c.name}</option>
-                          ))}
-                        </select>
-                      </div>
-
-                      <div>
-                        <label className="label text-xs">Product *</label>
-                        <select
-                          value={item.product}
-                          onChange={(e) => updateItem(index, 'product', e.target.value)}
-                          className="select text-sm bg-white font-medium"
-                        >
-                          <option value="">Select product</option>
-                          {filteredProducts.map(p => (
-                            <option key={p._id} value={p._id}>{p.name} ({p.sku})</option>
-                          ))}
-                        </select>
-                      </div>
-                    </div>
-
-                    <div className="grid grid-cols-3 gap-3">
-                      <div>
-                        <label className="label text-xs">Quantity *</label>
-                        <input
-                          type="number"
-                          value={item.quantityPurchased}
-                          onChange={(e) => updateItem(index, 'quantityPurchased', e.target.value)}
-                          className="input text-sm bg-white"
-                          min="1"
-                        />
-                      </div>
-                      <div>
-                        <label className="label text-xs">Price/Unit (₹) *</label>
-                        <input
-                          type="number"
-                          step="0.01"
-                          value={item.purchasePricePerUnit}
-                          onChange={(e) => updateItem(index, 'purchasePricePerUnit', e.target.value)}
-                          className="input text-sm bg-white"
-                          min="0"
-                        />
-                      </div>
-                      <div>
-                        <label className="label text-xs">Item Total (₹)</label>
-                        <input
-                          type="number"
-                          step="0.01"
-                          value={item.totalAmount}
-                          className="input text-sm bg-gray-100 font-semibold text-gray-800"
-                          readOnly
-                        />
-                      </div>
-                    </div>
-                  </div>
-                );
-              })}
+              <div>
+                <label className="label font-bold text-gray-800">Price Per Unit (₹) *</label>
+                <input
+                  type="number"
+                  min="0"
+                  step="0.01"
+                  {...register('purchasePricePerUnit', { valueAsNumber: true })}
+                  className="input font-bold text-base bg-white"
+                  placeholder="e.g. 55.00"
+                />
+                {errors.purchasePricePerUnit && <p className="text-xs text-red-500 mt-1">{errors.purchasePricePerUnit.message}</p>}
+              </div>
             </div>
           </div>
 
@@ -798,7 +578,7 @@ const StockPurchasesPage: React.FC = () => {
           {itemsSubtotal > 0 && (
             <div className="p-3.5 bg-gray-50 rounded-xl border border-gray-200 text-sm space-y-1.5">
               <div className="flex justify-between text-gray-600">
-                <span>Items Subtotal:</span>
+                <span>Items Subtotal ({qty} units × ₹{unitPrice}):</span>
                 <span>{formatCurrency(rupeesToPaise(itemsSubtotal))}</span>
               </div>
               {disc > 0 && (
@@ -839,7 +619,7 @@ const StockPurchasesPage: React.FC = () => {
           isOpen={!!viewingPurchase}
           onClose={() => setViewingPurchase(null)}
           title={`Purchase Invoice: #${viewingPurchase.vendorInvoiceNumber || viewingPurchase._id.slice(-6)}`}
-          size="lg"
+          size="md"
           footer={
             <div className="flex gap-2 justify-end">
               <button onClick={() => setViewingPurchase(null)} className="btn-secondary">Close</button>
@@ -881,35 +661,24 @@ const StockPurchasesPage: React.FC = () => {
               </div>
             </div>
 
-            {/* Items table */}
-            <div className="border border-gray-200 rounded-lg overflow-hidden">
-              <table className="w-full text-xs">
-                <thead className="bg-gray-100 text-gray-600 border-b border-gray-200">
-                  <tr>
-                    <th className="py-2 px-3 text-left">#</th>
-                    <th className="py-2 px-3 text-left">Product</th>
-                    <th className="py-2 px-3 text-left">SKU</th>
-                    <th className="py-2 px-3 text-right">Quantity</th>
-                    <th className="py-2 px-3 text-right">Unit Price</th>
-                    <th className="py-2 px-3 text-right">Amount</th>
-                  </tr>
-                </thead>
-                <tbody className="divide-y divide-gray-100">
-                  {(viewingPurchase.items || []).map((it: any, idx: number) => {
-                    const prod = typeof it.product === 'object' ? it.product : products.find(pr => pr._id === it.product);
-                    return (
-                      <tr key={idx} className="hover:bg-gray-50">
-                        <td className="py-2 px-3 text-gray-400">{idx + 1}</td>
-                        <td className="py-2 px-3 font-semibold text-gray-900">{prod?.name || '—'}</td>
-                        <td className="py-2 px-3 font-mono text-gray-500">{prod?.sku || '—'}</td>
-                        <td className="py-2 px-3 text-right font-medium">{it.quantityPurchased}</td>
-                        <td className="py-2 px-3 text-right text-gray-600">{formatCurrency(it.purchasePricePerUnit)}</td>
-                        <td className="py-2 px-3 text-right font-bold text-gray-900">{formatCurrency(it.totalAmount)}</td>
-                      </tr>
-                    );
-                  })}
-                </tbody>
-              </table>
+            {/* Quantity and Price summary */}
+            <div className="p-4 bg-primary-50/50 rounded-xl border border-primary-200 flex justify-between items-center">
+              <div>
+                <span className="text-xs text-gray-500 font-medium block">Total Units Added</span>
+                <span className="text-2xl font-bold text-primary-700">
+                  {(viewingPurchase.totalQuantity || (Array.isArray(viewingPurchase.items) ? viewingPurchase.items.reduce((s, it) => s + (it.quantityPurchased || 0), 0) : 0)).toLocaleString()} units
+                </span>
+              </div>
+              <div className="text-right">
+                <span className="text-xs text-gray-500 font-medium block">Price / Unit</span>
+                <span className="text-lg font-bold text-gray-900">
+                  {formatCurrency(
+                    viewingPurchase.purchasePricePerUnit !== undefined && viewingPurchase.purchasePricePerUnit > 0
+                      ? viewingPurchase.purchasePricePerUnit
+                      : ((viewingPurchase.totalQuantity || 1) > 0 ? Math.round(viewingPurchase.totalAmount / (viewingPurchase.totalQuantity || 1)) : 0)
+                  )}
+                </span>
+              </div>
             </div>
 
             {/* Total breakdown */}

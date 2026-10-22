@@ -28,9 +28,16 @@ const InventoryPage: React.FC = () => {
   });
 
   const products: Product[] = data?.data?.data || [];
+  const totalAvailableStock: number = (data?.data as any)?.totalAvailableStock !== undefined
+    ? (data?.data as any).totalAvailableStock
+    : (products.length > 0 ? (products[0].currentStock ?? 0) : 0);
+
   const getProductCost = (p: Product) => (p.defaultPurchaseCost > 0 ? p.defaultPurchaseCost : (p.weightedAvgCost || 0));
-  const totalQty = products.reduce((s, p) => s + p.currentStock, 0);
-  const totalValue = products.reduce((s, p) => s + p.currentStock * getProductCost(p), 0);
+  const totalQty = totalAvailableStock;
+  const avgCost = products.length > 0
+    ? (products.reduce((s, p) => s + getProductCost(p), 0) / products.length)
+    : 0;
+  const totalValue = Math.round(totalQty * avgCost);
   const lowStockCount = products.filter(p => p.currentStock <= p.reorderThreshold).length;
 
   return (

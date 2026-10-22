@@ -184,12 +184,11 @@ router.post('/', requireManagerOrAdmin, enforceAccountAccess, async (req: AuthRe
       const itemQty = item.quantity;
       const itemPrice = item.sellingPrice !== undefined ? item.sellingPrice : (sellingPrice || prod.sellingPrice || 0);
 
-      // Validate stock if not cancelled
+      // Validate total stock if not cancelled
       if (orderStatus !== 'cancelled') {
-        const stockAgg = await StockMovement.aggregate([
+        const totalStockAgg = await StockMovement.aggregate([
           {
             $match: {
-              product: prod._id,
               businessAccount: { $in: targetAccountIds },
               stockBucket: 'saleable',
             }
@@ -202,12 +201,12 @@ router.post('/', requireManagerOrAdmin, enforceAccountAccess, async (req: AuthRe
           }
         ]);
 
-        const availableStock = stockAgg.length > 0 ? Math.max(0, stockAgg[0].totalStock) : 0;
-        if (availableStock < itemQty) {
+        const availableTotalStock = totalStockAgg.length > 0 ? Math.max(0, totalStockAgg[0].totalStock) : 0;
+        if (availableTotalStock < itemQty) {
           const accLabel = account?.tradeName || account?.name || 'this account';
           const msg = isSharedStock
-            ? `Insufficient shared stock for "${prod.name}". Available across shared accounts: ${availableStock}, Requested: ${itemQty}`
-            : `Insufficient stock for "${prod.name}" in account "${accLabel}". Available own stock: ${availableStock}, Requested: ${itemQty}. (You can enable "Share Stock with other GST accounts" in GST Settings to use other account stock).`;
+            ? `Insufficient total stock across shared accounts. Available: ${availableTotalStock}, Requested: ${itemQty}`
+            : `Insufficient total stock in account "${accLabel}". Available: ${availableTotalStock}, Requested: ${itemQty}. Please record a stock purchase first.`;
           res.status(400).json({ success: false, message: msg });
           return;
         }

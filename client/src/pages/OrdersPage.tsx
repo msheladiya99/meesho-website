@@ -5,7 +5,7 @@ import { useForm } from 'react-hook-form';
 import { zodResolver } from '@hookform/resolvers/zod';
 import { z } from 'zod';
 import { ordersApi } from '../services/orders.service';
-import { productsApi } from '../services/inventory.service';
+import { productsApi, categoriesApi } from '../services/inventory.service';
 import { useAccountStore } from '../store/accountStore';
 import { formatCurrency, formatDate, rupeesToPaise, paiseToRupees, dateRangePresets } from '../lib/utils';
 import DateRangePicker from '../components/ui/DateRangePicker';
@@ -13,7 +13,7 @@ import Modal from '../components/ui/Modal';
 import { EmptyState, LoadingSpinner, ConfirmDialog } from '../components/ui/Feedback';
 import { PrintableQrLabel } from '../components/ui/PrintableQrLabel';
 import toast from 'react-hot-toast';
-import type { DateRange, Order, Product } from '../types';
+import type { DateRange, Order, Product, Category } from '../types';
 
 const schema = z.object({
   orderDate: z.string().min(1, 'Required'),
@@ -38,6 +38,8 @@ const OrdersPage: React.FC = () => {
   const [keepOpen, setKeepOpen] = useState(false);
   const [printOrder, setPrintOrder] = useState<Order | null>(null);
 
+  const [orderCategory, setOrderCategory] = useState<string>('');
+
   const params = {
     accountId: activeAccountId === 'all' ? undefined : activeAccountId,
     startDate: dateRange.startDate,
@@ -55,9 +57,23 @@ const OrdersPage: React.FC = () => {
     queryFn: () => productsApi.list({ accountId: activeAccountId === 'all' ? undefined : activeAccountId }),
   });
 
+  const { data: categoriesData } = useQuery({
+    queryKey: ['categories'],
+    queryFn: () => categoriesApi.list(),
+  });
+
   const orders = data?.data?.data || [];
   const products = productsData?.data?.data || [];
+  const categories: Category[] = categoriesData?.data?.data || [];
   const totalSales = orders.reduce((sum: number, o: Order) => sum + o.grossAmount, 0);
+
+  const filteredProducts = React.useMemo(() => {
+    if (!orderCategory) return products;
+    return products.filter((p: Product) => {
+      const catId = typeof p.category === 'object' ? (p.category as any)?._id : p.category;
+      return catId === orderCategory;
+    });
+  }, [products, orderCategory]);
 
   const { register, handleSubmit, watch, setValue, reset, formState: { errors, isSubmitting } } = useForm<FormData>({
     resolver: zodResolver(schema),
@@ -188,11 +204,19 @@ const OrdersPage: React.FC = () => {
 
   const openEdit = (order: Order) => {
     setEditingOrder(order);
+    const prodId = typeof order.product === 'string' ? order.product : order.product._id;
+    const prod = products.find((p: Product) => p._id === prodId);
+    if (prod) {
+      const catId = typeof prod.category === 'object' ? (prod.category as any)?._id : prod.category;
+      setOrderCategory(catId || '');
+    } else {
+      setOrderCategory('');
+    }
     reset({
       orderDate: order.orderDate.split('T')[0],
       meeshoOrderId: order.meeshoOrderId,
       subOrderId: order.subOrderId,
-      product: typeof order.product === 'string' ? order.product : order.product._id,
+      product: prodId,
       sellingPrice: paiseToRupees(order.sellingPrice),
       quantity: order.quantity,
       notes: order.notes,
@@ -202,6 +226,7 @@ const OrdersPage: React.FC = () => {
 
   const openAdd = () => {
     setEditingOrder(null);
+    setOrderCategory('');
     reset({ orderDate: new Date().toISOString().split('T')[0], quantity: 1 });
     setIsModalOpen(true);
   };
@@ -380,17 +405,36 @@ const OrdersPage: React.FC = () => {
             />
           </div>
 
-          <div>
-            <label className="label">Product *</label>
-            <select {...register('product')} className="select">
-              <option value="">Select product</option>
-              {products.map((p: Product) => (
-                <option key={p._id} value={p._id}>
-                  {p.name} ({p.sku}) — Available: {p.currentStock ?? 0}{p.isSharedStock ? ' • Shared' : ''}
-                </option>
-              ))}
-            </select>
-            {errors.product && <p className="text-xs text-red-500 mt-1">{errors.product.message}</p>}
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+            <div>
+              <label className="label">
+                Perfume Category
+                <span className="ml-1 text-[11px] text-gray-400 font-normal">(Filter)</span>
+              </label>
+              <select
+                value={orderCategory}
+                onChange={(e) => setOrderCategory(e.target.value)}
+                className="select"
+              >
+                <option value="">All Categories ({categories.length})</option>
+                {categories.map((c: Category) => (
+                  <option key={c._id} value={c._id}>{c.name}</option>
+                ))}
+              </select>
+            </div>
+
+            <div>
+              <label className="label">Perfume Name *</label>
+              <select {...register('product')} className="select font-medium">
+                <option value="">Select perfume</option>
+                {filteredProducts.map((p: Product) => (
+                  <option key={p._id} value={p._id}>
+                    {p.name} ({p.sku}) — Available: {p.currentStock ?? 0} units
+                  </option>
+                ))}
+              </select>
+              {errors.product && <p className="text-xs text-red-500 mt-1">{errors.product.message}</p>}
+            </div>
           </div>
 
           <div className="grid grid-cols-2 gap-4">

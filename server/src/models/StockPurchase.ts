@@ -1,7 +1,7 @@
 import mongoose, { Schema, Document } from 'mongoose';
 
 export interface IStockPurchaseItem {
-  product: mongoose.Types.ObjectId;
+  product?: mongoose.Types.ObjectId;
   quantityPurchased: number;
   purchasePricePerUnit: number; // paise
   totalAmount: number;           // paise
@@ -12,7 +12,9 @@ export interface IStockPurchase extends Document {
   purchaseDate: Date;
   vendor: mongoose.Types.ObjectId;
   vendorInvoiceNumber?: string;
-  items: IStockPurchaseItem[];
+  totalQuantity: number;
+  purchasePricePerUnit: number; // paise
+  items?: IStockPurchaseItem[];
   discount: number;             // paise
   additionalCosts: number;      // paise
   taxAmount: number;            // paise
@@ -24,21 +26,20 @@ export interface IStockPurchase extends Document {
 }
 
 const stockPurchaseItemSchema = new Schema<IStockPurchaseItem>({
-  product: { type: Schema.Types.ObjectId, ref: 'Product', required: true },
+  product: { type: Schema.Types.ObjectId, ref: 'Product', required: false },
   quantityPurchased: { type: Number, required: true, min: 1 },
   purchasePricePerUnit: { type: Number, required: true }, // paise
   totalAmount: { type: Number, required: true },           // paise
-});
+}, { _id: false });
 
 const stockPurchaseSchema = new Schema<IStockPurchase>({
   businessAccount: { type: Schema.Types.ObjectId, ref: 'BusinessAccount', required: true },
   purchaseDate: { type: Date, required: true },
   vendor: { type: Schema.Types.ObjectId, ref: 'Vendor', required: true },
   vendorInvoiceNumber: { type: String, trim: true },
-  items: { type: [stockPurchaseItemSchema], required: true, validate: {
-    validator: (val: IStockPurchaseItem[]) => val.length > 0,
-    message: 'At least one item is required'
-  }},
+  totalQuantity: { type: Number, default: 0, min: 0 },
+  purchasePricePerUnit: { type: Number, default: 0 }, // paise
+  items: { type: [stockPurchaseItemSchema], default: [] },
   discount: { type: Number, default: 0 },
   additionalCosts: { type: Number, default: 0 },
   taxAmount: { type: Number, default: 0 },

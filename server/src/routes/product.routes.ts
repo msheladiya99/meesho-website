@@ -23,42 +23,61 @@ router.get('/', async (req: AuthRequest, res: Response): Promise<void> => {
       Product.countDocuments(filter),
     ]);
 
-    // If accountId is provided, strictly isolate stock
+    // If accountId is provided, resolve target account stock
     if (accountId && accountId !== 'all' && mongoose.Types.ObjectId.isValid(accountId)) {
       const { targetAccountIds, isSharedStock } = await resolveStockAccountIds(accountId);
 
-      const productIds = products.map(p => p._id);
-      const movements = await StockMovement.aggregate([
+      const totalAgg = await StockMovement.aggregate([
         {
           $match: {
-            product: { $in: productIds },
             businessAccount: { $in: targetAccountIds },
             stockBucket: 'saleable',
           }
         },
         {
           $group: {
-            _id: '$product',
-            qty: { $sum: '$quantity' }
+            _id: null,
+            totalStock: { $sum: '$quantity' }
           }
         }
       ]);
-
-      const stockMap = new Map<string, number>();
-      movements.forEach(m => stockMap.set(m._id.toString(), Math.max(0, m.qty)));
+      const totalAvailableStock = totalAgg.length > 0 ? Math.max(0, totalAgg[0].totalStock) : 0;
 
       const adjustedProducts = products.map(p => {
         const pObj: any = p.toObject();
-        pObj.currentStock = stockMap.get(p._id.toString()) ?? 0;
+        pObj.currentStock = totalAvailableStock;
+        pObj.totalAvailableStock = totalAvailableStock;
         pObj.isSharedStock = isSharedStock;
         return pObj;
       });
 
-      res.json({ success: true, data: adjustedProducts, total, page: parseInt(page), limit: parseInt(limit) });
+      res.json({ success: true, data: adjustedProducts, total, page: parseInt(page), limit: parseInt(limit), totalAvailableStock });
       return;
     }
 
-    res.json({ success: true, data: products, total, page: parseInt(page), limit: parseInt(limit) });
+    const totalAgg = await StockMovement.aggregate([
+      {
+        $match: {
+          stockBucket: 'saleable',
+        }
+      },
+      {
+        $group: {
+          _id: null,
+          totalStock: { $sum: '$quantity' }
+        }
+      }
+    ]);
+    const totalAvailableStock = totalAgg.length > 0 ? Math.max(0, totalAgg[0].totalStock) : 0;
+
+    const adjustedProducts = products.map(p => {
+      const pObj: any = p.toObject();
+      pObj.currentStock = totalAvailableStock;
+      pObj.totalAvailableStock = totalAvailableStock;
+      return pObj;
+    });
+
+    res.json({ success: true, data: adjustedProducts, total, page: parseInt(page), limit: parseInt(limit), totalAvailableStock });
   } catch (err) {
     res.status(500).json({ success: false, message: (err as Error).message });
   }

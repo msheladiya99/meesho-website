@@ -36,20 +36,19 @@ Object.defineProperty(exports, "__esModule", { value: true });
 exports.StockPurchase = void 0;
 const mongoose_1 = __importStar(require("mongoose"));
 const stockPurchaseItemSchema = new mongoose_1.Schema({
-    product: { type: mongoose_1.Schema.Types.ObjectId, ref: 'Product', required: true },
+    product: { type: mongoose_1.Schema.Types.ObjectId, ref: 'Product', required: false },
     quantityPurchased: { type: Number, required: true, min: 1 },
     purchasePricePerUnit: { type: Number, required: true }, // paise
     totalAmount: { type: Number, required: true }, // paise
-});
+}, { _id: false });
 const stockPurchaseSchema = new mongoose_1.Schema({
     businessAccount: { type: mongoose_1.Schema.Types.ObjectId, ref: 'BusinessAccount', required: true },
     purchaseDate: { type: Date, required: true },
     vendor: { type: mongoose_1.Schema.Types.ObjectId, ref: 'Vendor', required: true },
     vendorInvoiceNumber: { type: String, trim: true },
-    items: { type: [stockPurchaseItemSchema], required: true, validate: {
-            validator: (val) => val.length > 0,
-            message: 'At least one item is required'
-        } },
+    totalQuantity: { type: Number, default: 0, min: 0 },
+    purchasePricePerUnit: { type: Number, default: 0 }, // paise
+    items: { type: [stockPurchaseItemSchema], default: [] },
     discount: { type: Number, default: 0 },
     additionalCosts: { type: Number, default: 0 },
     taxAmount: { type: Number, default: 0 },

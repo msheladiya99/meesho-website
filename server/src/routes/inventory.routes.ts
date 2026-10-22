@@ -27,7 +27,7 @@ router.get('/', async (req: AuthRequest, res: Response): Promise<void> => {
       const productIds = products.map(p => p._id);
 
       // Aggregate movements for this account + shared accounts
-      const [allTargetMovements, ownMovements] = await Promise.all([
+      const [allTargetMovements, ownMovements, totalAgg] = await Promise.all([
         StockMovement.aggregate([
           {
             $match: {
@@ -57,8 +57,24 @@ router.get('/', async (req: AuthRequest, res: Response): Promise<void> => {
               qty: { $sum: '$quantity' }
             }
           }
+        ]),
+        StockMovement.aggregate([
+          {
+            $match: {
+              businessAccount: { $in: targetAccountIds },
+              stockBucket: 'saleable',
+            }
+          },
+          {
+            $group: {
+              _id: null,
+              totalStock: { $sum: '$quantity' }
+            }
+          }
         ])
       ]);
+
+      const totalAvailableStock = totalAgg.length > 0 ? Math.max(0, totalAgg[0].totalStock) : 0;
 
       const targetStockMap = new Map<string, number>();
       allTargetMovements.forEach(item => {
@@ -74,20 +90,41 @@ router.get('/', async (req: AuthRequest, res: Response): Promise<void> => {
         const pObj: any = p.toObject();
         const ownStock = ownStockMap.get(p._id.toString()) ?? 0;
         
-        // STRICT INVENTORY ISOLATION:
-        // Current stock is strictly the calculated stock for target accounts (own stock if unchecked, shared if checked).
-        // If an account has 0 stock movements, it strictly shows 0. Never mix with other accounts!
-        pObj.currentStock = Math.max(0, targetStockMap.get(p._id.toString()) ?? 0);
+        // Products draw from the shared total quantity pool
+        pObj.currentStock = totalAvailableStock;
         pObj.ownStock = Math.max(0, ownStock);
+        pObj.totalAvailableStock = totalAvailableStock;
         pObj.isSharedStock = isSharedStock;
         return pObj;
       });
 
-      res.json({ success: true, data: mappedProducts });
+      res.json({ success: true, data: mappedProducts, totalAvailableStock });
       return;
     }
 
-    res.json({ success: true, data: products });
+    const totalAgg = await StockMovement.aggregate([
+      {
+        $match: {
+          stockBucket: 'saleable',
+        }
+      },
+      {
+        $group: {
+          _id: null,
+          totalStock: { $sum: '$quantity' }
+        }
+      }
+    ]);
+    const totalAvailableStock = totalAgg.length > 0 ? Math.max(0, totalAgg[0].totalStock) : 0;
+
+    const mappedProducts = products.map(p => {
+      const pObj: any = p.toObject();
+      pObj.currentStock = totalAvailableStock;
+      pObj.totalAvailableStock = totalAvailableStock;
+      return pObj;
+    });
+
+    res.json({ success: true, data: mappedProducts, totalAvailableStock });
   } catch (err) {
     res.status(500).json({ success: false, message: (err as Error).message });
   }

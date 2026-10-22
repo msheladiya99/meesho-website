@@ -3,7 +3,7 @@ var __importDefault = (this && this.__importDefault) || function (mod) {
     return (mod && mod.__esModule) ? mod : { "default": mod };
 };
 Object.defineProperty(exports, "__esModule", { value: true });
-exports.resolveStockAccountIds = exports.reverseMovementsByReference = exports.hasOrderDeductedStock = exports.recordStockMovement = exports.generateStockTransactionId = void 0;
+exports.resolveStockAccountIds = exports.calculateTotalAvailableStock = exports.reverseMovementsByReference = exports.hasOrderDeductedStock = exports.recordStockMovement = exports.generateStockTransactionId = void 0;
 const mongoose_1 = __importDefault(require("mongoose"));
 const Product_1 = require("../models/Product");
 const StockMovement_1 = require("../models/StockMovement");
@@ -17,9 +17,32 @@ exports.generateStockTransactionId = generateStockTransactionId;
 /**
  * Record a stock movement and update the product's stock buckets and weightedAvgCost.
  * Supports saleable, damaged, and pending buckets.
+ * When productId is omitted, records a direct total warehouse stock movement.
  */
 const recordStockMovement = async (params) => {
     const { businessAccount, productId, movementType, quantity, stockBucket = 'saleable', unitCost = 0, referenceType, referenceId, reason, createdBy, session, } = params;
+    // Handle direct total quantity purchase (no specific perfume selected)
+    if (!productId) {
+        const transactionId = (0, exports.generateStockTransactionId)();
+        await StockMovement_1.StockMovement.create([{
+                transactionId,
+                businessAccount: new mongoose_1.default.Types.ObjectId(businessAccount),
+                product: undefined,
+                sku: 'TOTAL_STOCK',
+                stockBucket,
+                movementType,
+                quantity,
+                unitCost: unitCost || 0,
+                referenceType,
+                referenceId: referenceId && mongoose_1.default.Types.ObjectId.isValid(referenceId) ? new mongoose_1.default.Types.ObjectId(referenceId) : undefined,
+                reason: reason || 'Direct total stock purchase',
+                previousStock: 0,
+                resultingStock: quantity,
+                runningBalance: quantity,
+                createdBy: createdBy ? new mongoose_1.default.Types.ObjectId(createdBy) : undefined,
+            }], { session });
+        return;
+    }
     const product = await Product_1.Product.findById(productId).session(session || null);
     if (!product)
         throw new Error(`Product ${productId} not found`);
@@ -55,7 +78,7 @@ const recordStockMovement = async (params) => {
         if (quantity > 0 && unitCost > 0) {
             const currentValue = product.currentStock * product.weightedAvgCost;
             const incomingValue = quantity * unitCost;
-            newWeightedAvgCost = Math.round((currentValue + incomingValue) / resultingStock);
+            newWeightedAvgCost = Math.round((currentValue + incomingValue) / (resultingStock > 0 ? resultingStock : 1));
             productUpdate.weightedAvgCost = newWeightedAvgCost;
         }
     }
@@ -81,14 +104,6 @@ const recordStockMovement = async (params) => {
             runningBalance: resultingStock,
             createdBy: createdBy ? new mongoose_1.default.Types.ObjectId(createdBy) : undefined,
         }], { session });
-    // Ensure product.currentStock strictly mirrors the movement ledger for saleable stock
-    if (stockBucket === 'saleable') {
-        const agg = await StockMovement_1.StockMovement.aggregate([
-            { $match: { product: new mongoose_1.default.Types.ObjectId(productId), stockBucket: 'saleable' } },
-            { $group: { _id: null, total: { $sum: '$quantity' } } }
-        ]).session(session || null);
-        productUpdate.currentStock = agg.length > 0 ? Math.max(0, agg[0].total) : 0;
-    }
     // Update product model
     await Product_1.Product.findByIdAndUpdate(productId, productUpdate, { session });
 };
@@ -113,42 +128,56 @@ const reverseMovementsByReference = async (referenceId, createdBy, session) => {
         referenceId: new mongoose_1.default.Types.ObjectId(referenceId),
     }).session(session || null);
     for (const mv of movements) {
-        const product = await Product_1.Product.findById(mv.product).session(session || null);
-        if (product) {
-            const reversalQuantity = mv.quantity;
-            if (mv.stockBucket === 'damaged') {
-                const newBal = Math.max(0, (product.damagedStock || 0) - reversalQuantity);
-                await Product_1.Product.findByIdAndUpdate(mv.product, { damagedStock: newBal }, { session });
-            }
-            else if (mv.stockBucket === 'pending') {
-                const newBal = Math.max(0, (product.pendingInspectionStock || 0) - reversalQuantity);
-                await Product_1.Product.findByIdAndUpdate(mv.product, { pendingInspectionStock: newBal }, { session });
-            }
-            else {
-                const newBal = Math.max(0, product.currentStock - reversalQuantity);
-                let newWeightedAvgCost = product.weightedAvgCost;
-                if (reversalQuantity > 0 && mv.unitCost > 0) {
-                    const currentValue = product.currentStock * product.weightedAvgCost;
-                    const reversedValue = reversalQuantity * mv.unitCost;
-                    newWeightedAvgCost = newBal > 0 ? Math.max(0, Math.round((currentValue - reversedValue) / newBal)) : product.weightedAvgCost;
+        if (mv.product) {
+            const product = await Product_1.Product.findById(mv.product).session(session || null);
+            if (product) {
+                const reversalQuantity = mv.quantity;
+                if (mv.stockBucket === 'damaged') {
+                    const newBal = Math.max(0, (product.damagedStock || 0) - reversalQuantity);
+                    await Product_1.Product.findByIdAndUpdate(mv.product, { damagedStock: newBal }, { session });
                 }
-                await Product_1.Product.findByIdAndUpdate(mv.product, { currentStock: newBal, weightedAvgCost: newWeightedAvgCost }, { session });
+                else if (mv.stockBucket === 'pending') {
+                    const newBal = Math.max(0, (product.pendingInspectionStock || 0) - reversalQuantity);
+                    await Product_1.Product.findByIdAndUpdate(mv.product, { pendingInspectionStock: newBal }, { session });
+                }
+                else {
+                    const newBal = Math.max(0, product.currentStock - reversalQuantity);
+                    let newWeightedAvgCost = product.weightedAvgCost;
+                    if (reversalQuantity > 0 && mv.unitCost > 0) {
+                        const currentValue = product.currentStock * product.weightedAvgCost;
+                        const reversedValue = reversalQuantity * mv.unitCost;
+                        newWeightedAvgCost = newBal > 0 ? Math.max(0, Math.round((currentValue - reversedValue) / newBal)) : product.weightedAvgCost;
+                    }
+                    await Product_1.Product.findByIdAndUpdate(mv.product, { currentStock: newBal, weightedAvgCost: newWeightedAvgCost }, { session });
+                }
             }
         }
         // Delete the original movement
         await StockMovement_1.StockMovement.findByIdAndDelete(mv._id).session(session || null);
-        // Recalculate true currentStock from remaining movements to prevent drift
-        if (!mv.stockBucket || mv.stockBucket === 'saleable') {
-            const agg = await StockMovement_1.StockMovement.aggregate([
-                { $match: { product: mv.product, stockBucket: 'saleable' } },
-                { $group: { _id: null, total: { $sum: '$quantity' } } }
-            ]).session(session || null);
-            const actualStock = agg.length > 0 ? Math.max(0, agg[0].total) : 0;
-            await Product_1.Product.findByIdAndUpdate(mv.product, { currentStock: actualStock }, { session });
-        }
     }
 };
 exports.reverseMovementsByReference = reverseMovementsByReference;
+/**
+ * Calculate total available saleable stock across designated account(s).
+ */
+const calculateTotalAvailableStock = async (targetAccountIds) => {
+    const agg = await StockMovement_1.StockMovement.aggregate([
+        {
+            $match: {
+                businessAccount: { $in: targetAccountIds },
+                stockBucket: 'saleable',
+            }
+        },
+        {
+            $group: {
+                _id: null,
+                totalStock: { $sum: '$quantity' }
+            }
+        }
+    ]);
+    return agg.length > 0 ? Math.max(0, agg[0].totalStock) : 0;
+};
+exports.calculateTotalAvailableStock = calculateTotalAvailableStock;
 /**
  * Resolve the account IDs whose stock the given account is entitled to access.
  * Returns { targetAccountIds, isSharedStock }.

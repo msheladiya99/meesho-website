@@ -1,6 +1,6 @@
 import mongoose, { Document } from 'mongoose';
 export interface IStockPurchaseItem {
-    product: mongoose.Types.ObjectId;
+    product?: mongoose.Types.ObjectId;
     quantityPurchased: number;
     purchasePricePerUnit: number;
     totalAmount: number;
@@ -10,7 +10,9 @@ export interface IStockPurchase extends Document {
     purchaseDate: Date;
     vendor: mongoose.Types.ObjectId;
     vendorInvoiceNumber?: string;
-    items: IStockPurchaseItem[];
+    totalQuantity: number;
+    purchasePricePerUnit: number;
+    items?: IStockPurchaseItem[];
     discount: number;
     additionalCosts: number;
     taxAmount: number;

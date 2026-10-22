@@ -38,8 +38,8 @@ const mongoose_1 = __importStar(require("mongoose"));
 const stockMovementSchema = new mongoose_1.Schema({
     transactionId: { type: String, required: true, trim: true },
     businessAccount: { type: mongoose_1.Schema.Types.ObjectId, ref: 'BusinessAccount', required: true },
-    product: { type: mongoose_1.Schema.Types.ObjectId, ref: 'Product', required: true },
-    sku: { type: String, required: true, uppercase: true },
+    product: { type: mongoose_1.Schema.Types.ObjectId, ref: 'Product', required: false },
+    sku: { type: String, required: false, uppercase: true },
     stockBucket: {
         type: String,
         enum: ['saleable', 'damaged', 'pending'],

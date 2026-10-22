@@ -2,7 +2,7 @@ import mongoose from 'mongoose';
 import { MovementType, StockBucket } from '../models/StockMovement';
 interface RecordMovementParams {
     businessAccount: string;
-    productId: string;
+    productId?: string;
     movementType: MovementType;
     quantity: number;
     stockBucket?: StockBucket;
@@ -17,6 +17,7 @@ export declare const generateStockTransactionId: () => string;
 /**
  * Record a stock movement and update the product's stock buckets and weightedAvgCost.
  * Supports saleable, damaged, and pending buckets.
+ * When productId is omitted, records a direct total warehouse stock movement.
  */
 export declare const recordStockMovement: (params: RecordMovementParams) => Promise<void>;
 /**
@@ -27,6 +28,10 @@ export declare const hasOrderDeductedStock: (orderId: string, session?: mongoose
  * Reverse a movement (e.g., when an order or purchase is deleted).
  */
 export declare const reverseMovementsByReference: (referenceId: string, createdBy?: string, session?: mongoose.ClientSession) => Promise<void>;
+/**
+ * Calculate total available saleable stock across designated account(s).
+ */
+export declare const calculateTotalAvailableStock: (targetAccountIds: mongoose.Types.ObjectId[]) => Promise<number>;
 /**
  * Resolve the account IDs whose stock the given account is entitled to access.
  * Returns { targetAccountIds, isSharedStock }.

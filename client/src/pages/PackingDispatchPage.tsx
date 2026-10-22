@@ -6,7 +6,7 @@ import {
   ChevronRight, Sparkles, Filter, Plus, Package, Tag, Building2, Trash2
 } from 'lucide-react';
 import { packingApi, type PackingLookupResult } from '../services/packing.service';
-import { productsApi, inventoryApi } from '../services/inventory.service';
+import { productsApi, inventoryApi, categoriesApi } from '../services/inventory.service';
 import { ordersApi } from '../services/orders.service';
 import { useAccountStore } from '../store/accountStore';
 import { formatCurrency, formatDate, paiseToRupees, rupeesToPaise } from '../lib/utils';
@@ -15,7 +15,7 @@ import { PrintableQrLabel } from '../components/ui/PrintableQrLabel';
 import { LoadingSpinner, EmptyState } from '../components/ui/Feedback';
 import Modal from '../components/ui/Modal';
 import toast from 'react-hot-toast';
-import type { Order, PackingRecord, Product } from '../types';
+import type { Order, PackingRecord, Product, Category } from '../types';
 
 export interface QuickOrderItem {
   id: string;
@@ -100,6 +100,13 @@ export const PackingDispatchPage: React.FC = () => {
     queryFn: () => inventoryApi.list({ accountId: currentTargetAccount }),
   });
   const products: Product[] = productsData?.data?.data || [];
+
+  const [quickOrderCategory, setQuickOrderCategory] = useState<string>('');
+  const { data: categoriesData } = useQuery({
+    queryKey: ['categories'],
+    queryFn: () => categoriesApi.list(),
+  });
+  const categories: Category[] = categoriesData?.data?.data || [];
 
   // Cache last selected product for rapid consecutive packing
   const [lastSelectedProductId, setLastSelectedProductId] = useState<string>(() => {
@@ -1164,7 +1171,21 @@ export const PackingDispatchPage: React.FC = () => {
                       </div>
 
                       {/* Dropdown Selector */}
-                      <div>
+                      <div className="space-y-2">
+                        <div className="flex items-center gap-2">
+                          <label className="text-[10px] text-gray-500 font-semibold uppercase tracking-wider shrink-0">Category:</label>
+                          <select
+                            value={quickOrderCategory}
+                            onChange={(e) => setQuickOrderCategory(e.target.value)}
+                            className="input py-1 text-xs bg-white text-gray-700"
+                          >
+                            <option value="">All Categories ({categories.length})</option>
+                            {categories.map((c) => (
+                              <option key={c._id} value={c._id}>{c.name}</option>
+                            ))}
+                          </select>
+                        </div>
+
                         <select
                           value={item.productId}
                           onChange={(e) => handleItemProductChange(item.id, e.target.value)}
@@ -1172,7 +1193,9 @@ export const PackingDispatchPage: React.FC = () => {
                           required
                         >
                           <option value="">Select a perfume / fragrance</option>
-                          {products.map((p) => (
+                          {products
+                            .filter((p) => !quickOrderCategory || (typeof p.category === 'object' ? (p.category as any)?._id : p.category) === quickOrderCategory)
+                            .map((p) => (
                             <option key={p._id} value={p._id}>
                               {p.name} — SKU: {p.sku} (Available: {p.currentStock}{p.isSharedStock ? ' • Shared' : ''})
                             </option>
@@ -1183,7 +1206,9 @@ export const PackingDispatchPage: React.FC = () => {
                         {products.length > 0 && (
                           <div className="flex flex-wrap gap-1.5 pt-1.5">
                             <span className="text-[10px] text-gray-400 self-center">Quick pick:</span>
-                            {products.slice(0, 8).map((p) => (
+                            {products
+                              .filter((p) => !quickOrderCategory || (typeof p.category === 'object' ? (p.category as any)?._id : p.category) === quickOrderCategory)
+                              .slice(0, 8).map((p) => (
                               <button
                                 key={p._id}
                                 type="button"

@@ -71,13 +71,14 @@ router.get('/:id', async (req, res) => {
 // POST /api/stock-purchases
 router.post('/', auth_1.requireManagerOrAdmin, auth_1.enforceAccountAccess, async (req, res) => {
     try {
-        const { businessAccount, items, totalAmount } = req.body;
+        const { businessAccount, totalQuantity, purchasePricePerUnit, items, totalAmount } = req.body;
         if (!businessAccount) {
             res.status(400).json({ success: false, message: 'businessAccount is required' });
             return;
         }
-        if (!items || !Array.isArray(items) || items.length === 0) {
-            res.status(400).json({ success: false, message: 'items array is required' });
+        const parsedQty = Number(totalQuantity) || (Array.isArray(items) ? items.reduce((sum, it) => sum + (Number(it.quantityPurchased) || 0), 0) : 0);
+        if (!parsedQty || parsedQty <= 0) {
+            res.status(400).json({ success: false, message: 'Total quantity must be greater than 0' });
             return;
         }
         // Concurrency guard against rapid double clicks on Create
@@ -95,28 +96,47 @@ router.post('/', auth_1.requireManagerOrAdmin, auth_1.enforceAccountAccess, asyn
                     recentPurchaseCreations.delete(k);
             }
         }
-        // Check for duplicate products in items
-        const productIds = items.map((i) => i.product);
-        const uniqueIds = new Set(productIds);
-        if (productIds.length !== uniqueIds.size) {
-            res.status(400).json({ success: false, message: 'Duplicate products in items list' });
-            return;
+        const calculatedUnitPrice = purchasePricePerUnit !== undefined && purchasePricePerUnit !== null
+            ? Number(purchasePricePerUnit)
+            : (parsedQty > 0 ? Math.round((Number(totalAmount) || 0) / parsedQty) : 0);
+        const purchase = await StockPurchase_1.StockPurchase.create({
+            ...req.body,
+            totalQuantity: parsedQty,
+            purchasePricePerUnit: calculatedUnitPrice,
+            items: Array.isArray(items) ? items : [],
+            createdBy: req.user?._id
+        });
+        // If items with specific products are provided (legacy mode), record per item;
+        // Otherwise record direct total quantity warehouse movement
+        if (Array.isArray(items) && items.length > 0 && items.some(it => it.product)) {
+            for (const item of items) {
+                const itemQty = Number(item.quantityPurchased) || 0;
+                if (itemQty <= 0)
+                    continue;
+                const unitCostForMovement = itemQty > 0 ? Math.round((item.totalAmount || (itemQty * item.purchasePricePerUnit)) / itemQty) : item.purchasePricePerUnit;
+                await (0, inventory_service_1.recordStockMovement)({
+                    businessAccount,
+                    productId: item.product,
+                    movementType: 'purchase',
+                    quantity: itemQty,
+                    unitCost: unitCostForMovement,
+                    referenceType: 'StockPurchase',
+                    referenceId: purchase._id.toString(),
+                    reason: `Stock purchase from vendor`,
+                    createdBy: req.user?._id?.toString(),
+                });
+            }
         }
-        const purchase = await StockPurchase_1.StockPurchase.create({ ...req.body, createdBy: req.user?._id });
-        // Record stock movement for each item
-        for (let i = 0; i < items.length; i++) {
-            const item = items[i];
-            const unitCostForMovement = item.quantityPurchased > 0 ? Math.round(item.totalAmount / item.quantityPurchased) : item.purchasePricePerUnit;
+        else {
             await (0, inventory_service_1.recordStockMovement)({
                 businessAccount,
-                productId: item.product,
                 movementType: 'purchase',
-                quantity: item.quantityPurchased,
-                unitCost: unitCostForMovement,
+                quantity: parsedQty,
+                unitCost: calculatedUnitPrice,
                 referenceType: 'StockPurchase',
                 referenceId: purchase._id.toString(),
-                reason: `Stock purchase from vendor`,
-                createdBy: req.user?._id,
+                reason: `Direct stock purchase: ${parsedQty} units`,
+                createdBy: req.user?._id?.toString(),
             });
         }
         await (0, audit_service_1.createAuditLog)({ action: 'CREATE', resource: 'StockPurchase', resourceId: purchase._id.toString(), userId: req.user?._id });
@@ -149,18 +169,15 @@ router.put('/:id', auth_1.requireManagerOrAdmin, auth_1.enforceAccountAccess, as
             res.status(404).json({ success: false, message: 'Purchase not found' });
             return;
         }
-        const { items, purchaseDate, vendor, vendorInvoiceNumber, discount, additionalCosts, taxAmount, totalAmount, paymentStatus, notes } = req.body;
-        if (!items || !Array.isArray(items) || items.length === 0) {
-            res.status(400).json({ success: false, message: 'items array is required' });
+        const { items, totalQuantity, purchasePricePerUnit, purchaseDate, vendor, vendorInvoiceNumber, discount, additionalCosts, taxAmount, totalAmount, paymentStatus, notes } = req.body;
+        const parsedQty = Number(totalQuantity) || (Array.isArray(items) ? items.reduce((sum, it) => sum + (Number(it.quantityPurchased) || 0), 0) : existing.totalQuantity || 0);
+        if (!parsedQty || parsedQty <= 0) {
+            res.status(400).json({ success: false, message: 'Total quantity must be greater than 0' });
             return;
         }
-        // Check for duplicate products in items
-        const productIds = items.map((i) => i.product);
-        const uniqueIds = new Set(productIds);
-        if (productIds.length !== uniqueIds.size) {
-            res.status(400).json({ success: false, message: 'Duplicate products in items list' });
-            return;
-        }
+        const calculatedUnitPrice = purchasePricePerUnit !== undefined && purchasePricePerUnit !== null
+            ? Number(purchasePricePerUnit)
+            : (parsedQty > 0 ? Math.round((Number(totalAmount) || 0) / parsedQty) : 0);
         // Reverse old movements, then clean up any remaining movements with this referenceId
         await (0, inventory_service_1.reverseMovementsByReference)(purchaseId, req.user?._id?.toString());
         await StockMovement_1.StockMovement.deleteMany({
@@ -168,7 +185,9 @@ router.put('/:id', auth_1.requireManagerOrAdmin, auth_1.enforceAccountAccess, as
             referenceId: new mongoose_1.default.Types.ObjectId(purchaseId),
         });
         const updateData = {
-            items,
+            totalQuantity: parsedQty,
+            purchasePricePerUnit: calculatedUnitPrice,
+            items: Array.isArray(items) ? items : [],
             purchaseDate,
             vendor,
             vendorInvoiceNumber,
@@ -184,18 +203,35 @@ router.put('/:id', auth_1.requireManagerOrAdmin, auth_1.enforceAccountAccess, as
             res.status(404).json({ success: false, message: 'Not found' });
             return;
         }
-        // Record stock movement for each item
-        for (const item of updated.items) {
-            const unitCostForMovement = item.quantityPurchased > 0 ? Math.round(item.totalAmount / item.quantityPurchased) : item.purchasePricePerUnit;
+        // Re-record stock movements
+        if (Array.isArray(items) && items.length > 0 && items.some(it => it.product)) {
+            for (const item of items) {
+                const itemQty = Number(item.quantityPurchased) || 0;
+                if (itemQty <= 0)
+                    continue;
+                const unitCostForMovement = itemQty > 0 ? Math.round((item.totalAmount || (itemQty * item.purchasePricePerUnit)) / itemQty) : item.purchasePricePerUnit;
+                await (0, inventory_service_1.recordStockMovement)({
+                    businessAccount: updated.businessAccount.toString(),
+                    productId: item.product.toString(),
+                    movementType: 'purchase',
+                    quantity: itemQty,
+                    unitCost: unitCostForMovement,
+                    referenceType: 'StockPurchase',
+                    referenceId: updated._id.toString(),
+                    reason: 'Stock purchase updated — re-recorded',
+                    createdBy: req.user?._id?.toString(),
+                });
+            }
+        }
+        else {
             await (0, inventory_service_1.recordStockMovement)({
                 businessAccount: updated.businessAccount.toString(),
-                productId: item.product.toString(),
                 movementType: 'purchase',
-                quantity: item.quantityPurchased,
-                unitCost: unitCostForMovement,
+                quantity: parsedQty,
+                unitCost: calculatedUnitPrice,
                 referenceType: 'StockPurchase',
                 referenceId: updated._id.toString(),
-                reason: 'Stock purchase updated — re-recorded',
+                reason: `Direct stock purchase updated: ${parsedQty} units`,
                 createdBy: req.user?._id?.toString(),
             });
         }

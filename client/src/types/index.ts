@@ -218,7 +218,9 @@ export interface StockPurchase {
   purchaseDate: string;
   vendor: Vendor | string;
   vendorInvoiceNumber?: string;
-  items: StockPurchaseItem[];
+  totalQuantity?: number;
+  purchasePricePerUnit?: number; // paise
+  items?: StockPurchaseItem[];
   discount: number; // paise
   additionalCosts: number; // paise
   taxAmount: number; // paise

@@ -4,8 +4,8 @@ export type StockBucket = 'saleable' | 'damaged' | 'pending';
 export interface IStockMovement extends Document {
     transactionId: string;
     businessAccount: mongoose.Types.ObjectId;
-    product: mongoose.Types.ObjectId;
-    sku: string;
+    product?: mongoose.Types.ObjectId;
+    sku?: string;
     stockBucket: StockBucket;
     movementType: MovementType;
     quantity: number;

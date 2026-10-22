@@ -17,8 +17,8 @@ export type StockBucket = 'saleable' | 'damaged' | 'pending';
 export interface IStockMovement extends Document {
   transactionId: string;
   businessAccount: mongoose.Types.ObjectId;
-  product: mongoose.Types.ObjectId;
-  sku: string;
+  product?: mongoose.Types.ObjectId;
+  sku?: string;
   stockBucket: StockBucket;
   movementType: MovementType;
   quantity: number;       // positive = stock IN, negative = stock OUT
@@ -35,8 +35,8 @@ export interface IStockMovement extends Document {
 const stockMovementSchema = new Schema<IStockMovement>({
   transactionId: { type: String, required: true, trim: true },
   businessAccount: { type: Schema.Types.ObjectId, ref: 'BusinessAccount', required: true },
-  product: { type: Schema.Types.ObjectId, ref: 'Product', required: true },
-  sku: { type: String, required: true, uppercase: true },
+  product: { type: Schema.Types.ObjectId, ref: 'Product', required: false },
+  sku: { type: String, required: false, uppercase: true },
   stockBucket: {
     type: String,
     enum: ['saleable', 'damaged', 'pending'],
