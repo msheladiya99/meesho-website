@@ -53,6 +53,8 @@
     "yn": "^3.1.1"
   },
   "scripts": {
+    "build": "npm --prefix server install && npm --prefix server run build",
+    "start": "npm --prefix server start",
     "test": "echo \"Error: no test specified\" && exit 1"
   },
   "keywords": [],

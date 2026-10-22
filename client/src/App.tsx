@@ -5,6 +5,7 @@ import { Toaster } from 'react-hot-toast';
 
 import { useAuthStore } from './store/authStore';
 import AppLayout from './components/layout/AppLayout';
+import { healthPingService } from './services/healthPing.service';
 
 // Pages
 import LoginPage from './pages/LoginPage';
@@ -47,6 +48,13 @@ const PublicRoute: React.FC<{ children: React.ReactNode }> = ({ children }) => {
 };
 
 function App() {
+  React.useEffect(() => {
+    healthPingService.start();
+    return () => {
+      healthPingService.stop();
+    };
+  }, []);
+
   return (
     <QueryClientProvider client={queryClient}>
       <BrowserRouter>

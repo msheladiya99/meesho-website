@@ -1,0 +1,27 @@
+services:
+  # ───────────────────────────────────────────────────────────────────────────
+  # Render Web Service Blueprint for Meesho Perfume Business Manager Backend
+  # ───────────────────────────────────────────────────────────────────────────
+  - type: web
+    name: meesho-perfume-backend
+    runtime: node
+    region: oregon
+    plan: starter # Change to 'free' if evaluating; 'starter' ($7/mo) guarantees 24/7 always-on without sleeping
+    rootDir: server
+    buildCommand: npm install && npm run build
+    startCommand: npm start
+    healthCheckPath: /health
+    autoDeploy: true
+    envVars:
+      - key: NODE_ENV
+        value: production
+      - key: PORT
+        value: 10000
+      - key: MONGODB_URI
+        sync: false
+      - key: JWT_SECRET
+        sync: false
+      - key: JWT_EXPIRES_IN
+        value: 7d
+      - key: ALLOWED_ORIGINS
+        sync: false

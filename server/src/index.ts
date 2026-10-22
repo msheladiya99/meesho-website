@@ -1,7 +1,7 @@
 import express from 'express';
 import cors from 'cors';
 import dotenv from 'dotenv';
-import { connectDB } from './config/db';
+import { connectDB, closeDB, isDbConnected } from './config/db';
 import { errorHandler } from './middleware/errorHandler';
 import { rateLimiter } from './middleware/rateLimiter';
 
@@ -26,21 +26,90 @@ import auditRoutes from './routes/audit.routes';
 dotenv.config();
 
 const app = express();
-const PORT = process.env.PORT || 5000;
+const PORT = Number(process.env.PORT) || 5000;
+const HOST = '0.0.0.0';
 
-// Connect DB
-connectDB();
+// Enable trust proxy for Render reverse-proxy (fixes rate-limiting and IP tracking)
+app.set('trust proxy', 1);
 
-// Middleware
+// Connect DB asynchronously on boot
+connectDB().catch((err) => {
+  console.error('Initial DB connection attempt encountered error:', err.message);
+});
+
+// Configure CORS
+const allowedOrigins = (process.env.ALLOWED_ORIGINS || '')
+  .split(',')
+  .map(o => o.trim())
+  .filter(Boolean);
+
 app.use(cors({
-  origin: process.env.ALLOWED_ORIGINS?.split(',') || ['http://localhost:5173'],
+  origin: (origin, callback) => {
+    // Allow non-browser requests (e.g. mobile apps, curl, server-to-server, health checks)
+    if (!origin) return callback(null, true);
+
+    // If explicit origins are configured, check match
+    if (allowedOrigins.length > 0) {
+      if (
+        allowedOrigins.includes(origin) ||
+        allowedOrigins.includes('*') ||
+        /\.vercel\.app$/.test(origin) ||
+        /\.onrender\.com$/.test(origin)
+      ) {
+        return callback(null, true);
+      }
+      return callback(new Error(`Origin ${origin} not allowed by CORS`));
+    }
+
+    // Default development fallback
+    return callback(null, true);
+  },
   credentials: true,
 }));
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Production Health & Readiness Endpoints (Mounted BEFORE Rate Limiter)
+// ─────────────────────────────────────────────────────────────────────────────
+
+// Liveness probe for Render health-check path (configured in Render Dashboard: /health)
+app.get(['/health', '/api/health'], (_req, res) => {
+  res.status(200).json({
+    status: 'ok',
+    service: 'perfume-business-manager',
+    uptime: Math.floor(process.uptime()),
+    timestamp: new Date().toISOString(),
+  });
+});
+
+// Readiness probe (verifies MongoDB connection readiness without heavy queries)
+app.get(['/ready', '/api/ready', '/health/ready'], (_req, res) => {
+  const connected = isDbConnected();
+  if (connected) {
+    res.status(200).json({
+      status: 'ready',
+      service: 'perfume-business-manager',
+      database: 'connected',
+      timestamp: new Date().toISOString(),
+    });
+  } else {
+    res.status(503).json({
+      status: 'not_ready',
+      service: 'perfume-business-manager',
+      database: 'disconnected',
+      message: 'Database connection is initializing or temporarily unavailable',
+      timestamp: new Date().toISOString(),
+    });
+  }
+});
+
+// Parsers
 app.use(express.json({ limit: '10mb' }));
 app.use(express.urlencoded({ extended: true }));
+
+// Apply rate limiter to business API routes
 app.use(rateLimiter);
 
-// API Routes
+// Business API Routes
 app.use('/api/auth', authRoutes);
 app.use('/api/users', userRoutes);
 app.use('/api/business-accounts', accountRoutes);
@@ -58,16 +127,53 @@ app.use('/api/reports', reportRoutes);
 app.use('/api/analytics', analyticsRoutes);
 app.use('/api/audit-logs', auditRoutes);
 
-// Health check
-app.get('/api/health', (_req, res) => {
-  res.json({ status: 'ok', timestamp: new Date().toISOString() });
-});
-
 // Error handler (must be last)
 app.use(errorHandler);
 
-app.listen(PORT, () => {
-  console.log(`🚀 Server running on http://localhost:${PORT}`);
+// ─────────────────────────────────────────────────────────────────────────────
+// Server Listen & Graceful Shutdown
+// ─────────────────────────────────────────────────────────────────────────────
+const server = app.listen(PORT, HOST, () => {
+  console.log(`🚀 Server listening on http://${HOST}:${PORT} [NODE_ENV=${process.env.NODE_ENV || 'production'}]`);
+});
+
+let isShuttingDown = false;
+
+const gracefulShutdown = async (signal: string) => {
+  if (isShuttingDown) return;
+  isShuttingDown = true;
+  console.log(`\n🛑 Received ${signal}. Starting graceful shutdown...`);
+
+  // Stop accepting new connections
+  server.close(async () => {
+    console.log('🔒 HTTP server closed');
+    try {
+      await closeDB();
+      console.log('✅ Graceful shutdown completed cleanly');
+      process.exit(0);
+    } catch (err) {
+      console.error('❌ Error during database shutdown:', err);
+      process.exit(1);
+    }
+  });
+
+  // Force exit after 10s if active connections hang
+  setTimeout(() => {
+    console.error('⚠️ Forcefully terminating after shutdown timeout (10s)');
+    process.exit(1);
+  }, 10000).unref();
+};
+
+process.on('SIGTERM', () => gracefulShutdown('SIGTERM'));
+process.on('SIGINT', () => gracefulShutdown('SIGINT'));
+
+process.on('unhandledRejection', (reason: any) => {
+  console.error('🚨 Unhandled Promise Rejection:', reason?.message || reason);
+});
+
+process.on('uncaughtException', (err: Error) => {
+  console.error('💥 Uncaught Exception:', err.message, err.stack);
+  gracefulShutdown('uncaughtException');
 });
 
 export default app;
