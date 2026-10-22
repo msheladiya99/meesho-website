@@ -836,16 +836,16 @@ export const ReturnsPage: React.FC = () => {
                 <thead>
                   <tr>
                     <th>Date</th>
-                    <th>Transaction ID</th>
-                    <th>Type</th>
-                    <th>Meesho ID</th>
+                    <th className="hidden lg:table-cell">Transaction ID</th>
+                    <th className="hidden sm:table-cell">Type</th>
+                    <th className="hidden md:table-cell">Meesho ID</th>
                     <th>Product</th>
-                    <th>Returned</th>
-                    <th>Good</th>
-                    <th>Damaged</th>
-                    <th>Pending</th>
-                    <th>Status</th>
-                    <th>Actions</th>
+                    <th className="text-center sm:text-left">Qty</th>
+                    <th className="hidden sm:table-cell text-emerald-700">Good</th>
+                    <th className="hidden md:table-cell text-red-600">Damaged</th>
+                    <th className="hidden sm:table-cell text-amber-700">Pending</th>
+                    <th className="text-center sm:text-left">Status</th>
+                    <th className="text-right pr-2">Actions</th>
                   </tr>
                 </thead>
                 <tbody>
@@ -853,20 +853,30 @@ export const ReturnsPage: React.FC = () => {
                     const prod = typeof ret.product === 'object' ? ret.product : null;
                     return (
                       <tr key={ret._id}>
-                        <td className="whitespace-nowrap">{formatDate(ret.returnDate || ret.createdAt)}</td>
-                        <td className="font-mono text-xs font-semibold text-gray-800">{ret.returnTransactionId || ret.transactionId || '—'}</td>
-                        <td>
+                        <td className="whitespace-nowrap text-[11px] sm:text-xs">{formatDate(ret.returnDate || ret.createdAt)}</td>
+                        <td className="hidden lg:table-cell font-mono text-xs font-semibold text-gray-800">{ret.returnTransactionId || ret.transactionId || '—'}</td>
+                        <td className="hidden sm:table-cell">
                           <span className={`badge ${ret.returnType === 'rto_return' ? 'badge-yellow' : 'badge-purple'}`}>
                             {ret.returnType === 'rto_return' ? 'RTO' : 'Customer'}
                           </span>
                         </td>
-                        <td className="font-mono text-xs font-bold">{ret.meeshoOrderId || '—'}</td>
-                        <td>{(prod as any)?.name || '—'}</td>
-                        <td className="font-bold">{ret.returnedQuantity}</td>
-                        <td className="text-emerald-700 font-semibold">{ret.goodQuantity || 0}</td>
-                        <td className="text-red-600 font-semibold">{ret.damagedQuantity || 0}</td>
-                        <td className="text-amber-700 font-semibold">{ret.pendingInspectionQuantity || 0}</td>
+                        <td className="hidden md:table-cell font-mono text-xs font-bold">{ret.meeshoOrderId || '—'}</td>
                         <td>
+                          <div>
+                            <div className="font-medium text-xs text-gray-900 truncate max-w-[130px] sm:max-w-none">{(prod as any)?.name || '—'}</div>
+                            <div className="sm:hidden flex items-center gap-1 mt-0.5 text-[10px] text-gray-400 font-mono">
+                              <span className={`badge ${ret.returnType === 'rto_return' ? 'badge-yellow' : 'badge-purple'} text-[9px] px-1 py-0`}>
+                                {ret.returnType === 'rto_return' ? 'RTO' : 'Cust'}
+                              </span>
+                              {ret.meeshoOrderId && <span className="truncate max-w-[80px]">{ret.meeshoOrderId}</span>}
+                            </div>
+                          </div>
+                        </td>
+                        <td className="text-center sm:text-left font-bold text-xs">{ret.returnedQuantity}</td>
+                        <td className="hidden sm:table-cell text-emerald-700 font-semibold">{ret.goodQuantity || 0}</td>
+                        <td className="hidden md:table-cell text-red-600 font-semibold">{ret.damagedQuantity || 0}</td>
+                        <td className="hidden sm:table-cell text-amber-700 font-semibold">{ret.pendingInspectionQuantity || 0}</td>
+                        <td className="text-center sm:text-left">
                           <span className={`badge ${
                             ret.status === 'stock_updated' ? 'badge-green' :
                             ret.status === 'inspection_pending' ? 'badge-yellow' :

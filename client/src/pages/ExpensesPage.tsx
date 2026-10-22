@@ -121,19 +121,37 @@ const ExpensesPage: React.FC = () => {
         ) : (
           <div className="table-container">
             <table className="table">
-              <thead><tr><th>Date</th><th>Category</th><th>Description</th><th>Amount</th><th>Paid By</th><th>Method</th><th>Allocation</th><th>Actions</th></tr></thead>
+              <thead>
+                <tr>
+                  <th>Date</th>
+                  <th>Category</th>
+                  <th className="hidden sm:table-cell">Description</th>
+                  <th className="text-right sm:text-left">Amount</th>
+                  <th className="text-center sm:text-left">Paid By</th>
+                  <th className="hidden md:table-cell">Method</th>
+                  <th className="hidden lg:table-cell">Allocation</th>
+                  <th className="text-right pr-2">Actions</th>
+                </tr>
+              </thead>
               <tbody>
                 {expenses.map(e => (
                   <tr key={e._id}>
-                    <td className="whitespace-nowrap">{formatDate(e.expenseDate)}</td>
-                    <td><span className="badge badge-blue">{e.category}</span></td>
-                    <td>{e.description}</td>
-                    <td className="font-semibold">{formatCurrency(e.amount)}</td>
-                    <td className="capitalize">{e.paidBy}</td>
-                    <td>{e.paymentMethod || '—'}</td>
-                    <td><span className="badge badge-gray">{e.allocationMethod}</span></td>
+                    <td className="whitespace-nowrap text-[11px] sm:text-xs">{formatDate(e.expenseDate)}</td>
                     <td>
-                      <button onClick={() => setDeleteId(e._id)} className="p-1.5 rounded hover:bg-red-50 text-gray-400 hover:text-red-600"><Trash2 className="w-3.5 h-3.5" /></button>
+                      <div>
+                        <span className="badge badge-blue text-[9px] sm:text-xs">{e.category}</span>
+                        <div className="sm:hidden text-[10px] text-gray-500 mt-0.5 truncate max-w-[120px]">
+                          {e.description}
+                        </div>
+                      </div>
+                    </td>
+                    <td className="hidden sm:table-cell text-xs">{e.description}</td>
+                    <td className="text-right sm:text-left font-semibold text-xs sm:text-sm">{formatCurrency(e.amount)}</td>
+                    <td className="text-center sm:text-left capitalize text-xs">{e.paidBy}</td>
+                    <td className="hidden md:table-cell text-xs">{e.paymentMethod || '—'}</td>
+                    <td className="hidden lg:table-cell"><span className="badge badge-gray">{e.allocationMethod}</span></td>
+                    <td className="text-right pr-2">
+                      <button onClick={() => setDeleteId(e._id)} className="p-1 sm:p-1.5 rounded hover:bg-red-50 text-gray-400 hover:text-red-600"><Trash2 className="w-3.5 h-3.5" /></button>
                     </td>
                   </tr>
                 ))}

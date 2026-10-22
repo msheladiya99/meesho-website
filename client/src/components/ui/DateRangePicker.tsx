@@ -31,12 +31,12 @@ const DateRangePicker: React.FC<Props> = ({ value, onChange }) => {
     p[key].startDate === value.startDate && p[key].endDate === value.endDate;
 
   return (
-    <div className="flex flex-wrap items-center gap-2">
+    <div className="flex flex-wrap items-center gap-1.5 sm:gap-2">
       {presets.map(({ label, key }) => (
         <button
           key={key}
           onClick={() => applyPreset(key)}
-          className={`px-3 py-1.5 text-xs font-medium rounded-lg border transition-all ${
+          className={`px-2 sm:px-3 py-1 sm:py-1.5 text-[11px] sm:text-xs font-medium rounded-lg border transition-all ${
             isActive(key)
               ? 'bg-primary-600 text-white border-primary-600'
               : 'border-gray-200 text-gray-600 hover:border-primary-300 hover:text-primary-600 bg-white'
@@ -47,7 +47,7 @@ const DateRangePicker: React.FC<Props> = ({ value, onChange }) => {
       ))}
       <button
         onClick={() => setShowCustom(!showCustom)}
-        className={`flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium rounded-lg border transition-all ${
+        className={`flex items-center gap-1 px-2 sm:px-3 py-1 sm:py-1.5 text-[11px] sm:text-xs font-medium rounded-lg border transition-all ${
           showCustom ? 'bg-primary-600 text-white border-primary-600' : 'border-gray-200 text-gray-600 hover:border-primary-300 bg-white'
         }`}
       >

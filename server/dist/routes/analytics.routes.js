@@ -49,12 +49,14 @@ const inventory_service_1 = require("../services/inventory.service");
 const auth_1 = require("../middleware/auth");
 const router = (0, express_1.Router)();
 router.use(auth_1.authenticate);
-const af = (accountId) => accountId && accountId !== 'all' ? { businessAccount: new mongoose_1.default.Types.ObjectId(accountId) } : {};
+const af = (accountId) => accountId && accountId !== 'all' && mongoose_1.default.Types.ObjectId.isValid(accountId)
+    ? { businessAccount: new mongoose_1.default.Types.ObjectId(accountId) }
+    : {};
 const df = (startDate, endDate, field = 'orderDate') => {
     const f = {};
-    if (startDate)
+    if (startDate && !isNaN(new Date(startDate).getTime()))
         f['$gte'] = new Date(startDate);
-    if (endDate)
+    if (endDate && !isNaN(new Date(endDate).getTime()))
         f['$lte'] = new Date(endDate + 'T23:59:59.999Z');
     return Object.keys(f).length ? { [field]: f } : {};
 };

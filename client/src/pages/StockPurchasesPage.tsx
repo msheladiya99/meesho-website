@@ -343,14 +343,14 @@ const StockPurchasesPage: React.FC = () => {
             <table className="table">
               <thead>
                 <tr>
-                  <th className="w-28">Date</th>
+                  <th>Date</th>
                   <th>Vendor</th>
-                  <th>Invoice #</th>
-                  <th className="text-center">Total Quantity</th>
-                  <th className="text-right">Price / Unit</th>
-                  <th className="text-right">Total Amount</th>
-                  <th className="text-center">Payment</th>
-                  <th className="text-right pr-5">Actions</th>
+                  <th className="hidden sm:table-cell">Invoice #</th>
+                  <th className="text-center sm:text-left">Qty</th>
+                  <th className="hidden md:table-cell text-right">Price / Unit</th>
+                  <th className="text-right sm:text-left">Total Amount</th>
+                  <th className="text-center sm:text-left">Payment</th>
+                  <th className="text-right pr-2">Actions</th>
                 </tr>
               </thead>
               <tbody>
@@ -364,23 +364,25 @@ const StockPurchasesPage: React.FC = () => {
                   return (
                     <tr key={p._id} className="transition-colors hover:bg-gray-50/80">
                       {/* Date */}
-                      <td className="whitespace-nowrap font-medium text-gray-900 align-middle">
-                        <div className="flex items-center gap-1.5">
-                          <Calendar className="w-3.5 h-3.5 text-gray-400" />
+                      <td className="whitespace-nowrap font-medium text-gray-900 align-middle text-[11px] sm:text-xs">
+                        <div className="flex items-center gap-1">
+                          <Calendar className="w-3 h-3 text-gray-400 sm:inline hidden" />
                           <span>{formatDate(p.purchaseDate)}</span>
                         </div>
                       </td>
 
                       {/* Vendor */}
                       <td className="align-middle">
-                        <div className="font-semibold text-gray-900">{(vend as Vendor)?.name || '—'}</div>
-                        {(vend as Vendor)?.company && (
-                          <div className="text-xs text-gray-500">{(vend as Vendor)?.company}</div>
-                        )}
+                        <div className="font-semibold text-gray-900 text-xs truncate max-w-[120px] sm:max-w-none">
+                          {(vend as Vendor)?.name || '—'}
+                        </div>
+                        <div className="sm:hidden font-mono text-[10px] text-gray-400">
+                          {p.vendorInvoiceNumber ? `#${p.vendorInvoiceNumber}` : ''}
+                        </div>
                       </td>
 
                       {/* Invoice Number */}
-                      <td className="align-middle font-mono text-xs">
+                      <td className="hidden sm:table-cell align-middle font-mono text-xs">
                         {p.vendorInvoiceNumber ? (
                           <span className="inline-block px-2 py-0.5 bg-gray-100 rounded text-gray-700 font-semibold">
                             #{p.vendorInvoiceNumber}
@@ -391,38 +393,32 @@ const StockPurchasesPage: React.FC = () => {
                       </td>
 
                       {/* Total Quantity */}
-                      <td className="text-center align-middle">
-                        <span className="inline-flex items-center px-2.5 py-1 rounded-full text-xs font-bold bg-primary-50 text-primary-700 border border-primary-200">
-                          {rowQty.toLocaleString()} units
+                      <td className="text-center sm:text-left align-middle">
+                        <span className="inline-flex items-center px-1.5 sm:px-2.5 py-0.5 sm:py-1 rounded-full text-[10px] sm:text-xs font-bold bg-primary-50 text-primary-700 border border-primary-200">
+                          {rowQty}u
                         </span>
                       </td>
 
                       {/* Price Per Unit */}
-                      <td className="text-right align-middle font-medium text-gray-700 text-sm">
+                      <td className="hidden md:table-cell text-right align-middle font-medium text-gray-700 text-sm">
                         {formatCurrency(rowUnitPrice)}
                       </td>
 
                       {/* Total Amount */}
-                      <td className="text-right align-middle font-bold text-gray-900 text-sm">
+                      <td className="text-right sm:text-left align-middle font-bold text-gray-900 text-xs sm:text-sm">
                         {formatCurrency(p.totalAmount)}
-                        {(p.discount > 0 || p.taxAmount > 0 || p.additionalCosts > 0) && (
-                          <div className="text-[10px] text-gray-400 font-normal">
-                            {p.discount > 0 && <span>-Disc </span>}
-                            {p.taxAmount > 0 && <span>+Tax </span>}
-                          </div>
-                        )}
                       </td>
 
                       {/* Payment Status */}
-                      <td className="text-center align-middle">
-                        <span className={`inline-flex items-center px-2 py-0.5 rounded-full text-xs font-semibold capitalize border ${paymentColors[p.paymentStatus] || 'bg-gray-100 text-gray-800'}`}>
+                      <td className="text-center sm:text-left align-middle">
+                        <span className={`inline-flex items-center px-1.5 sm:px-2 py-0.5 rounded-full text-[9px] sm:text-xs font-semibold capitalize border ${paymentColors[p.paymentStatus] || 'bg-gray-100 text-gray-800'}`}>
                           {p.paymentStatus}
                         </span>
                       </td>
 
                       {/* Actions */}
-                      <td className="text-right pr-5 align-middle">
-                        <div className="flex items-center justify-end gap-1">
+                      <td className="text-right pr-2 align-middle">
+                        <div className="flex items-center justify-end gap-0.5 sm:gap-1">
                           <button
                             onClick={() => setViewingPurchase(p)}
                             className="p-1.5 rounded-lg hover:bg-primary-50 text-gray-400 hover:text-primary-600 transition-colors"

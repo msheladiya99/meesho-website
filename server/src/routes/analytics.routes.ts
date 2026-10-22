@@ -14,12 +14,14 @@ const router = Router();
 router.use(authenticate);
 
 const af = (accountId?: string) =>
-  accountId && accountId !== 'all' ? { businessAccount: new mongoose.Types.ObjectId(accountId) } : {};
+  accountId && accountId !== 'all' && mongoose.Types.ObjectId.isValid(accountId)
+    ? { businessAccount: new mongoose.Types.ObjectId(accountId) }
+    : {};
 
 const df = (startDate?: string, endDate?: string, field = 'orderDate') => {
   const f: Record<string, unknown> = {};
-  if (startDate) f['$gte'] = new Date(startDate);
-  if (endDate) f['$lte'] = new Date(endDate + 'T23:59:59.999Z');
+  if (startDate && !isNaN(new Date(startDate).getTime())) f['$gte'] = new Date(startDate);
+  if (endDate && !isNaN(new Date(endDate).getTime())) f['$lte'] = new Date(endDate + 'T23:59:59.999Z');
   return Object.keys(f).length ? { [field]: f } : {};
 };
 

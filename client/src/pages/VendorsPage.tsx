@@ -72,19 +72,31 @@ const VendorsPage: React.FC = () => {
         ) : (
           <div className="table-container">
             <table className="table">
-              <thead><tr><th>Name</th><th>Company</th><th>Phone</th><th>Email</th><th>GSTIN</th><th>Actions</th></tr></thead>
+              <thead>
+                <tr>
+                  <th>Vendor</th>
+                  <th className="hidden sm:table-cell">Company</th>
+                  <th>Phone</th>
+                  <th className="hidden md:table-cell">Email</th>
+                  <th className="hidden lg:table-cell">GSTIN</th>
+                  <th className="text-right pr-2">Actions</th>
+                </tr>
+              </thead>
               <tbody>
                 {vendors.map(v => (
                   <tr key={v._id}>
-                    <td className="font-medium">{v.name}</td>
-                    <td>{v.company || '—'}</td>
-                    <td>{v.phone || '—'}</td>
-                    <td>{v.email || '—'}</td>
-                    <td className="font-mono text-xs">{v.gstin || '—'}</td>
-                    <td>
-                      <div className="flex gap-1">
-                        <button onClick={() => openEdit(v)} className="p-1.5 rounded hover:bg-gray-100 text-gray-400 hover:text-gray-700"><Edit2 className="w-3.5 h-3.5" /></button>
-                        <button onClick={() => setDeleteId(v._id)} className="p-1.5 rounded hover:bg-red-50 text-gray-400 hover:text-red-600"><Trash2 className="w-3.5 h-3.5" /></button>
+                    <td className="font-medium">
+                      <div className="text-xs text-gray-900">{v.name}</div>
+                      {v.company && <div className="sm:hidden text-[10px] text-gray-400">{v.company}</div>}
+                    </td>
+                    <td className="hidden sm:table-cell text-xs">{v.company || '—'}</td>
+                    <td className="text-xs text-gray-700">{v.phone || '—'}</td>
+                    <td className="hidden md:table-cell text-xs text-gray-500">{v.email || '—'}</td>
+                    <td className="hidden lg:table-cell font-mono text-xs">{v.gstin || '—'}</td>
+                    <td className="text-right pr-2">
+                      <div className="flex items-center justify-end gap-1">
+                        <button onClick={() => openEdit(v)} className="p-1 sm:p-1.5 rounded hover:bg-gray-100 text-gray-400 hover:text-gray-700"><Edit2 className="w-3.5 h-3.5" /></button>
+                        <button onClick={() => setDeleteId(v._id)} className="p-1 sm:p-1.5 rounded hover:bg-red-50 text-gray-400 hover:text-red-600"><Trash2 className="w-3.5 h-3.5" /></button>
                       </div>
                     </td>
                   </tr>

@@ -219,7 +219,7 @@ const ProductsPage: React.FC = () => {
                 <table className="table">
                   <thead>
                     <tr>
-                      <th className="w-10">
+                      <th className="w-8 sm:w-10">
                         <button onClick={toggleSelectAll} className="p-1 hover:bg-gray-100 rounded">
                           {selectedProductIds.size === products.length && products.length > 0 ? (
                             <CheckSquare2 className="w-4 h-4 text-primary-600" />
@@ -228,16 +228,14 @@ const ProductsPage: React.FC = () => {
                           )}
                         </button>
                       </th>
-                      <th>Name</th>
-                      <th>SKU</th>
-                      <th>Category</th>
-                      <th>Size</th>
-                      <th>Selling Price</th>
-                      <th>Cost</th>
-                      <th>Stock</th>
-                      <th>Reorder At</th>
-                      <th>Status</th>
-                      <th>Actions</th>
+                      <th>Product</th>
+                      <th className="hidden sm:table-cell">SKU</th>
+                      <th className="hidden md:table-cell">Category</th>
+                      <th className="hidden sm:table-cell">Size</th>
+                      <th className="text-right sm:text-left">Price</th>
+                      <th className="text-center sm:text-left">Stock</th>
+                      <th className="hidden sm:table-cell">Status</th>
+                      <th className="text-right pr-2">Actions</th>
                     </tr>
                   </thead>
                   <tbody>
@@ -256,25 +254,30 @@ const ProductsPage: React.FC = () => {
                               )}
                             </button>
                           </td>
-                          <td className="font-medium">{p.name}</td>
-                          <td className="font-mono text-xs">{p.sku}</td>
-                          <td>{(cat as Category)?.name || '—'}</td>
-                          <td>{p.sizeml}ml</td>
-                          <td>{formatCurrency(p.sellingPrice)}</td>
-                          <td className={lowStock ? 'text-red-600 font-semibold' : ''}>
+                          <td className="font-medium">
+                            <div className="text-xs text-gray-900 truncate max-w-[130px] sm:max-w-none">{p.name}</div>
+                            <div className="sm:hidden font-mono text-[10px] text-gray-400">
+                              {p.sku} {p.sizeml ? `• ${p.sizeml}ml` : ''}
+                            </div>
+                          </td>
+                          <td className="hidden sm:table-cell font-mono text-xs">{p.sku}</td>
+                          <td className="hidden md:table-cell text-xs">{(cat as Category)?.name || '—'}</td>
+                          <td className="hidden sm:table-cell text-xs">{p.sizeml}ml</td>
+                          <td className="text-right sm:text-left text-xs font-semibold">{formatCurrency(p.sellingPrice)}</td>
+                          <td className={`text-center sm:text-left text-xs ${lowStock ? 'text-red-600 font-semibold' : ''}`}>
                             <span>{p.currentStock}</span>
                             {p.isSharedStock && (
-                              <span className="ml-1.5 px-1.5 py-0.5 rounded text-[10px] bg-purple-100 text-purple-700 font-bold" title="Shared stock from other GST accounts">
+                              <span className="ml-1 px-1 py-0.5 rounded text-[9px] bg-purple-100 text-purple-700 font-bold" title="Shared stock">
                                 Shared
                               </span>
                             )}
                             {lowStock && ' ⚠'}
                           </td>
-                          <td><span className={`badge ${p.isActive ? 'badge-green' : 'badge-gray'}`}>{p.isActive ? 'Active' : 'Inactive'}</span></td>
-                          <td>
-                            <div className="flex gap-1">
-                              <button onClick={() => openEditProduct(p)} className="p-1.5 rounded hover:bg-gray-100 text-gray-400 hover:text-gray-700"><Edit2 className="w-3.5 h-3.5" /></button>
-                              <button onClick={() => setDeleteProductId(p._id)} className="p-1.5 rounded hover:bg-red-50 text-gray-400 hover:text-red-600"><Trash2 className="w-3.5 h-3.5" /></button>
+                          <td className="hidden sm:table-cell"><span className={`badge ${p.isActive ? 'badge-green' : 'badge-gray'}`}>{p.isActive ? 'Active' : 'Inactive'}</span></td>
+                          <td className="text-right pr-2">
+                            <div className="flex items-center justify-end gap-1">
+                              <button onClick={() => openEditProduct(p)} className="p-1 sm:p-1.5 rounded hover:bg-gray-100 text-gray-400 hover:text-gray-700"><Edit2 className="w-3.5 h-3.5" /></button>
+                              <button onClick={() => setDeleteProductId(p._id)} className="p-1 sm:p-1.5 rounded hover:bg-red-50 text-gray-400 hover:text-red-600"><Trash2 className="w-3.5 h-3.5" /></button>
                             </div>
                           </td>
                         </tr>

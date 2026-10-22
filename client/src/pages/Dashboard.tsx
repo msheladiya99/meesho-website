@@ -76,17 +76,19 @@ const Dashboard: React.FC = () => {
             {formatDate(dateRange.startDate)} – {formatDate(dateRange.endDate)}
           </p>
         </div>
-        <div className="flex items-center gap-3">
+        <div className="flex flex-col sm:flex-row sm:items-center gap-3 w-full sm:w-auto">
           {user?.role === 'admin' && (
             <button
               onClick={() => navigate('/settings')}
-              className="flex items-center gap-2 px-4 py-2 bg-primary-600 text-white rounded-lg hover:bg-primary-700 transition-colors text-sm font-medium"
+              className="flex items-center justify-center gap-2 px-3 py-2 bg-primary-600 text-white rounded-lg hover:bg-primary-700 transition-colors text-xs sm:text-sm font-medium w-full sm:w-auto"
             >
               <Plus className="w-4 h-4" />
               New GSTIN Account
             </button>
           )}
-          <DateRangePicker value={dateRange} onChange={setDateRange} />
+          <div className="w-full sm:w-auto overflow-x-auto pb-1 sm:pb-0">
+            <DateRangePicker value={dateRange} onChange={setDateRange} />
+          </div>
         </div>
       </div>
 

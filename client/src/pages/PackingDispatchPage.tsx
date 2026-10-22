@@ -791,15 +791,15 @@ export const PackingDispatchPage: React.FC = () => {
             <table className="table">
               <thead>
                 <tr>
-                  <th>Order Date</th>
-                  <th>Meesho Order ID</th>
+                  <th className="hidden md:table-cell">Order Date</th>
+                  <th className="hidden sm:table-cell">Meesho Order ID</th>
                   <th>Product & SKU</th>
-                  <th>Ordered</th>
-                  <th>Packed</th>
-                  <th>Remaining</th>
-                  <th>Carrier Label</th>
-                  <th>Status</th>
-                  <th>Actions</th>
+                  <th className="hidden md:table-cell">Ordered</th>
+                  <th className="text-center sm:text-left">Packed</th>
+                  <th className="hidden lg:table-cell">Remaining</th>
+                  <th className="hidden md:table-cell">Carrier Label</th>
+                  <th className="text-center sm:text-left">Status</th>
+                  <th className="text-right pr-2">Actions</th>
                 </tr>
               </thead>
               <tbody>
@@ -810,22 +810,25 @@ export const PackingDispatchPage: React.FC = () => {
 
                   return (
                     <tr key={order._id}>
-                      <td className="whitespace-nowrap">{formatDate(order.orderDate)}</td>
-                      <td className="font-mono font-bold text-xs text-gray-900">{order.meeshoOrderId || '—'}</td>
+                      <td className="hidden md:table-cell whitespace-nowrap">{formatDate(order.orderDate)}</td>
+                      <td className="hidden sm:table-cell font-mono font-bold text-xs text-gray-900">{order.meeshoOrderId || '—'}</td>
                       <td>
                         {order.isCombo && order.items && order.items.length > 0 ? (
                           <div className="space-y-1">
-                            <div className="flex items-center gap-1.5">
+                            <div className="flex items-center gap-1">
                               <span className="font-bold text-gray-900 text-xs">Combo Pack</span>
-                              <span className="text-[10px] bg-purple-100 text-purple-700 font-bold px-1.5 py-0.5 rounded border border-purple-200">
-                                Combo ({order.items.length})
+                              <span className="text-[9px] bg-purple-100 text-purple-700 font-bold px-1 py-0.5 rounded border border-purple-200">
+                                ({order.items.length})
                               </span>
+                            </div>
+                            <div className="sm:hidden text-[10px] text-gray-400 font-mono">
+                              {order.meeshoOrderId || ''}
                             </div>
                             <div className="space-y-0.5">
                               {order.items.map((it: any, idx: number) => {
                                 const itemProd = typeof it.product === 'object' ? it.product : null;
                                 return (
-                                  <div key={idx} className="text-[11px] text-gray-600 truncate max-w-[200px] flex items-center gap-1">
+                                  <div key={idx} className="text-[10px] text-gray-600 truncate max-w-[140px] sm:max-w-[200px] flex items-center gap-1">
                                     <span className="font-semibold text-purple-700">{it.quantity}x</span>
                                     <span className="truncate">{itemProd?.name || it.sku}</span>
                                   </div>
@@ -835,15 +838,21 @@ export const PackingDispatchPage: React.FC = () => {
                           </div>
                         ) : (
                           <div>
-                            <div className="font-medium text-gray-900 truncate max-w-[180px]">{(prod as any)?.name || '—'}</div>
-                            <div className="font-mono text-[11px] text-gray-400">{order.sku}</div>
+                            <div className="font-medium text-gray-900 text-xs truncate max-w-[140px] sm:max-w-[180px]">{(prod as any)?.name || '—'}</div>
+                            <div className="font-mono text-[10px] text-gray-400">
+                              <span className="sm:hidden text-gray-600 font-medium">{order.meeshoOrderId ? `${order.meeshoOrderId} • ` : ''}</span>
+                              {order.sku}
+                            </div>
                           </div>
                         )}
                       </td>
-                      <td className="font-semibold">{order.quantity}</td>
-                      <td className="text-emerald-700 font-semibold">{packed}</td>
-                      <td className="font-semibold text-amber-700">{remaining}</td>
-                      <td className="font-mono text-xs">
+                      <td className="hidden md:table-cell font-semibold">{order.quantity}</td>
+                      <td className="text-center sm:text-left text-emerald-700 font-semibold text-xs">
+                        {packed}
+                        <span className="sm:hidden text-gray-400 text-[10px] font-normal">/{order.quantity}</span>
+                      </td>
+                      <td className="hidden lg:table-cell font-semibold text-amber-700">{remaining}</td>
+                      <td className="hidden md:table-cell font-mono text-xs">
                         {order.shippingLabelId ? (
                           <span className="text-gray-700 font-medium">{order.shippingLabelId}</span>
                         ) : order.internalQrCode ? (
@@ -852,7 +861,7 @@ export const PackingDispatchPage: React.FC = () => {
                           <span className="text-gray-300">—</span>
                         )}
                       </td>
-                      <td>
+                      <td className="text-center sm:text-left">
                         <span className={`badge ${
                           order.status === 'packed' ? 'badge-green' :
                           order.status === 'dispatched' ? 'badge-blue' :
@@ -861,8 +870,8 @@ export const PackingDispatchPage: React.FC = () => {
                           {order.status}
                         </span>
                       </td>
-                      <td>
-                        <div className="flex items-center gap-1.5">
+                      <td className="text-right pr-2">
+                        <div className="flex items-center justify-end gap-1">
                           {order.status !== 'packed' && order.status !== 'dispatched' && (
                             <button
                               onClick={() => {
@@ -1096,26 +1105,26 @@ export const PackingDispatchPage: React.FC = () => {
 
             {/* Perfume Products Section (Single or Multi-item Combo) */}
             <div className="space-y-3 pt-1">
-              <div className="flex items-center justify-between border-b pb-2">
+              <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 border-b pb-2">
                 <div>
                   <div className="font-bold text-gray-900 text-xs flex items-center gap-1.5">
                     <Sparkles className="w-3.5 h-3.5 text-purple-600" />
                     Perfumes / Fragrances in this Parcel:
                     {comboItems.length > 1 && (
                       <span className="text-[10px] bg-purple-100 text-purple-700 font-bold px-2 py-0.5 rounded-full border border-purple-200">
-                        COMBO ({comboItems.length} Fragrances)
+                        COMBO ({comboItems.length})
                       </span>
                     )}
                   </div>
                   <p className="text-[11px] text-gray-400">
-                    Add one or more perfumes under this label. Stock will be deducted individually for each perfume.
+                    Add one or more perfumes under this label. Stock will be deducted individually.
                   </p>
                 </div>
 
                 <button
                   type="button"
                   onClick={handleAddComboItem}
-                  className="inline-flex items-center gap-1 px-2.5 py-1.5 bg-purple-50 hover:bg-purple-100 text-purple-700 border border-purple-200 rounded-lg text-xs font-semibold shadow-2xs transition-all cursor-pointer"
+                  className="inline-flex items-center justify-center gap-1 px-2.5 py-1.5 bg-purple-50 hover:bg-purple-100 text-purple-700 border border-purple-200 rounded-lg text-xs font-semibold shadow-2xs transition-all cursor-pointer w-full sm:w-auto"
                 >
                   <Plus className="w-3.5 h-3.5 text-purple-600" />
                   + Add Another Perfume (Combo)
@@ -1129,9 +1138,9 @@ export const PackingDispatchPage: React.FC = () => {
                   return (
                     <div
                       key={item.id}
-                      className="p-3.5 rounded-xl border border-gray-200 bg-gray-50/60 hover:bg-white hover:border-primary-300 transition-all space-y-2.5"
+                      className="p-2.5 sm:p-3.5 rounded-xl border border-gray-200 bg-gray-50/60 hover:bg-white hover:border-primary-300 transition-all space-y-2"
                     >
-                      <div className="flex items-center justify-between">
+                      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-1">
                         <div className="flex items-center gap-2">
                           <span className="w-5 h-5 rounded-full bg-primary-100 text-primary-700 flex items-center justify-center font-bold text-[11px]">
                             {index + 1}

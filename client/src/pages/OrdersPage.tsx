@@ -275,14 +275,14 @@ const OrdersPage: React.FC = () => {
               <thead>
                 <tr>
                   <th>Date</th>
-                  <th>Meesho ID</th>
+                  <th className="hidden md:table-cell">Meesho ID</th>
                   <th>Product</th>
-                  <th>SKU</th>
-                  <th>Price</th>
-                  <th>Qty</th>
-                  <th>Amount</th>
-                  <th>Status</th>
-                  <th>Actions</th>
+                  <th className="hidden sm:table-cell">SKU</th>
+                  <th className="hidden md:table-cell">Price</th>
+                  <th className="text-center sm:text-left">Qty</th>
+                  <th className="text-right sm:text-left">Amount</th>
+                  <th className="text-center sm:text-left">Status</th>
+                  <th className="text-right pr-2">Actions</th>
                 </tr>
               </thead>
               <tbody>
@@ -290,33 +290,43 @@ const OrdersPage: React.FC = () => {
                   const prod = typeof order.product === 'object' ? order.product : null;
                   return (
                     <tr key={order._id}>
-                      <td className="whitespace-nowrap">{formatDate(order.orderDate)}</td>
-                      <td className="font-mono text-xs">{order.meeshoOrderId || '—'}</td>
+                      <td className="whitespace-nowrap text-[11px] sm:text-xs">{formatDate(order.orderDate)}</td>
+                      <td className="hidden md:table-cell font-mono text-xs">{order.meeshoOrderId || '—'}</td>
                       <td>
                         {order.isCombo && order.items && order.items.length > 0 ? (
                           <div className="space-y-0.5">
                             <div className="flex items-center gap-1">
                               <span className="font-semibold text-gray-900 text-xs">Combo Pack</span>
-                              <span className="badge badge-purple text-[10px]">COMBO ({order.items.length})</span>
+                              <span className="badge badge-purple text-[9px] sm:text-[10px]">({order.items.length})</span>
+                            </div>
+                            <div className="sm:hidden text-[10px] text-gray-400 font-mono">
+                              {order.meeshoOrderId || order.sku}
                             </div>
                             {order.items.map((it: any, idx: number) => {
                               const itemProd = typeof it.product === 'object' ? it.product : null;
                               return (
-                                <div key={idx} className="text-[11px] text-gray-500 truncate max-w-[200px]">
+                                <div key={idx} className="text-[10px] sm:text-[11px] text-gray-500 truncate max-w-[140px] sm:max-w-[200px]">
                                   • {it.quantity}x {itemProd?.name || it.sku}
                                 </div>
                               );
                             })}
                           </div>
                         ) : (
-                          prod?.name || '—'
+                          <div>
+                            <div className="font-medium text-xs text-gray-900 truncate max-w-[130px] sm:max-w-none">
+                              {prod?.name || '—'}
+                            </div>
+                            <div className="sm:hidden text-[10px] text-gray-400 font-mono truncate max-w-[130px]">
+                              {order.meeshoOrderId || order.sku}
+                            </div>
+                          </div>
                         )}
                       </td>
-                      <td className="font-mono text-xs truncate max-w-[150px]" title={order.sku}>{order.sku}</td>
-                      <td>{formatCurrency(order.sellingPrice)}</td>
-                      <td>{order.quantity}</td>
-                      <td className="font-semibold">{formatCurrency(order.grossAmount)}</td>
-                      <td>
+                      <td className="hidden sm:table-cell font-mono text-xs truncate max-w-[150px]" title={order.sku}>{order.sku}</td>
+                      <td className="hidden md:table-cell">{formatCurrency(order.sellingPrice)}</td>
+                      <td className="text-center sm:text-left font-medium">{order.quantity}</td>
+                      <td className="text-right sm:text-left font-semibold">{formatCurrency(order.grossAmount)}</td>
+                      <td className="text-center sm:text-left">
                         <span className={`badge ${
                           order.status === 'delivered' || order.status === 'packed' ? 'badge-green' :
                           order.status === 'returned' || order.status === 'rto_received' ? 'badge-red' :
@@ -325,15 +335,15 @@ const OrdersPage: React.FC = () => {
                           'badge-yellow'
                         }`}>{order.status}</span>
                       </td>
-                      <td>
-                        <div className="flex items-center gap-1">
-                          <button onClick={() => setPrintOrder(order)} className="p-1.5 rounded hover:bg-gray-100 text-gray-400 hover:text-gray-700" title="Print Internal QR Label">
+                      <td className="text-right pr-2">
+                        <div className="flex items-center justify-end gap-0.5 sm:gap-1">
+                          <button onClick={() => setPrintOrder(order)} className="p-1 sm:p-1.5 rounded hover:bg-gray-100 text-gray-400 hover:text-gray-700" title="Print Internal QR Label">
                             <QrCode className="w-3.5 h-3.5" />
                           </button>
-                          <button onClick={() => openEdit(order)} className="p-1.5 rounded hover:bg-gray-100 text-gray-400 hover:text-gray-700">
+                          <button onClick={() => openEdit(order)} className="p-1 sm:p-1.5 rounded hover:bg-gray-100 text-gray-400 hover:text-gray-700">
                             <Edit2 className="w-3.5 h-3.5" />
                           </button>
-                          <button onClick={() => setDeleteId(order._id)} className="p-1.5 rounded hover:bg-red-50 text-gray-400 hover:text-red-600">
+                          <button onClick={() => setDeleteId(order._id)} className="p-1 sm:p-1.5 rounded hover:bg-red-50 text-gray-400 hover:text-red-600">
                             <Trash2 className="w-3.5 h-3.5" />
                           </button>
                         </div>

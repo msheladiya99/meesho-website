@@ -17,16 +17,18 @@ const auth_1 = require("../middleware/auth");
 const inventory_service_1 = require("../services/inventory.service");
 const router = (0, express_1.Router)();
 router.use(auth_1.authenticate);
-const acctFilter = (accountId) => accountId && accountId !== 'all' ? { businessAccount: new mongoose_1.default.Types.ObjectId(accountId) } : {};
+const acctFilter = (accountId) => accountId && accountId !== 'all' && mongoose_1.default.Types.ObjectId.isValid(accountId)
+    ? { businessAccount: new mongoose_1.default.Types.ObjectId(accountId) }
+    : {};
 const dateFilter = (startDate, endDate, field = 'orderDate') => {
     if (!startDate && !endDate)
         return {};
     const f = {};
-    if (startDate)
+    if (startDate && !isNaN(new Date(startDate).getTime()))
         f['$gte'] = new Date(startDate);
-    if (endDate)
+    if (endDate && !isNaN(new Date(endDate).getTime()))
         f['$lte'] = new Date(endDate + 'T23:59:59.999Z');
-    return { [field]: f };
+    return Object.keys(f).length ? { [field]: f } : {};
 };
 const getAccountInventoryStats = async (accountId, products = []) => {
     if (accountId && accountId !== 'all' && mongoose_1.default.Types.ObjectId.isValid(accountId)) {
@@ -170,6 +172,7 @@ router.get('/dashboard', auth_1.enforceAccountAccess, async (req, res) => {
         });
     }
     catch (err) {
+        console.error('[Dashboard Report Error]:', err);
         res.status(500).json({ success: false, message: err.message });
     }
 });

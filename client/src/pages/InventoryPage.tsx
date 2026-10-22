@@ -52,27 +52,27 @@ const InventoryPage: React.FC = () => {
         </div>
       </div>
 
-      <div className="grid grid-cols-3 gap-4">
-        <div className="card p-4 text-center">
-          <p className="text-xs text-gray-500 uppercase font-semibold tracking-wider">Total SKUs</p>
-          <p className="text-2xl font-bold text-gray-900 mt-1">{products.length}</p>
+      <div className="grid grid-cols-3 gap-2 sm:gap-4">
+        <div className="card p-2.5 sm:p-4 text-center">
+          <p className="text-[10px] sm:text-xs text-gray-500 uppercase font-semibold tracking-wider truncate">Total SKUs</p>
+          <p className="text-base sm:text-2xl font-bold text-gray-900 mt-0.5 sm:mt-1">{products.length}</p>
         </div>
-        <div className="card p-4 text-center">
-          <p className="text-xs text-gray-500 uppercase font-semibold tracking-wider">Total Units</p>
-          <p className="text-2xl font-bold text-gray-900 mt-1">{formatNumber(totalQty)}</p>
+        <div className="card p-2.5 sm:p-4 text-center">
+          <p className="text-[10px] sm:text-xs text-gray-500 uppercase font-semibold tracking-wider truncate">Total Units</p>
+          <p className="text-base sm:text-2xl font-bold text-gray-900 mt-0.5 sm:mt-1">{formatNumber(totalQty)}</p>
         </div>
-        <div className="card p-4 text-center">
-          <p className="text-xs text-gray-500 uppercase font-semibold tracking-wider">Inventory Value</p>
-          <p className="text-2xl font-bold text-gray-900 mt-1">{formatCurrency(totalValue)}</p>
+        <div className="card p-2.5 sm:p-4 text-center">
+          <p className="text-[10px] sm:text-xs text-gray-500 uppercase font-semibold tracking-wider truncate">Value</p>
+          <p className="text-base sm:text-2xl font-bold text-gray-900 mt-0.5 sm:mt-1 truncate">{formatCurrency(totalValue)}</p>
         </div>
       </div>
 
-      <div className="card p-4 flex flex-wrap items-center gap-3">
-        <input className="input max-w-xs" placeholder="Search products..." value={search} onChange={e => setSearch(e.target.value)} />
+      <div className="card p-3 sm:p-4 flex flex-col sm:flex-row items-stretch sm:items-center gap-2 sm:gap-3">
+        <input className="input flex-1 sm:max-w-xs" placeholder="Search products..." value={search} onChange={e => setSearch(e.target.value)} />
         <select
           value={selectedCategory}
           onChange={e => setSelectedCategory(e.target.value)}
-          className="select max-w-xs"
+          className="select flex-1 sm:max-w-xs"
         >
           <option value="all">All Categories</option>
           {categories.map(c => (
@@ -87,7 +87,18 @@ const InventoryPage: React.FC = () => {
         ) : (
           <div className="table-container">
             <table className="table">
-              <thead><tr><th>Product</th><th>SKU</th><th>Category</th><th>Stock Qty</th><th>Reorder At</th><th>Cost/Unit</th><th>Inventory Value</th><th>Status</th></tr></thead>
+              <thead>
+                <tr>
+                  <th>Product</th>
+                  <th className="hidden sm:table-cell">SKU</th>
+                  <th className="hidden md:table-cell">Category</th>
+                  <th className="text-center sm:text-left">Stock</th>
+                  <th className="hidden lg:table-cell">Reorder</th>
+                  <th className="hidden md:table-cell">Cost</th>
+                  <th className="text-right sm:text-left">Value</th>
+                  <th className="text-center sm:text-left">Status</th>
+                </tr>
+              </thead>
               <tbody>
                 {products.map(p => {
                   const lowStock = p.currentStock <= p.reorderThreshold;
@@ -96,24 +107,29 @@ const InventoryPage: React.FC = () => {
                   const unitCost = getProductCost(p);
                   return (
                     <tr key={p._id}>
-                      <td className="font-medium">{p.name}</td>
-                      <td className="font-mono text-xs">{p.sku}</td>
-                      <td>{(cat as { name?: string })?.name || '—'}</td>
-                      <td className={outOfStock ? 'text-red-600 font-bold' : lowStock ? 'text-orange-600 font-semibold' : 'font-medium'}>
+                      <td className="font-medium">
+                        <div>{p.name}</div>
+                        <div className="sm:hidden font-mono text-[10px] text-gray-400">
+                          {p.sku} {cat ? `• ${(cat as any).name}` : ''}
+                        </div>
+                      </td>
+                      <td className="hidden sm:table-cell font-mono text-xs">{p.sku}</td>
+                      <td className="hidden md:table-cell">{(cat as { name?: string })?.name || '—'}</td>
+                      <td className={`text-center sm:text-left ${outOfStock ? 'text-red-600 font-bold' : lowStock ? 'text-orange-600 font-semibold' : 'font-medium'}`}>
                         <span>{p.currentStock}</span>
                         {p.isSharedStock && (
-                          <span className="ml-1.5 px-1.5 py-0.5 rounded text-[10px] bg-purple-100 text-purple-700 font-bold" title="Shared stock from other GST accounts">
+                          <span className="ml-1 px-1 py-0.5 rounded text-[9px] bg-purple-100 text-purple-700 font-bold" title="Shared stock">
                             Shared
                           </span>
                         )}
-                        {lowStock && !outOfStock && <AlertTriangle className="inline w-3.5 h-3.5 ml-1" />}
+                        {lowStock && !outOfStock && <AlertTriangle className="inline w-3 h-3 ml-0.5" />}
                       </td>
-                      <td className="text-gray-500">{p.reorderThreshold}</td>
-                      <td>{formatCurrency(unitCost)}</td>
-                      <td className="font-semibold">{formatCurrency(p.currentStock * unitCost)}</td>
-                      <td>
-                        {outOfStock ? <span className="badge badge-red">Out of Stock</span> :
-                         lowStock ? <span className="badge badge-yellow">Low Stock</span> :
+                      <td className="hidden lg:table-cell text-gray-500">{p.reorderThreshold}</td>
+                      <td className="hidden md:table-cell">{formatCurrency(unitCost)}</td>
+                      <td className="text-right sm:text-left font-semibold">{formatCurrency(p.currentStock * unitCost)}</td>
+                      <td className="text-center sm:text-left">
+                        {outOfStock ? <span className="badge badge-red">Out</span> :
+                         lowStock ? <span className="badge badge-yellow">Low</span> :
                          <span className="badge badge-green">OK</span>}
                       </td>
                     </tr>

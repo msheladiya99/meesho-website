@@ -16,14 +16,16 @@ const router = Router();
 router.use(authenticate);
 
 const acctFilter = (accountId?: string) =>
-  accountId && accountId !== 'all' ? { businessAccount: new mongoose.Types.ObjectId(accountId) } : {};
+  accountId && accountId !== 'all' && mongoose.Types.ObjectId.isValid(accountId)
+    ? { businessAccount: new mongoose.Types.ObjectId(accountId) }
+    : {};
 
 const dateFilter = (startDate?: string, endDate?: string, field = 'orderDate') => {
   if (!startDate && !endDate) return {};
   const f: Record<string, unknown> = {};
-  if (startDate) f['$gte'] = new Date(startDate);
-  if (endDate) f['$lte'] = new Date(endDate + 'T23:59:59.999Z');
-  return { [field]: f };
+  if (startDate && !isNaN(new Date(startDate).getTime())) f['$gte'] = new Date(startDate);
+  if (endDate && !isNaN(new Date(endDate).getTime())) f['$lte'] = new Date(endDate + 'T23:59:59.999Z');
+  return Object.keys(f).length ? { [field]: f } : {};
 };
 
 const getAccountInventoryStats = async (accountId?: string, products: any[] = []) => {
@@ -192,6 +194,7 @@ router.get('/dashboard', enforceAccountAccess, async (req: AuthRequest, res: Res
       },
     });
   } catch (err) {
+    console.error('[Dashboard Report Error]:', err);
     res.status(500).json({ success: false, message: (err as Error).message });
   }
 });
