@@ -71,8 +71,8 @@ app.use(cors({
 // Production Health & Readiness Endpoints (Mounted BEFORE Rate Limiter)
 // ─────────────────────────────────────────────────────────────────────────────
 
-// Liveness probe for Render health-check path (configured in Render Dashboard: /health)
-app.get(['/health', '/api/health'], (_req, res) => {
+// Liveness probe for Render and external health checks (supports /, /health, /api/health)
+app.get(['/', '/health', '/api/health'], (_req, res) => {
   res.status(200).json({
     status: 'ok',
     service: 'perfume-business-manager',
