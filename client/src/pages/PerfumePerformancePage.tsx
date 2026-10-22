@@ -403,10 +403,10 @@ const PerfumePerformancePage: React.FC = () => {
       )}
 
       {/* Filter and Search Bar */}
-      <div className="card p-3.5 flex flex-wrap items-center justify-between gap-3 shadow-xs">
-        <div className="flex flex-wrap items-center gap-2.5 flex-1 min-w-[280px]">
+      <div className="card p-3 sm:p-3.5 flex flex-col sm:flex-row items-stretch sm:items-center justify-between gap-2.5 sm:gap-3 shadow-xs">
+        <div className="flex flex-col sm:flex-row items-stretch sm:items-center gap-2 sm:gap-2.5 flex-1">
           {/* Search */}
-          <div className="relative flex-1 min-w-[200px] max-w-sm">
+          <div className="relative flex-1">
             <Search className="w-4 h-4 text-gray-400 absolute left-3 top-1/2 -translate-y-1/2" />
             <input
               type="text"
@@ -429,7 +429,7 @@ const PerfumePerformancePage: React.FC = () => {
           <select
             value={selectedCategory}
             onChange={e => setSelectedCategory(e.target.value)}
-            className="select text-xs py-2 max-w-[180px]"
+            className="select text-xs py-2 w-full sm:max-w-[180px]"
           >
             <option value="all">All Categories</option>
             {categories.map(c => (
@@ -439,12 +439,12 @@ const PerfumePerformancePage: React.FC = () => {
         </div>
 
         {/* Sort Controls */}
-        <div className="flex items-center gap-2">
+        <div className="flex items-center justify-between sm:justify-end gap-2">
           <span className="text-xs text-gray-500 font-medium">Sort by:</span>
           <select
             value={sortField}
             onChange={e => setSortField(e.target.value as SortField)}
-            className="select text-xs py-1.5 font-medium"
+            className="select text-xs py-1.5 font-medium flex-1 sm:flex-none"
           >
             <option value="soldCount">Most Sold</option>
             <option value="returnCount">Most Returns</option>
@@ -457,7 +457,7 @@ const PerfumePerformancePage: React.FC = () => {
 
           <button
             onClick={() => setSortOrder(prev => (prev === 'asc' ? 'desc' : 'asc'))}
-            className="p-1.5 border border-gray-200 rounded-lg hover:bg-gray-50 text-gray-600 transition-colors"
+            className="p-1.5 border border-gray-200 rounded-lg hover:bg-gray-50 text-gray-600 transition-colors flex-shrink-0"
             title={`Toggle order: currently ${sortOrder.toUpperCase()}`}
           >
             <ArrowUpDown className="w-4 h-4" />
@@ -482,53 +482,53 @@ const PerfumePerformancePage: React.FC = () => {
           <div className="table-container">
             <table className="table">
               <thead>
-                <tr className="bg-gray-50/80 text-gray-600 text-xs uppercase tracking-wider font-semibold">
+                <tr className="bg-gray-50/80 text-gray-600 text-[10px] sm:text-xs uppercase tracking-wider font-semibold">
                   <th className="cursor-pointer hover:bg-gray-100 transition-colors" onClick={() => handleSort('name')}>
-                    <div className="flex items-center gap-1.5">
-                      <span>Perfume Name</span>
+                    <div className="flex items-center gap-1">
+                      <span>Perfume</span>
                       <ArrowUpDown className="w-3 h-3 text-gray-400" />
                     </div>
                   </th>
-                  <th className="cursor-pointer hover:bg-gray-100 transition-colors" onClick={() => handleSort('currentStock')}>
-                    <div className="flex items-center gap-1.5">
+                  <th className="cursor-pointer hover:bg-gray-100 transition-colors text-center" onClick={() => handleSort('currentStock')}>
+                    <div className="flex items-center justify-center gap-1">
                       <span>Stock</span>
                       <ArrowUpDown className="w-3 h-3 text-gray-400" />
                     </div>
                   </th>
                   <th className="cursor-pointer hover:bg-gray-100 transition-colors text-right" onClick={() => handleSort('soldCount')}>
-                    <div className="flex items-center justify-end gap-1.5">
-                      <span className="text-blue-700">Sold Count</span>
+                    <div className="flex items-center justify-end gap-1">
+                      <span className="text-blue-700">Sold</span>
                       <ArrowUpDown className="w-3 h-3 text-blue-500" />
                     </div>
                   </th>
                   <th className="cursor-pointer hover:bg-gray-100 transition-colors text-right" onClick={() => handleSort('returnCount')}>
-                    <div className="flex items-center justify-end gap-1.5">
-                      <span className="text-rose-700">Return Count</span>
+                    <div className="flex items-center justify-end gap-1">
+                      <span className="text-rose-700">Return</span>
                       <ArrowUpDown className="w-3 h-3 text-rose-500" />
                     </div>
                   </th>
                   <th className="cursor-pointer hover:bg-gray-100 transition-colors text-right" onClick={() => handleSort('netSoldCount')}>
-                    <div className="flex items-center justify-end gap-1.5">
-                      <span className="text-emerald-700">Net Sold</span>
+                    <div className="flex items-center justify-end gap-1">
+                      <span className="text-emerald-700">Net</span>
                       <ArrowUpDown className="w-3 h-3 text-emerald-500" />
                     </div>
                   </th>
-                  <th className="cursor-pointer hover:bg-gray-100 transition-colors text-center" onClick={() => handleSort('returnRate')}>
+                  <th className="hidden md:table-cell cursor-pointer hover:bg-gray-100 transition-colors text-center" onClick={() => handleSort('returnRate')}>
                     <div className="flex items-center justify-center gap-1.5">
                       <span>Return Rate</span>
                       <ArrowUpDown className="w-3 h-3 text-gray-400" />
                     </div>
                   </th>
-                  <th className="cursor-pointer hover:bg-gray-100 transition-colors text-right" onClick={() => handleSort('salesRevenue')}>
+                  <th className="hidden lg:table-cell cursor-pointer hover:bg-gray-100 transition-colors text-right" onClick={() => handleSort('salesRevenue')}>
                     <div className="flex items-center justify-end gap-1.5">
                       <span>Sales Revenue</span>
                       <ArrowUpDown className="w-3 h-3 text-gray-400" />
                     </div>
                   </th>
-                  <th className="text-center">Details</th>
+                  <th className="hidden sm:table-cell text-center">Details</th>
                 </tr>
               </thead>
-              <tbody className="divide-y divide-gray-100 text-sm">
+              <tbody className="divide-y divide-gray-100">
                 {sortedPerfumes.map((perfume) => {
                   const isOutOfStock = perfume.currentStock <= 0;
                   const isLowStock = perfume.currentStock > 0 && perfume.currentStock <= 5;
@@ -541,27 +541,27 @@ const PerfumePerformancePage: React.FC = () => {
                       onClick={() => setSelectedPerfume(perfume)}
                     >
                       {/* Perfume Name & SKU */}
-                      <td className="py-3.5">
-                        <div className="flex items-center gap-3">
-                          <div className="w-9 h-9 rounded-lg bg-primary-50 border border-primary-100 flex items-center justify-center text-primary-600 font-bold text-xs flex-shrink-0 group-hover:bg-primary-600 group-hover:text-white transition-all shadow-2xs">
+                      <td className="py-2.5 sm:py-3.5">
+                        <div className="flex items-center gap-2 sm:gap-3">
+                          <div className="hidden sm:flex w-9 h-9 rounded-lg bg-primary-50 border border-primary-100 items-center justify-center text-primary-600 font-bold text-xs flex-shrink-0 group-hover:bg-primary-600 group-hover:text-white transition-all shadow-2xs">
                             <Flame className="w-4 h-4" />
                           </div>
                           <div>
-                            <div className="font-bold text-gray-900 group-hover:text-primary-700 transition-colors">
+                            <div className="font-bold text-gray-900 group-hover:text-primary-700 transition-colors text-xs sm:text-sm truncate max-w-[115px] sm:max-w-none">
                               {perfume.name}
                             </div>
-                            <div className="flex items-center gap-2 mt-0.5">
-                              <span className="font-mono text-[11px] text-gray-500 bg-gray-100 px-1.5 py-0.2 rounded">
+                            <div className="flex items-center gap-1 mt-0.5">
+                              <span className="font-mono text-[9px] sm:text-[11px] text-gray-500 bg-gray-100 px-1 py-0.2 rounded truncate max-w-[80px] sm:max-w-none">
                                 {perfume.sku}
                               </span>
                               {perfume.category && perfume.category !== 'Uncategorized' && (
-                                <span className="text-[10px] text-gray-500">
+                                <span className="hidden sm:inline text-[10px] text-gray-500">
                                   {perfume.category}
                                 </span>
                               )}
                               {perfume.sizeml ? (
-                                <span className="text-[10px] text-gray-400">
-                                  · {perfume.sizeml} ml
+                                <span className="text-[9px] sm:text-[10px] text-gray-400">
+                                  · {perfume.sizeml}ml
                                 </span>
                               ) : null}
                             </div>
@@ -570,10 +570,10 @@ const PerfumePerformancePage: React.FC = () => {
                       </td>
 
                       {/* Stock Quantity */}
-                      <td>
-                        <div className="flex items-center gap-1.5">
+                      <td className="text-center">
+                        <div className="inline-flex items-center gap-1">
                           <span
-                            className={`font-bold px-2 py-0.5 rounded-full text-xs ${
+                            className={`font-bold px-1.5 sm:px-2 py-0.5 rounded text-[10px] sm:text-xs ${
                               isOutOfStock
                                 ? 'bg-red-100 text-red-700 font-extrabold'
                                 : isLowStock
@@ -583,13 +583,8 @@ const PerfumePerformancePage: React.FC = () => {
                           >
                             {perfume.currentStock}
                           </span>
-                          {isOutOfStock ? (
-                            <span className="text-[10px] text-red-500 font-semibold">Out</span>
-                          ) : isLowStock ? (
-                            <span className="text-[10px] text-amber-600 font-medium">Low</span>
-                          ) : null}
                           {perfume.isSharedStock && (
-                            <span className="px-1.5 py-0.5 rounded text-[9px] bg-purple-100 text-purple-700 font-bold tracking-tight" title="Shared Stock">
+                            <span className="hidden sm:inline px-1.5 py-0.5 rounded text-[9px] bg-purple-100 text-purple-700 font-bold tracking-tight" title="Shared Stock">
                               Shared
                             </span>
                           )}
@@ -598,47 +593,42 @@ const PerfumePerformancePage: React.FC = () => {
 
                       {/* Sold Count */}
                       <td className="text-right">
-                        <div className="font-extrabold text-blue-700 text-base">
+                        <div className="font-extrabold text-blue-700 text-xs sm:text-base">
                           {perfume.soldCount}
                         </div>
-                        <div className="text-[11px] text-gray-500 mt-0.5">
+                        <div className="sm:hidden text-[9px] text-gray-500 font-medium">
+                          {formatCurrency(perfume.salesRevenue)}
+                        </div>
+                        <div className="hidden sm:block text-[11px] text-gray-500 mt-0.5">
                           {perfume.soldOrdersCount} {perfume.soldOrdersCount === 1 ? 'order' : 'orders'}
-                          {perfume.comboSoldCount > 0 && (
-                            <span className="text-indigo-600 font-medium ml-1" title="Units sold as part of combo packages">
-                              ({perfume.comboSoldCount} combo)
-                            </span>
-                          )}
                         </div>
                       </td>
 
                       {/* Return Count */}
                       <td className="text-right">
-                        <div className={`font-extrabold text-base ${perfume.returnCount > 0 ? 'text-rose-600' : 'text-gray-400'}`}>
+                        <div className={`font-extrabold text-xs sm:text-base ${perfume.returnCount > 0 ? 'text-rose-600' : 'text-gray-400'}`}>
                           {perfume.returnCount}
                         </div>
+                        <div className="sm:hidden text-[9px] text-rose-500 font-medium">
+                          {returnRate > 0 ? `${returnRate.toFixed(0)}%` : '0%'}
+                        </div>
                         {perfume.returnCount > 0 ? (
-                          <div className="text-[10px] text-gray-500 mt-0.5">
-                            {perfume.customerReturnCount > 0 && <span>{perfume.customerReturnCount} Cust</span>}
-                            {perfume.customerReturnCount > 0 && perfume.rtoReturnCount > 0 && <span> · </span>}
-                            {perfume.rtoReturnCount > 0 && <span>{perfume.rtoReturnCount} RTO</span>}
+                          <div className="hidden sm:block text-[10px] text-gray-500 mt-0.5">
+                            {perfume.customerReturnCount > 0 && <span>{perfume.customerReturnCount}C </span>}
+                            {perfume.rtoReturnCount > 0 && <span>{perfume.rtoReturnCount}RTO</span>}
                           </div>
-                        ) : (
-                          <div className="text-[10px] text-emerald-600 font-medium mt-0.5">0 returns</div>
-                        )}
+                        ) : null}
                       </td>
 
                       {/* Net Sold */}
                       <td className="text-right">
-                        <div className="font-extrabold text-emerald-700 text-base">
+                        <div className="font-extrabold text-emerald-700 text-xs sm:text-base">
                           {perfume.netSoldCount}
-                        </div>
-                        <div className="text-[10px] text-gray-400 mt-0.5">
-                          {perfume.soldCount > 0 ? `${((perfume.netSoldCount / perfume.soldCount) * 100).toFixed(0)}% kept` : '—'}
                         </div>
                       </td>
 
-                      {/* Return Rate */}
-                      <td className="text-center">
+                      {/* Return Rate (Desktop) */}
+                      <td className="hidden md:table-cell text-center">
                         <div className="inline-flex flex-col items-center">
                           <span
                             className={`px-2.5 py-0.5 rounded-full text-xs font-bold border ${
@@ -665,8 +655,8 @@ const PerfumePerformancePage: React.FC = () => {
                         </div>
                       </td>
 
-                      {/* Sales Revenue */}
-                      <td className="text-right">
+                      {/* Sales Revenue (Desktop) */}
+                      <td className="hidden lg:table-cell text-right">
                         <div className="font-semibold text-gray-900">
                           {formatCurrency(perfume.salesRevenue)}
                         </div>
@@ -677,8 +667,8 @@ const PerfumePerformancePage: React.FC = () => {
                         )}
                       </td>
 
-                      {/* Details View Button */}
-                      <td className="text-center" onClick={(e) => { e.stopPropagation(); setSelectedPerfume(perfume); }}>
+                      {/* Details View Button (Desktop) */}
+                      <td className="hidden sm:table-cell text-center" onClick={(e) => { e.stopPropagation(); setSelectedPerfume(perfume); }}>
                         <button className="px-2.5 py-1 text-xs font-medium text-primary-600 bg-primary-50 hover:bg-primary-100 rounded-lg transition-colors">
                           View
                         </button>

@@ -31,27 +31,29 @@ const PnLPage: React.FC = () => {
     if (value === undefined) return null;
     const isNeg = value < 0;
     return (
-      <div className={`flex items-center justify-between py-2.5 ${subtotal ? 'border-t border-gray-200 mt-1' : 'border-b border-gray-50'}`}>
-        <span className={`text-sm ${indent ? 'pl-6 text-gray-500' : bold ? 'font-semibold text-gray-900' : 'text-gray-700'}`}>{label}</span>
-        <span className={`text-sm ${bold ? 'font-bold' : 'font-medium'} ${isNeg ? 'text-red-600' : positive ? 'text-gray-900' : 'text-gray-700'}`}>
+      <div className={`flex items-center justify-between py-2 sm:py-2.5 ${subtotal ? 'border-t border-gray-200 mt-1' : 'border-b border-gray-50'}`}>
+        <span className={`text-xs sm:text-sm ${indent ? 'pl-3 sm:pl-6 text-gray-500' : bold ? 'font-semibold text-gray-900' : 'text-gray-700'}`}>{label}</span>
+        <span className={`text-xs sm:text-sm ${bold ? 'font-bold' : 'font-medium'} ${isNeg ? 'text-red-600' : positive ? 'text-gray-900' : 'text-gray-700'}`}>
           {formatCurrency(Math.abs(value))}
-          {isNeg && <span className="text-xs ml-1 text-red-400">(loss)</span>}
+          {isNeg && <span className="text-[10px] sm:text-xs ml-1 text-red-400">(loss)</span>}
         </span>
       </div>
     );
   };
 
   return (
-    <div className="space-y-5">
-      <div className="flex flex-col sm:flex-row sm:items-center gap-4 justify-between">
+    <div className="space-y-4 sm:space-y-5">
+      <div className="flex flex-col sm:flex-row sm:items-center gap-3 sm:gap-4 justify-between">
         <div>
           <h1 className="text-xl font-bold text-gray-900">Profit & Loss</h1>
           <p className="text-sm text-gray-500">{formatDate(dateRange.startDate)} – {formatDate(dateRange.endDate)}</p>
         </div>
-        <DateRangePicker value={dateRange} onChange={setDateRange} />
+        <div className="w-full sm:w-auto overflow-x-auto pb-1 sm:pb-0">
+          <DateRangePicker value={dateRange} onChange={setDateRange} />
+        </div>
       </div>
 
-      <div className="flex items-center gap-2 px-4 py-2.5 bg-amber-50 border border-amber-100 rounded-lg text-xs text-amber-700">
+      <div className="flex items-center gap-2 px-3 sm:px-4 py-2 sm:py-2.5 bg-amber-50 border border-amber-100 rounded-lg text-xs text-amber-700">
         <AlertTriangle className="w-3.5 h-3.5 flex-shrink-0" />
         These are <strong className="mx-1">estimated</strong> figures based on entered data. Not a substitute for audited accounts.
       </div>
@@ -59,9 +61,9 @@ const PnLPage: React.FC = () => {
       {isLoading ? <LoadingSpinner /> : !pnl ? (
         <div className="card p-8 text-center text-gray-400">No data available for selected period.</div>
       ) : (
-        <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+        <div className="grid grid-cols-1 lg:grid-cols-2 gap-4 sm:gap-6">
           {/* P&L Statement */}
-          <div className="card p-6">
+          <div className="card p-3.5 sm:p-6">
             <h2 className="text-sm font-bold text-gray-700 mb-4 uppercase tracking-wider">Income Statement</h2>
             <div className="space-y-0.5">
               <Row label="Gross Order Value" value={pnl.grossOrderValue} bold />
