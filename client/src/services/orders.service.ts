@@ -19,4 +19,25 @@ export const ordersApi = {
 
   categorySummary: (params?: PaginationParams) =>
     api.get('/orders/summary/category', { params }),
+
+  downloadSampleTemplate: () =>
+    api.get('/orders/import/sample-template', { responseType: 'blob' }),
+
+  previewImport: (payload: FormData | { rows: any[] }) => {
+    if (payload instanceof FormData) {
+      return api.post<ApiResponse<any>>('/orders/import/preview', payload, {
+        headers: { 'Content-Type': 'multipart/form-data' },
+      });
+    }
+    return api.post<ApiResponse<any>>('/orders/import/preview', payload);
+  },
+
+  executeImport: (payload: FormData | { businessAccount: string; rows: any[] }) => {
+    if (payload instanceof FormData) {
+      return api.post<ApiResponse<any>>('/orders/import/execute', payload, {
+        headers: { 'Content-Type': 'multipart/form-data' },
+      });
+    }
+    return api.post<ApiResponse<any>>('/orders/import/execute', payload);
+  },
 };

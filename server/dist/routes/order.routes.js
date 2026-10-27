@@ -5,6 +5,7 @@ var __importDefault = (this && this.__importDefault) || function (mod) {
 Object.defineProperty(exports, "__esModule", { value: true });
 const express_1 = require("express");
 const mongoose_1 = __importDefault(require("mongoose"));
+const multer_1 = __importDefault(require("multer"));
 const Order_1 = require("../models/Order");
 const Product_1 = require("../models/Product");
 const PackingRecord_1 = require("../models/PackingRecord");
@@ -14,6 +15,11 @@ const auth_1 = require("../middleware/auth");
 const audit_service_1 = require("../services/audit.service");
 const inventory_service_1 = require("../services/inventory.service");
 const qrScanner_service_1 = require("../services/qrScanner.service");
+const meeshoImport_service_1 = require("../services/meeshoImport.service");
+const upload = (0, multer_1.default)({
+    storage: multer_1.default.memoryStorage(),
+    limits: { fileSize: 15 * 1024 * 1024 }, // 15MB max file size
+});
 const router = (0, express_1.Router)();
 router.use(auth_1.authenticate);
 // Helper: build account filter
@@ -53,6 +59,95 @@ router.get('/', auth_1.enforceAccountAccess, async (req, res) => {
             Order_1.Order.countDocuments(filter),
         ]);
         res.json({ success: true, data: orders, total, page: parseInt(page), limit: parseInt(limit) });
+    }
+    catch (err) {
+        res.status(500).json({ success: false, message: err.message });
+    }
+});
+// GET /api/orders/import/sample-template — Download sample Meesho Excel format
+router.get('/import/sample-template', async (_req, res) => {
+    try {
+        const buffer = (0, meeshoImport_service_1.generateMeeshoSampleTemplate)();
+        res.setHeader('Content-Type', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');
+        res.setHeader('Content-Disposition', 'attachment; filename="Meesho_Orders_Sample_Template.xlsx"');
+        res.send(buffer);
+    }
+    catch (err) {
+        res.status(500).json({ success: false, message: err.message });
+    }
+});
+// POST /api/orders/import/preview — Parse and preview Meesho Excel data before import
+router.post('/import/preview', auth_1.requireManagerOrAdmin, upload.single('file'), async (req, res) => {
+    try {
+        let parsedRows = [];
+        if (req.file) {
+            parsedRows = (0, meeshoImport_service_1.parseMeeshoWorkbook)(req.file.buffer);
+        }
+        else if (Array.isArray(req.body.rows)) {
+            parsedRows = (0, meeshoImport_service_1.parseMeeshoRawRows)(req.body.rows);
+        }
+        else if (typeof req.body.rowsJson === 'string') {
+            parsedRows = (0, meeshoImport_service_1.parseMeeshoRawRows)(JSON.parse(req.body.rowsJson));
+        }
+        else {
+            res.status(400).json({ success: false, message: 'Please provide an Excel file (.xlsx, .xls, .csv) or table rows' });
+            return;
+        }
+        const totalRows = parsedRows.length;
+        const returnsCount = parsedRows.filter(r => r.isReturn).length;
+        const uniqueSkus = Array.from(new Set(parsedRows.map(r => r.sku))).filter(Boolean);
+        res.json({
+            success: true,
+            data: {
+                totalRows,
+                returnsCount,
+                ordersCount: totalRows,
+                uniqueSkusCount: uniqueSkus.length,
+                previewRows: parsedRows.slice(0, 25),
+                allRows: parsedRows,
+            },
+        });
+    }
+    catch (err) {
+        res.status(400).json({ success: false, message: err.message });
+    }
+});
+// POST /api/orders/import/execute — Bulk import Meesho orders and returns entries
+router.post('/import/execute', auth_1.requireManagerOrAdmin, auth_1.enforceAccountAccess, upload.single('file'), async (req, res) => {
+    try {
+        const businessAccount = req.body.businessAccount;
+        if (!businessAccount || businessAccount === 'all') {
+            res.status(400).json({ success: false, message: 'A specific Business Account (GSTIN) is required for import' });
+            return;
+        }
+        let parsedRows = [];
+        if (req.file) {
+            parsedRows = (0, meeshoImport_service_1.parseMeeshoWorkbook)(req.file.buffer);
+        }
+        else if (Array.isArray(req.body.rows)) {
+            parsedRows = req.body.rows;
+        }
+        else if (typeof req.body.rowsJson === 'string') {
+            parsedRows = JSON.parse(req.body.rowsJson);
+        }
+        else {
+            res.status(400).json({ success: false, message: 'Please provide an Excel file or row data' });
+            return;
+        }
+        if (parsedRows.length === 0) {
+            res.status(400).json({ success: false, message: 'No valid Meesho order rows found to import' });
+            return;
+        }
+        const summary = await (0, meeshoImport_service_1.importMeeshoOrdersAndReturns)({
+            businessAccount,
+            rows: parsedRows,
+            userId: req.user?._id?.toString(),
+        });
+        res.json({
+            success: true,
+            message: `Import completed: ${summary.ordersCreated} orders created, ${summary.ordersUpdated} orders updated, and ${summary.returnsCreated} return entries recorded.`,
+            data: summary,
+        });
     }
     catch (err) {
         res.status(500).json({ success: false, message: err.message });

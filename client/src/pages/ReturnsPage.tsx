@@ -3,13 +3,14 @@ import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import {
   RotateCcw, QrCode, Camera, CheckCircle2, AlertTriangle, ShieldAlert,
   Search, Plus, Printer, Image, Trash2, Edit2, Layers, Clock, Sparkles,
-  ArrowRight, Wrench, PackageX
+  ArrowRight, Wrench, PackageX, FileSpreadsheet
 } from 'lucide-react';
 import { returnsApi, type ReturnLookupResult } from '../services/returns.service';
 import { productsApi } from '../services/inventory.service';
 import { useAccountStore } from '../store/accountStore';
 import { formatCurrency, formatDate, paiseToRupees, rupeesToPaise } from '../lib/utils';
 import { CameraScannerModal } from '../components/ui/CameraScannerModal';
+import { MeeshoImportModal } from '../components/ui/MeeshoImportModal';
 import { LoadingSpinner, EmptyState } from '../components/ui/Feedback';
 import Modal from '../components/ui/Modal';
 import toast from 'react-hot-toast';
@@ -22,6 +23,7 @@ export const ReturnsPage: React.FC = () => {
 
   // Active Tab
   const [activeTab, setActiveTab] = useState<'returns' | 'rto' | 'customer' | 'pending_inspection' | 'damaged_stock' | 'exceptions'>('returns');
+  const [isImportModalOpen, setIsImportModalOpen] = useState(false);
 
   // Scanner & Lookup State
   const [scanInput, setScanInput] = useState('');
@@ -253,13 +255,23 @@ export const ReturnsPage: React.FC = () => {
           </p>
         </div>
 
-        {activeAccount && (
-          <div className="flex items-center gap-2 bg-white px-3 py-1.5 rounded-lg border border-gray-200 text-xs">
-            <span className="text-gray-400">Active GSTIN:</span>
-            <span className="font-mono font-bold text-gray-800">{activeAccount.gstin}</span>
-            <span className="text-gray-400">({activeAccount.tradeName})</span>
-          </div>
-        )}
+        <div className="flex items-center gap-3">
+          <button
+            onClick={() => setIsImportModalOpen(true)}
+            className="btn-secondary flex items-center gap-2 border-indigo-200 text-indigo-700 hover:bg-indigo-50 dark:border-indigo-800 dark:text-indigo-300 dark:hover:bg-indigo-950/40"
+            title="Import Meesho Returns, RTOs and Sub-orders from Excel (.xlsx, .csv)"
+          >
+            <FileSpreadsheet className="w-4 h-4 text-emerald-600 dark:text-emerald-400" />
+            <span>Import Meesho Excel</span>
+          </button>
+          {activeAccount && (
+            <div className="hidden sm:flex items-center gap-2 bg-white px-3 py-1.5 rounded-lg border border-gray-200 text-xs">
+              <span className="text-gray-400">Active GSTIN:</span>
+              <span className="font-mono font-bold text-gray-800">{activeAccount.gstin}</span>
+              <span className="text-gray-400">({activeAccount.tradeName})</span>
+            </div>
+          )}
+        </div>
       </div>
 
       {/* Main Scanning & Processing Section */}
@@ -1078,6 +1090,12 @@ export const ReturnsPage: React.FC = () => {
           setScanInput(code);
           lookupMutation.mutate(code);
         }}
+      />
+
+      {/* Meesho Excel Import Modal */}
+      <MeeshoImportModal
+        isOpen={isImportModalOpen}
+        onClose={() => setIsImportModalOpen(false)}
       />
     </div>
   );

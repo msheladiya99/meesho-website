@@ -1,6 +1,6 @@
 import React, { useState } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
-import { Plus, Search, Edit2, Trash2, ShoppingCart, QrCode, Printer } from 'lucide-react';
+import { Plus, Search, Edit2, Trash2, ShoppingCart, QrCode, Printer, FileSpreadsheet } from 'lucide-react';
 import { useForm } from 'react-hook-form';
 import { zodResolver } from '@hookform/resolvers/zod';
 import { z } from 'zod';
@@ -12,6 +12,7 @@ import DateRangePicker from '../components/ui/DateRangePicker';
 import Modal from '../components/ui/Modal';
 import { EmptyState, LoadingSpinner, ConfirmDialog } from '../components/ui/Feedback';
 import { PrintableQrLabel } from '../components/ui/PrintableQrLabel';
+import { MeeshoImportModal } from '../components/ui/MeeshoImportModal';
 import toast from 'react-hot-toast';
 import type { DateRange, Order, Product, Category } from '../types';
 
@@ -37,6 +38,7 @@ const OrdersPage: React.FC = () => {
   const [deleteId, setDeleteId] = useState<string | null>(null);
   const [keepOpen, setKeepOpen] = useState(false);
   const [printOrder, setPrintOrder] = useState<Order | null>(null);
+  const [isImportModalOpen, setIsImportModalOpen] = useState(false);
 
   const [orderCategory, setOrderCategory] = useState<string>('');
 
@@ -239,9 +241,19 @@ const OrdersPage: React.FC = () => {
           <h1 className="text-xl font-bold text-gray-900">Orders</h1>
           <p className="text-sm text-gray-500">Total sales: <strong>{formatCurrency(totalSales)}</strong> · {orders.length} orders</p>
         </div>
-        <button onClick={openAdd} className="btn-primary">
-          <Plus className="w-4 h-4" /> Add Order
-        </button>
+        <div className="flex items-center gap-2">
+          <button
+            onClick={() => setIsImportModalOpen(true)}
+            className="btn-secondary flex items-center gap-2 border-indigo-200 text-indigo-700 hover:bg-indigo-50 dark:border-indigo-800 dark:text-indigo-300 dark:hover:bg-indigo-950/40"
+            title="Import Meesho Sub-orders and Returns from Excel (.xlsx, .csv)"
+          >
+            <FileSpreadsheet className="w-4 h-4 text-emerald-600 dark:text-emerald-400" />
+            <span>Import Meesho Excel</span>
+          </button>
+          <button onClick={openAdd} className="btn-primary">
+            <Plus className="w-4 h-4" /> Add Order
+          </button>
+        </div>
       </div>
 
       {/* Filters */}
@@ -493,6 +505,11 @@ const OrdersPage: React.FC = () => {
           onClose={() => setPrintOrder(null)}
         />
       )}
+
+      <MeeshoImportModal
+        isOpen={isImportModalOpen}
+        onClose={() => setIsImportModalOpen(false)}
+      />
     </div>
   );
 };
