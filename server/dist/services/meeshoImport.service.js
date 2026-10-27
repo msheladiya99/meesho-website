@@ -113,7 +113,7 @@ const mapMeeshoStatus = (rawStatusStr, rawReturnTypeStr, rawReturnStatusStr) => 
         (rawReturnTypeStr && /rto/i.test(rawReturnTypeStr))) {
         const isCompleted = combined.includes('deliver') ||
             combined.includes('received') ||
-            combined.includes('completed') ||
+            combined.includes('complete') ||
             combined.includes('closed');
         return {
             orderStatus: isCompleted ? 'rto_received' : 'rto_in_transit',
@@ -134,7 +134,7 @@ const mapMeeshoStatus = (rawStatusStr, rawReturnTypeStr, rawReturnStatusStr) => 
         (rawReturnStatusStr && rawReturnStatusStr.trim() !== '')) {
         const isCompleted = combined.includes('deliver') ||
             combined.includes('received') ||
-            combined.includes('completed');
+            combined.includes('complete');
         return {
             orderStatus: 'returned',
             isReturn: true,
@@ -161,6 +161,7 @@ const mapMeeshoStatus = (rawStatusStr, rawReturnTypeStr, rawReturnStatusStr) => 
     // Packed / Ready to Ship orders
     if (combined.includes('packed') ||
         combined.includes('ready to ship') ||
+        combined.includes('ready_to_ship') ||
         combined.includes('manifested')) {
         return { orderStatus: 'packed', isReturn: false };
     }
@@ -223,6 +224,13 @@ const COLUMN_ALIASES = {
         'orderquantity',
     ],
     sellingPrice: [
+        'supplierdiscountedpriceinclgstandcommision',
+        'supplierdiscountedpriceinclgstandcommission',
+        'supplierdiscountedprice',
+        'supplierlistedpriceinclgstcommission',
+        'supplierlistedprice',
+        'discountedprice',
+        'listedprice',
         'totalamount',
         'supplierprice',
         'sellingprice',
@@ -236,6 +244,9 @@ const COLUMN_ALIASES = {
         'finalamount',
     ],
     status: [
+        'reasonforcreditentry',
+        'reasonforcredit',
+        'creditentryreason',
         'suborderstatus',
         'orderstatus',
         'status',
@@ -244,6 +255,7 @@ const COLUMN_ALIASES = {
         'trackingstatus',
     ],
     shippingLabelId: [
+        'packetid',
         'awbno',
         'awbnumber',
         'awb',
@@ -403,6 +415,16 @@ const importMeeshoOrdersAndReturns = async (params) => {
                 product = await Product_1.Product.findOne({
                     sku: { $regex: `^${skuKey.replace(/[-[\]{}()*+?.,\\^$|#\s]/g, '\\$&')}$`, $options: 'i' },
                 });
+                // Flexible alphanumeric matching (e.g. 'Choco Musk-01' matches 'CHOCO_MUSK01')
+                if (!product) {
+                    const stripped = skuKey.replace(/[^A-Z0-9]/g, '');
+                    if (stripped.length >= 4) {
+                        const flexPattern = stripped.split('').join('[-_\\s]?');
+                        product = await Product_1.Product.findOne({
+                            sku: { $regex: `^${flexPattern}$`, $options: 'i' },
+                        });
+                    }
+                }
                 if (!product && row.productName) {
                     product = await Product_1.Product.findOne({
                         name: { $regex: `^${row.productName.trim().replace(/[-[\]{}()*+?.,\\^$|#\s]/g, '\\$&')}$`, $options: 'i' },
