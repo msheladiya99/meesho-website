@@ -16,6 +16,7 @@ import {
   importMeeshoOrdersAndReturns,
   generateMeeshoSampleTemplate,
 } from '../services/meeshoImport.service';
+import { applyCustomerReturnCharge, reverseCustomerReturnCharge } from '../services/customerReturnCharge.service';
 
 const upload = multer({
   storage: multer.memoryStorage(),
@@ -566,6 +567,22 @@ router.put('/:id', requireManagerOrAdmin, enforceAccountAccess, async (req: Auth
       changes: { before: { sellingPrice: existing.sellingPrice, quantity: existing.quantity }, after: { sellingPrice, quantity } },
     });
 
+    // Handle Customer Return Charge transition
+    if (existing.status !== 'returned' && order.status === 'returned') {
+      await applyCustomerReturnCharge({
+        orderId: order._id,
+        returnedQuantity: order.quantity,
+        returnDate: new Date(),
+        userId: req.user?._id?.toString(),
+      });
+    } else if (existing.status === 'returned' && order.status !== 'returned') {
+      await reverseCustomerReturnCharge({
+        orderId: order._id,
+        reason: `Order status changed from returned to ${order.status}`,
+        userId: req.user?._id?.toString(),
+      });
+    }
+
     res.json({ success: true, data: order });
   } catch (err) {
     const msg = (err as Error).message;
@@ -593,6 +610,15 @@ router.delete('/:id', requireManagerOrAdmin, async (req: AuthRequest, res: Respo
     await reverseMovementsByReference(req.params.id as string, req.user?._id?.toString());
 
     await Order.findByIdAndUpdate(req.params.id, { isDeleted: true, deletedAt: new Date() });
+
+    if (order.status === 'returned') {
+      await reverseCustomerReturnCharge({
+        orderId: order._id,
+        reason: 'Order deleted',
+        userId: req.user?._id?.toString(),
+      });
+    }
+
     await createAuditLog({ action: 'DELETE', resource: 'Order', resourceId: req.params.id as string, userId: req.user?._id?.toString(), details: `Soft deleted order ${order.meeshoOrderId || order._id}` });
 
     res.json({ success: true, message: 'Order deleted and stock restored' });

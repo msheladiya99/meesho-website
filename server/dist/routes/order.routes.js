@@ -16,6 +16,7 @@ const audit_service_1 = require("../services/audit.service");
 const inventory_service_1 = require("../services/inventory.service");
 const qrScanner_service_1 = require("../services/qrScanner.service");
 const meeshoImport_service_1 = require("../services/meeshoImport.service");
+const customerReturnCharge_service_1 = require("../services/customerReturnCharge.service");
 const upload = (0, multer_1.default)({
     storage: multer_1.default.memoryStorage(),
     limits: { fileSize: 15 * 1024 * 1024 }, // 15MB max file size
@@ -531,6 +532,22 @@ router.put('/:id', auth_1.requireManagerOrAdmin, auth_1.enforceAccountAccess, as
             action: 'UPDATE', resource: 'Order', resourceId: req.params.id, userId: req.user?._id?.toString(),
             changes: { before: { sellingPrice: existing.sellingPrice, quantity: existing.quantity }, after: { sellingPrice, quantity } },
         });
+        // Handle Customer Return Charge transition
+        if (existing.status !== 'returned' && order.status === 'returned') {
+            await (0, customerReturnCharge_service_1.applyCustomerReturnCharge)({
+                orderId: order._id,
+                returnedQuantity: order.quantity,
+                returnDate: new Date(),
+                userId: req.user?._id?.toString(),
+            });
+        }
+        else if (existing.status === 'returned' && order.status !== 'returned') {
+            await (0, customerReturnCharge_service_1.reverseCustomerReturnCharge)({
+                orderId: order._id,
+                reason: `Order status changed from returned to ${order.status}`,
+                userId: req.user?._id?.toString(),
+            });
+        }
         res.json({ success: true, data: order });
     }
     catch (err) {
@@ -562,6 +579,13 @@ router.delete('/:id', auth_1.requireManagerOrAdmin, async (req, res) => {
         // Restore stock by reversing movement
         await (0, inventory_service_1.reverseMovementsByReference)(req.params.id, req.user?._id?.toString());
         await Order_1.Order.findByIdAndUpdate(req.params.id, { isDeleted: true, deletedAt: new Date() });
+        if (order.status === 'returned') {
+            await (0, customerReturnCharge_service_1.reverseCustomerReturnCharge)({
+                orderId: order._id,
+                reason: 'Order deleted',
+                userId: req.user?._id?.toString(),
+            });
+        }
         await (0, audit_service_1.createAuditLog)({ action: 'DELETE', resource: 'Order', resourceId: req.params.id, userId: req.user?._id?.toString(), details: `Soft deleted order ${order.meeshoOrderId || order._id}` });
         res.json({ success: true, message: 'Order deleted and stock restored' });
     }

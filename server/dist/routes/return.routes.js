@@ -13,6 +13,7 @@ const auth_1 = require("../middleware/auth");
 const audit_service_1 = require("../services/audit.service");
 const inventory_service_1 = require("../services/inventory.service");
 const qrScanner_service_1 = require("../services/qrScanner.service");
+const customerReturnCharge_service_1 = require("../services/customerReturnCharge.service");
 const router = (0, express_1.Router)();
 router.use(auth_1.authenticate);
 const generateReturnTransactionId = () => {
@@ -274,6 +275,16 @@ router.post('/process', auth_1.requireManagerOrAdmin, auth_1.enforceAccountAcces
                 : `Partially returned ${newTotalReturned}/${order.quantity}`;
         }
         await order.save();
+        // If customer return, apply customer return charge expense
+        if (returnType === 'customer_return') {
+            await (0, customerReturnCharge_service_1.applyCustomerReturnCharge)({
+                orderId: order._id,
+                returnOrderId: returnOrder._id,
+                returnedQuantity: recvQty,
+                returnDate: returnOrder.returnDate,
+                userId: req.user?._id,
+            });
+        }
         await (0, audit_service_1.createAuditLog)({
             action: 'CREATE',
             resource: 'ReturnOrder',
@@ -678,6 +689,15 @@ router.post('/', auth_1.requireManagerOrAdmin, auth_1.enforceAccountAccess, asyn
             userId: req.user?._id,
             details: `Return created (Tx: ${returnTxId})`,
         });
+        if (returnOrder.returnType === 'customer_return' && originalOrder) {
+            await (0, customerReturnCharge_service_1.applyCustomerReturnCharge)({
+                orderId: originalOrder,
+                returnOrderId: returnOrder._id,
+                returnedQuantity,
+                returnDate: returnOrder.returnDate,
+                userId: req.user?._id,
+            });
+        }
         const populated = await ReturnOrder_1.ReturnOrder.findById(returnOrder._id)
             .populate('product', 'name sku')
             .populate('businessAccount', 'name gstin');
@@ -724,6 +744,13 @@ router.delete('/:id', auth_1.requireManagerOrAdmin, async (req, res) => {
         }
         const retId = req.params.id;
         await ReturnOrder_1.ReturnOrder.findByIdAndUpdate(retId, { isDeleted: true });
+        if (ret.returnType === 'customer_return' && ret.originalOrder) {
+            await (0, customerReturnCharge_service_1.reverseCustomerReturnCharge)({
+                orderId: ret.originalOrder.toString(),
+                reason: `Return order ${ret.returnTransactionId || ret._id} was deleted`,
+                userId: req.user?._id,
+            });
+        }
         await (0, audit_service_1.createAuditLog)({
             action: 'DELETE',
             resource: 'ReturnOrder',

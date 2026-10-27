@@ -8,6 +8,7 @@ import { PackingRecord } from '../models/PackingRecord';
 import { recordStockMovement } from './inventory.service';
 import { generateInternalQrCode } from './qrScanner.service';
 import { createAuditLog } from './audit.service';
+import { applyCustomerReturnCharge } from './customerReturnCharge.service';
 
 export interface ParsedMeeshoRow {
   rowNumber: number;
@@ -715,6 +716,16 @@ export const importMeeshoOrdersAndReturns = async (params: {
           } else if (row.returnType === 'customer_return' && orderDoc.status !== 'returned') {
             orderDoc.status = 'returned';
             await orderDoc.save();
+          }
+
+          // Apply Customer Return Charge if customer return
+          if (row.returnType === 'customer_return') {
+            await applyCustomerReturnCharge({
+              orderId: orderDoc._id,
+              returnedQuantity: row.quantity,
+              returnDate: row.returnDate || row.orderDate,
+              userId,
+            });
           }
 
           summary.returnsCreated++;

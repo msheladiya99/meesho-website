@@ -26,6 +26,7 @@ const expense_routes_1 = __importDefault(require("./routes/expense.routes"));
 const report_routes_1 = __importDefault(require("./routes/report.routes"));
 const analytics_routes_1 = __importDefault(require("./routes/analytics.routes"));
 const audit_routes_1 = __importDefault(require("./routes/audit.routes"));
+const customerReturnCharge_routes_1 = __importDefault(require("./routes/customerReturnCharge.routes"));
 dotenv_1.default.config();
 const app = (0, express_1.default)();
 const PORT = Number(process.env.PORT) || 5000;
@@ -116,6 +117,7 @@ app.use('/api/expenses', expense_routes_1.default);
 app.use('/api/reports', report_routes_1.default);
 app.use('/api/analytics', analytics_routes_1.default);
 app.use('/api/audit-logs', audit_routes_1.default);
+app.use('/api/customer-return-charges', customerReturnCharge_routes_1.default);
 // Error handler (must be last)
 app.use(errorHandler_1.errorHandler);
 // ─────────────────────────────────────────────────────────────────────────────

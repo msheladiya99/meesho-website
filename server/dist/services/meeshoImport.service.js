@@ -47,6 +47,7 @@ const PackingRecord_1 = require("../models/PackingRecord");
 const inventory_service_1 = require("./inventory.service");
 const qrScanner_service_1 = require("./qrScanner.service");
 const audit_service_1 = require("./audit.service");
+const customerReturnCharge_service_1 = require("./customerReturnCharge.service");
 // Generate return transaction ID (RET-YYYYMMDD-XXXXX)
 const generateReturnTxId = () => {
     const dateStr = new Date().toISOString().slice(0, 10).replace(/-/g, '');
@@ -631,6 +632,15 @@ const importMeeshoOrdersAndReturns = async (params) => {
                     else if (row.returnType === 'customer_return' && orderDoc.status !== 'returned') {
                         orderDoc.status = 'returned';
                         await orderDoc.save();
+                    }
+                    // Apply Customer Return Charge if customer return
+                    if (row.returnType === 'customer_return') {
+                        await (0, customerReturnCharge_service_1.applyCustomerReturnCharge)({
+                            orderId: orderDoc._id,
+                            returnedQuantity: row.quantity,
+                            returnDate: row.returnDate || row.orderDate,
+                            userId,
+                        });
                     }
                     summary.returnsCreated++;
                 }

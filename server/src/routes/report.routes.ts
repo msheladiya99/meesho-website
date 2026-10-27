@@ -9,6 +9,7 @@ import { PackingRecord } from '../models/PackingRecord';
 import { ScanException } from '../models/ScanException';
 import { BusinessAccount } from '../models/BusinessAccount';
 import { StockMovement } from '../models/StockMovement';
+import { CustomerReturnCharge } from '../models/CustomerReturnCharge';
 import { authenticate, enforceAccountAccess, AuthRequest } from '../middleware/auth';
 import { resolveStockAccountIds } from '../services/inventory.service';
 
@@ -202,12 +203,22 @@ router.get('/dashboard', enforceAccountAccess, async (req: AuthRequest, res: Res
 // GET /api/reports/pnl
 router.get('/pnl', enforceAccountAccess, async (req: AuthRequest, res: Response): Promise<void> => {
   try {
-    const { accountId, startDate, endDate } = req.query as Record<string, string>;
+    const { accountId, categoryId, startDate, endDate } = req.query as Record<string, string>;
     const af = acctFilter(accountId);
     const df = dateFilter(startDate, endDate, 'orderDate');
     const rdf = dateFilter(startDate, endDate, 'returnDate');
     const pdf = dateFilter(startDate, endDate, 'purchaseDate');
     const edf = dateFilter(startDate, endDate, 'expenseDate');
+
+    let prodFilter: Record<string, any> = {};
+    let catChargeFilter: Record<string, any> = {};
+    if (categoryId && categoryId !== 'all' && mongoose.Types.ObjectId.isValid(categoryId)) {
+      const catObjId = new mongoose.Types.ObjectId(categoryId);
+      const matchedProducts = await Product.find({ category: catObjId }).select('_id');
+      const catProdIds = matchedProducts.map((p) => p._id);
+      prodFilter = { product: { $in: catProdIds } };
+      catChargeFilter = { $or: [{ category: catObjId }, { product: { $in: catProdIds } }] };
+    }
 
     const EXPENSE_CATEGORIES = {
       meeshoFees: 'Meesho Fees',
@@ -215,17 +226,29 @@ router.get('/pnl', enforceAccountAccess, async (req: AuthRequest, res: Response)
       advertising: 'Advertising',
     };
 
-    const [orderAgg, cancelAgg, returnAgg, purchaseAgg, expenseAgg, catExpenses, products] = await Promise.all([
-      Order.aggregate([{ $match: { isDeleted: false, ...af, ...df } }, { $group: { _id: null, gross: { $sum: '$grossAmount' }, qty: { $sum: '$quantity' } } }]),
-      Order.aggregate([{ $match: { isDeleted: false, status: 'cancelled', ...af, ...df } }, { $group: { _id: null, total: { $sum: '$grossAmount' } } }]),
-      ReturnOrder.aggregate([{ $match: { isDeleted: false, ...af, ...rdf } }, { $group: { _id: null, total: { $sum: '$returnAmount' } } }]),
+    const [orderAgg, cancelAgg, returnAgg, purchaseAgg, expenseAgg, catExpenses, products, returnChargeAgg] = await Promise.all([
+      Order.aggregate([{ $match: { isDeleted: false, ...af, ...df, ...prodFilter } }, { $group: { _id: null, gross: { $sum: '$grossAmount' }, qty: { $sum: '$quantity' } } }]),
+      Order.aggregate([{ $match: { isDeleted: false, status: 'cancelled', ...af, ...df, ...prodFilter } }, { $group: { _id: null, total: { $sum: '$grossAmount' } } }]),
+      ReturnOrder.aggregate([{ $match: { isDeleted: false, ...af, ...rdf, ...prodFilter } }, { $group: { _id: null, total: { $sum: '$returnAmount' } } }]),
       StockPurchase.aggregate([{ $match: { isDeleted: false, ...af, ...pdf } }, { $group: { _id: null, total: { $sum: '$totalAmount' } } }]),
       Expense.aggregate([{ $match: { isDeleted: false, ...af, ...edf } }, { $group: { _id: null, total: { $sum: '$amount' } } }]),
       Expense.aggregate([
         { $match: { isDeleted: false, ...af, ...edf } },
         { $group: { _id: '$category', total: { $sum: '$amount' } } },
       ]),
-      Product.find({ isActive: true }),
+      Product.find(categoryId && categoryId !== 'all' ? { isActive: true, category: categoryId } : { isActive: true }),
+      CustomerReturnCharge.aggregate([
+        { $match: { isDeleted: false, status: { $in: ['applied', 'adjusted'] }, ...af, ...rdf, ...catChargeFilter } },
+        {
+          $group: {
+            _id: null,
+            totalBase: { $sum: '$baseCharge' },
+            totalHandling: { $sum: '$handlingCharge' },
+            total: { $sum: '$totalCharge' },
+            count: { $sum: 1 },
+          },
+        },
+      ]),
     ]);
 
     const grossOrderValue = orderAgg[0]?.gross || 0;
@@ -234,8 +257,6 @@ router.get('/pnl', enforceAccountAccess, async (req: AuthRequest, res: Response)
     const netSales = grossOrderValue - salesCancellations - returnsRefunds;
 
     const totalQtySold = orderAgg[0]?.qty || 0;
-    // More accurate COGS: sum(qty_by_product × WAC_per_product)
-    // Simplified: average WAC × total qty
     const avgWAC = products.length > 0
       ? products.reduce((s, p) => s + p.weightedAvgCost, 0) / products.length
       : 0;
@@ -250,23 +271,38 @@ router.get('/pnl', enforceAccountAccess, async (req: AuthRequest, res: Response)
     const meeshoFees = getCatTotal(EXPENSE_CATEGORIES.meeshoFees);
     const shippingCosts = getCatTotal(EXPENSE_CATEGORIES.shipping) + getCatTotal('Return Shipping');
     const advertising = getCatTotal(EXPENSE_CATEGORIES.advertising) + getCatTotal('Marketing');
-    const otherExpenses = (expenseAgg[0]?.total || 0) - meeshoFees - shippingCosts - advertising;
-    const operatingProfit = grossProfit - meeshoFees - shippingCosts - advertising - Math.max(otherExpenses, 0);
+    const totalRtoCharges = getCatTotal('RTO Charges') + getCatTotal('RTO Return Charges');
+
+    const totalCustomerReturnCharges = returnChargeAgg[0]?.totalBase || 0;
+    const totalCustomerReturnHandlingCharges = returnChargeAgg[0]?.totalHandling || 0;
+    const totalCustomerReturnExpenses = returnChargeAgg[0]?.total || 0;
+
+    const otherExpenses = Math.max(0, (expenseAgg[0]?.total || 0) - meeshoFees - shippingCosts - advertising - totalRtoCharges);
+    const totalOperatingExpenses = meeshoFees + shippingCosts + advertising + totalCustomerReturnExpenses + totalRtoCharges + otherExpenses;
+    const operatingProfit = grossProfit - totalOperatingExpenses;
 
     res.json({
       success: true,
       data: {
         grossOrderValue,
+        totalSales: grossOrderValue,
         salesCancellations,
         returnsRefunds,
+        salesReturns: returnsRefunds,
         netSales,
         costOfGoodsSold,
         grossProfit,
         meeshoFees,
         shippingCosts,
         advertising,
-        otherExpenses: Math.max(otherExpenses, 0),
+        totalCustomerReturnCharges,
+        totalCustomerReturnHandlingCharges,
+        totalCustomerReturnExpenses,
+        totalRtoCharges,
+        otherExpenses,
+        totalOperatingExpenses,
         operatingProfit,
+        netProfit: operatingProfit,
         profitMargin: netSales > 0 ? (operatingProfit / netSales) * 100 : 0,
       },
     });

@@ -17,7 +17,7 @@ export const reportsApi = {
   custom: (params: PaginationParams) =>
     api.get('/reports/custom', { params }),
 
-  pnl: (params: { startDate: string; endDate: string; accountId?: string }) =>
+  pnl: (params: { startDate?: string; endDate?: string; accountId?: string; categoryId?: string }) =>
     api.get('/reports/pnl', { params }),
 
   exportCsv: (type: string, params: Record<string, string>) =>

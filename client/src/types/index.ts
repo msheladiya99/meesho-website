@@ -379,3 +379,81 @@ export interface PerfumePerformanceSummary {
   overallReturnRate: number;
   totalPerfumes: number;
 }
+
+// ─── Customer Return Charges ──────────────────────────────────────────────────
+export type ChargeCalculationType = 'fixed_order' | 'fixed_unit' | 'percentage';
+export type HandlingCalculationType = 'fixed_order' | 'fixed_unit';
+export type ReturnChargeStatus = 'applied' | 'reversed' | 'adjusted';
+
+export interface CustomerReturnChargeSettings {
+  _id?: string;
+  isEnabled: boolean;
+  calculationType: ChargeCalculationType;
+  chargeAmount: number; // in paise
+  percentageRate: number; // e.g. 5
+  hasHandlingCharge: boolean;
+  handlingCalculationType: HandlingCalculationType;
+  handlingChargeAmount: number; // in paise
+  effectiveFrom: string;
+  businessAccountScope: 'all' | 'selected';
+  applicableAccounts: string[] | BusinessAccount[];
+  categoryScope: 'all' | 'selected';
+  applicableCategories: string[] | Category[];
+  settingsVersion: number;
+  notes?: string;
+  updatedBy?: User;
+  createdAt?: string;
+  updatedAt?: string;
+}
+
+export interface CustomerReturnCharge {
+  _id: string;
+  transactionId: string;
+  order: Order | string;
+  returnOrder?: string;
+  businessAccount: BusinessAccount;
+  product: Product;
+  sku: string;
+  productName?: string;
+  category?: Category;
+  orderDate: string;
+  returnDate: string;
+  returnedQuantity: number;
+  originalOrderValue: number; // paise
+  chargeType: ChargeCalculationType;
+  appliedRate: number;
+  baseCharge: number; // paise
+  handlingCharge: number; // paise
+  totalCharge: number; // paise
+  transactionType: 'customer_return_charge';
+  status: ReturnChargeStatus;
+  reversalReason?: string;
+  settingsVersion: number;
+  calculationTimestamp: string;
+  calculationDetails?: string;
+  createdBy?: User;
+}
+
+export interface PnLData {
+  grossOrderValue: number;
+  totalSales: number;
+  salesCancellations: number;
+  returnsRefunds: number;
+  salesReturns: number;
+  netSales: number;
+  costOfGoodsSold: number;
+  grossProfit: number;
+  meeshoFees: number;
+  shippingCosts: number;
+  advertising: number;
+  totalCustomerReturnCharges: number;
+  totalCustomerReturnHandlingCharges: number;
+  totalCustomerReturnExpenses: number;
+  totalRtoCharges: number;
+  otherExpenses: number;
+  totalOperatingExpenses: number;
+  operatingProfit: number;
+  netProfit: number;
+  profitMargin: number;
+}
+

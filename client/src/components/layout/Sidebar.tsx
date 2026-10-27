@@ -26,6 +26,7 @@ const navItems = [
 ];
 
 const adminNavItems = [
+  { to: '/return-charges', icon: RotateCcw, label: 'Customer Return Charges' },
   { to: '/settings', icon: Settings, label: 'GSTIN Settings' },
   { to: '/users', icon: Shield, label: 'User Management' },
   { to: '/audit', icon: ScrollText, label: 'Audit Logs' },

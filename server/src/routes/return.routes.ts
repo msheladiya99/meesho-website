@@ -8,6 +8,7 @@ import { authenticate, requireManagerOrAdmin, enforceAccountAccess, AuthRequest 
 import { createAuditLog } from '../services/audit.service';
 import { recordStockMovement } from '../services/inventory.service';
 import { findOrderByScannedCode, recordScanException } from '../services/qrScanner.service';
+import { applyCustomerReturnCharge, reverseCustomerReturnCharge } from '../services/customerReturnCharge.service';
 
 const router = Router();
 router.use(authenticate);
@@ -314,6 +315,17 @@ router.post('/process', requireManagerOrAdmin, enforceAccountAccess, async (req:
         : `Partially returned ${newTotalReturned}/${order.quantity}`;
     }
     await order.save();
+
+    // If customer return, apply customer return charge expense
+    if (returnType === 'customer_return') {
+      await applyCustomerReturnCharge({
+        orderId: order._id,
+        returnOrderId: returnOrder._id,
+        returnedQuantity: recvQty,
+        returnDate: returnOrder.returnDate,
+        userId: req.user?._id,
+      });
+    }
 
     await createAuditLog({
       action: 'CREATE',
@@ -748,6 +760,16 @@ router.post('/', requireManagerOrAdmin, enforceAccountAccess, async (req: AuthRe
       details: `Return created (Tx: ${returnTxId})`,
     });
 
+    if (returnOrder.returnType === 'customer_return' && originalOrder) {
+      await applyCustomerReturnCharge({
+        orderId: originalOrder,
+        returnOrderId: returnOrder._id,
+        returnedQuantity,
+        returnDate: returnOrder.returnDate,
+        userId: req.user?._id,
+      });
+    }
+
     const populated = await ReturnOrder.findById(returnOrder._id)
       .populate('product', 'name sku')
       .populate('businessAccount', 'name gstin');
@@ -794,6 +816,14 @@ router.delete('/:id', requireManagerOrAdmin, async (req: AuthRequest, res: Respo
 
     const retId = req.params.id as string;
     await ReturnOrder.findByIdAndUpdate(retId, { isDeleted: true });
+
+    if (ret.returnType === 'customer_return' && ret.originalOrder) {
+      await reverseCustomerReturnCharge({
+        orderId: ret.originalOrder.toString(),
+        reason: `Return order ${ret.returnTransactionId || ret._id} was deleted`,
+        userId: req.user?._id,
+      });
+    }
     await createAuditLog({
       action: 'DELETE',
       resource: 'ReturnOrder',
