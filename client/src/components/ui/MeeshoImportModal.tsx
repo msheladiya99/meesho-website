@@ -328,7 +328,7 @@ export const MeeshoImportModal: React.FC<MeeshoImportModalProps> = ({ isOpen, on
               }}
               className="w-4 h-4 rounded text-indigo-600 focus:ring-indigo-500 border-slate-300 dark:border-slate-700"
             />
-            <span>Only add Shipped, Delivered & Returned orders (Exclude Hold and Ready to Ship)</span>
+            <span>Only add Shipped, Delivered & Returned orders (Exclude Cancelled, Hold & Ready to Ship)</span>
           </label>
         </div>
 

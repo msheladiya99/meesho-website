@@ -28,6 +28,11 @@ const schema = z.object({
 
 type FormData = z.infer<typeof schema>;
 
+const truncateText = (text: string, maxLen = 30): string => {
+  if (!text) return '—';
+  return text.length > maxLen ? text.slice(0, maxLen).trim() + '...' : text;
+};
+
 const OrdersPage: React.FC = () => {
   const { activeAccountId } = useAccountStore();
   const qc = useQueryClient();
@@ -288,7 +293,7 @@ const OrdersPage: React.FC = () => {
                 <tr>
                   <th>Date</th>
                   <th className="hidden md:table-cell">Meesho ID</th>
-                  <th>Product</th>
+                  <th className="max-w-[220px]">Product</th>
                   <th className="hidden sm:table-cell">SKU</th>
                   <th className="hidden md:table-cell">Price</th>
                   <th className="text-center sm:text-left">Qty</th>
@@ -304,7 +309,7 @@ const OrdersPage: React.FC = () => {
                     <tr key={order._id}>
                       <td className="whitespace-nowrap text-[11px] sm:text-xs">{formatDate(order.orderDate)}</td>
                       <td className="hidden md:table-cell font-mono text-xs">{order.meeshoOrderId || '—'}</td>
-                      <td>
+                      <td className="max-w-[220px]">
                         {order.isCombo && order.items && order.items.length > 0 ? (
                           <div className="space-y-0.5">
                             <div className="flex items-center gap-1">
@@ -316,17 +321,25 @@ const OrdersPage: React.FC = () => {
                             </div>
                             {order.items.map((it: any, idx: number) => {
                               const itemProd = typeof it.product === 'object' ? it.product : null;
+                              const itemName = itemProd?.name || it.sku;
                               return (
-                                <div key={idx} className="text-[10px] sm:text-[11px] text-gray-500 truncate max-w-[140px] sm:max-w-[200px]">
-                                  • {it.quantity}x {itemProd?.name || it.sku}
+                                <div
+                                  key={idx}
+                                  className="text-[10px] sm:text-[11px] text-gray-500 truncate max-w-[140px] sm:max-w-[220px]"
+                                  title={itemName}
+                                >
+                                  • {it.quantity}x {truncateText(itemName, 30)}
                                 </div>
                               );
                             })}
                           </div>
                         ) : (
                           <div>
-                            <div className="font-medium text-xs text-gray-900 truncate max-w-[130px] sm:max-w-none">
-                              {prod?.name || '—'}
+                            <div
+                              className="font-medium text-xs text-gray-900 truncate max-w-[140px] sm:max-w-[220px]"
+                              title={prod?.name || '—'}
+                            >
+                              {truncateText(prod?.name || '—', 30)}
                             </div>
                             <div className="sm:hidden text-[10px] text-gray-400 font-mono truncate max-w-[130px]">
                               {order.meeshoOrderId || order.sku}

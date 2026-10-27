@@ -329,14 +329,16 @@ const parseMeeshoRawRows = (rawRows, options) => {
             continue; // Skip blank or invalid rows
         const statusVal = findMatchingField(raw, COLUMN_ALIASES.status);
         const rawStatus = statusVal ? String(statusVal).trim() : undefined;
-        // Filter out HOLD and READY_TO_SHIP orders by default (only add shipped, delivered, and returns)
+        // Filter out HOLD, READY_TO_SHIP, and CANCELLED orders by default (only add shipped, delivered, and returns)
         if (skipHoldAndReady && rawStatus) {
             const upper = rawStatus.toUpperCase();
             if (upper === 'HOLD' ||
                 upper.includes('HOLD') ||
                 upper === 'READY_TO_SHIP' ||
                 upper.includes('READY TO SHIP') ||
-                upper.includes('READY_TO_SHIP')) {
+                upper.includes('READY_TO_SHIP') ||
+                upper === 'CANCELLED' ||
+                upper.includes('CANCEL')) {
                 continue;
             }
         }
@@ -402,7 +404,7 @@ exports.parseMeeshoWorkbook = parseMeeshoWorkbook;
 // Core Execution: Process parsed Meesho rows into Database (Orders & Returns)
 const importMeeshoOrdersAndReturns = async (params) => {
     const { businessAccount, rows, userId, skipHoldAndReadyToShip = true } = params;
-    // Filter out HOLD and READY_TO_SHIP rows if enabled
+    // Filter out HOLD, READY_TO_SHIP, and CANCELLED rows if enabled
     const activeRows = skipHoldAndReadyToShip
         ? rows.filter((r) => {
             const upper = (r.rawStatus || '').toUpperCase();
@@ -410,7 +412,9 @@ const importMeeshoOrdersAndReturns = async (params) => {
                 upper.includes('HOLD') ||
                 upper === 'READY_TO_SHIP' ||
                 upper.includes('READY TO SHIP') ||
-                upper.includes('READY_TO_SHIP'));
+                upper.includes('READY_TO_SHIP') ||
+                upper === 'CANCELLED' ||
+                upper.includes('CANCEL'));
         })
         : rows;
     const summary = {
