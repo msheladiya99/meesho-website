@@ -84,14 +84,15 @@ router.get('/import/sample-template', async (_req, res: Response): Promise<void>
 // POST /api/orders/import/preview — Parse and preview Meesho Excel data before import
 router.post('/import/preview', requireManagerOrAdmin, upload.single('file'), async (req: AuthRequest, res: Response): Promise<void> => {
   try {
+    const skipHoldAndReadyToShip = req.body.skipHoldAndReadyToShip !== 'false' && req.body.skipHoldAndReadyToShip !== false;
     let parsedRows: any[] = [];
 
     if (req.file) {
-      parsedRows = parseMeeshoWorkbook(req.file.buffer);
+      parsedRows = parseMeeshoWorkbook(req.file.buffer, { skipHoldAndReadyToShip });
     } else if (Array.isArray(req.body.rows)) {
-      parsedRows = parseMeeshoRawRows(req.body.rows);
+      parsedRows = parseMeeshoRawRows(req.body.rows, { skipHoldAndReadyToShip });
     } else if (typeof req.body.rowsJson === 'string') {
-      parsedRows = parseMeeshoRawRows(JSON.parse(req.body.rowsJson));
+      parsedRows = parseMeeshoRawRows(JSON.parse(req.body.rowsJson), { skipHoldAndReadyToShip });
     } else {
       res.status(400).json({ success: false, message: 'Please provide an Excel file (.xlsx, .xls, .csv) or table rows' });
       return;
@@ -126,10 +127,11 @@ router.post('/import/execute', requireManagerOrAdmin, enforceAccountAccess, uplo
       return;
     }
 
+    const skipHoldAndReadyToShip = req.body.skipHoldAndReadyToShip !== 'false' && req.body.skipHoldAndReadyToShip !== false;
     let parsedRows: any[] = [];
 
     if (req.file) {
-      parsedRows = parseMeeshoWorkbook(req.file.buffer);
+      parsedRows = parseMeeshoWorkbook(req.file.buffer, { skipHoldAndReadyToShip });
     } else if (Array.isArray(req.body.rows)) {
       parsedRows = req.body.rows;
     } else if (typeof req.body.rowsJson === 'string') {
@@ -148,6 +150,7 @@ router.post('/import/execute', requireManagerOrAdmin, enforceAccountAccess, uplo
       businessAccount,
       rows: parsedRows,
       userId: req.user?._id?.toString(),
+      skipHoldAndReadyToShip,
     });
 
     res.json({

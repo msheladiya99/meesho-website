@@ -68,6 +68,7 @@ export const MeeshoImportModal: React.FC<MeeshoImportModalProps> = ({ isOpen, on
     activeAccountId && activeAccountId !== 'all' ? activeAccountId : accounts[0]?._id || ''
   );
   const [selectedFile, setSelectedFile] = useState<File | null>(null);
+  const [skipHoldAndReady, setSkipHoldAndReady] = useState(true);
   const [isParsing, setIsParsing] = useState(false);
   const [isImporting, setIsImporting] = useState(false);
   const [preview, setPreview] = useState<PreviewData | null>(null);
@@ -121,7 +122,7 @@ export const MeeshoImportModal: React.FC<MeeshoImportModalProps> = ({ isOpen, on
   };
 
   // Process chosen Excel file
-  const handleFileChange = async (file: File) => {
+  const handleFileChange = async (file: File, overrideSkip?: boolean) => {
     if (!file) return;
 
     const validExtensions = ['.xlsx', '.xls', '.csv'];
@@ -135,14 +136,16 @@ export const MeeshoImportModal: React.FC<MeeshoImportModalProps> = ({ isOpen, on
     setIsParsing(true);
     setResult(null);
 
+    const useSkip = overrideSkip !== undefined ? overrideSkip : skipHoldAndReady;
     const formData = new FormData();
     formData.append('file', file);
+    formData.append('skipHoldAndReadyToShip', useSkip ? 'true' : 'false');
 
     try {
       const res = await ordersApi.previewImport(formData);
       if (res.data?.success && res.data.data) {
         setPreview(res.data.data);
-        toast.success(`Parsed ${res.data.data.totalRows} rows from Excel!`);
+        toast.success(`Parsed ${res.data.data.totalRows} orders/returns from Excel!`);
       } else {
         toast.error('Failed to parse file: No valid rows detected.');
         setPreview(null);
@@ -182,7 +185,8 @@ export const MeeshoImportModal: React.FC<MeeshoImportModalProps> = ({ isOpen, on
       const res = await ordersApi.executeImport({
         businessAccount: selectedAccount,
         rows: preview.allRows,
-      });
+        skipHoldAndReadyToShip: skipHoldAndReady,
+      } as any);
 
       if (res.data?.success && res.data.data) {
         const sum: ImportResultSummary = res.data.data;
@@ -307,6 +311,25 @@ export const MeeshoImportModal: React.FC<MeeshoImportModalProps> = ({ isOpen, on
               Download Meesho Template
             </button>
           </div>
+        </div>
+
+        {/* Shipped/Delivered Filter Checkbox */}
+        <div className="flex items-center gap-2 bg-indigo-50/60 dark:bg-indigo-950/20 px-3.5 py-2.5 rounded-xl border border-indigo-100 dark:border-indigo-900/40">
+          <label className="flex items-center gap-2.5 cursor-pointer text-xs font-semibold text-slate-800 dark:text-slate-200 select-none">
+            <input
+              type="checkbox"
+              checked={skipHoldAndReady}
+              onChange={(e) => {
+                const next = e.target.checked;
+                setSkipHoldAndReady(next);
+                if (selectedFile) {
+                  handleFileChange(selectedFile, next);
+                }
+              }}
+              className="w-4 h-4 rounded text-indigo-600 focus:ring-indigo-500 border-slate-300 dark:border-slate-700"
+            />
+            <span>Only add Shipped, Delivered & Returned orders (Exclude Hold and Ready to Ship)</span>
+          </label>
         </div>
 
         {/* Success / Final Result Screen */}

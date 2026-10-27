@@ -79,15 +79,16 @@ router.get('/import/sample-template', async (_req, res) => {
 // POST /api/orders/import/preview — Parse and preview Meesho Excel data before import
 router.post('/import/preview', auth_1.requireManagerOrAdmin, upload.single('file'), async (req, res) => {
     try {
+        const skipHoldAndReadyToShip = req.body.skipHoldAndReadyToShip !== 'false' && req.body.skipHoldAndReadyToShip !== false;
         let parsedRows = [];
         if (req.file) {
-            parsedRows = (0, meeshoImport_service_1.parseMeeshoWorkbook)(req.file.buffer);
+            parsedRows = (0, meeshoImport_service_1.parseMeeshoWorkbook)(req.file.buffer, { skipHoldAndReadyToShip });
         }
         else if (Array.isArray(req.body.rows)) {
-            parsedRows = (0, meeshoImport_service_1.parseMeeshoRawRows)(req.body.rows);
+            parsedRows = (0, meeshoImport_service_1.parseMeeshoRawRows)(req.body.rows, { skipHoldAndReadyToShip });
         }
         else if (typeof req.body.rowsJson === 'string') {
-            parsedRows = (0, meeshoImport_service_1.parseMeeshoRawRows)(JSON.parse(req.body.rowsJson));
+            parsedRows = (0, meeshoImport_service_1.parseMeeshoRawRows)(JSON.parse(req.body.rowsJson), { skipHoldAndReadyToShip });
         }
         else {
             res.status(400).json({ success: false, message: 'Please provide an Excel file (.xlsx, .xls, .csv) or table rows' });
@@ -120,9 +121,10 @@ router.post('/import/execute', auth_1.requireManagerOrAdmin, auth_1.enforceAccou
             res.status(400).json({ success: false, message: 'A specific Business Account (GSTIN) is required for import' });
             return;
         }
+        const skipHoldAndReadyToShip = req.body.skipHoldAndReadyToShip !== 'false' && req.body.skipHoldAndReadyToShip !== false;
         let parsedRows = [];
         if (req.file) {
-            parsedRows = (0, meeshoImport_service_1.parseMeeshoWorkbook)(req.file.buffer);
+            parsedRows = (0, meeshoImport_service_1.parseMeeshoWorkbook)(req.file.buffer, { skipHoldAndReadyToShip });
         }
         else if (Array.isArray(req.body.rows)) {
             parsedRows = req.body.rows;
@@ -142,6 +144,7 @@ router.post('/import/execute', auth_1.requireManagerOrAdmin, auth_1.enforceAccou
             businessAccount,
             rows: parsedRows,
             userId: req.user?._id?.toString(),
+            skipHoldAndReadyToShip,
         });
         res.json({
             success: true,

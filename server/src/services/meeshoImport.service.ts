@@ -344,8 +344,12 @@ const findMatchingField = (rawRow: Record<string, any>, aliases: string[]): any 
 };
 
 // Convert raw row array (e.g. from XLSX.utils.sheet_to_json) into ParsedMeeshoRow[]
-export const parseMeeshoRawRows = (rawRows: Record<string, any>[]): ParsedMeeshoRow[] => {
+export const parseMeeshoRawRows = (
+  rawRows: Record<string, any>[],
+  options?: { skipHoldAndReadyToShip?: boolean }
+): ParsedMeeshoRow[] => {
   const parsedRows: ParsedMeeshoRow[] = [];
+  const skipHoldAndReady = options?.skipHoldAndReadyToShip !== false;
 
   for (let i = 0; i < rawRows.length; i++) {
     const raw = rawRows[i];
@@ -353,6 +357,23 @@ export const parseMeeshoRawRows = (rawRows: Record<string, any>[]): ParsedMeesho
 
     const subOrderVal = findMatchingField(raw, COLUMN_ALIASES.subOrderId);
     if (!subOrderVal) continue; // Skip blank or invalid rows
+
+    const statusVal = findMatchingField(raw, COLUMN_ALIASES.status);
+    const rawStatus = statusVal ? String(statusVal).trim() : undefined;
+
+    // Filter out HOLD and READY_TO_SHIP orders by default (only add shipped, delivered, and returns)
+    if (skipHoldAndReady && rawStatus) {
+      const upper = rawStatus.toUpperCase();
+      if (
+        upper === 'HOLD' ||
+        upper.includes('HOLD') ||
+        upper === 'READY_TO_SHIP' ||
+        upper.includes('READY TO SHIP') ||
+        upper.includes('READY_TO_SHIP')
+      ) {
+        continue;
+      }
+    }
 
     const subOrderId = String(subOrderVal).trim();
     const meeshoOrderVal = findMatchingField(raw, COLUMN_ALIASES.meeshoOrderId);
@@ -377,9 +398,6 @@ export const parseMeeshoRawRows = (rawRows: Record<string, any>[]): ParsedMeesho
 
     const carrierVal = findMatchingField(raw, COLUMN_ALIASES.carrierName);
     const carrierName = carrierVal ? String(carrierVal).trim() : undefined;
-
-    const statusVal = findMatchingField(raw, COLUMN_ALIASES.status);
-    const rawStatus = statusVal ? String(statusVal).trim() : undefined;
 
     const returnTypeVal = findMatchingField(raw, COLUMN_ALIASES.returnType);
     const returnStatusVal = findMatchingField(raw, COLUMN_ALIASES.returnStatus);
@@ -421,14 +439,17 @@ export const parseMeeshoRawRows = (rawRows: Record<string, any>[]): ParsedMeesho
 };
 
 // Parse an Excel Buffer (xlsx, xls, csv) into ParsedMeeshoRow[]
-export const parseMeeshoWorkbook = (buffer: Buffer): ParsedMeeshoRow[] => {
+export const parseMeeshoWorkbook = (
+  buffer: Buffer,
+  options?: { skipHoldAndReadyToShip?: boolean }
+): ParsedMeeshoRow[] => {
   const workbook = XLSX.read(buffer, { type: 'buffer', cellDates: true });
   const firstSheetName = workbook.SheetNames[0];
   if (!firstSheetName) return [];
 
   const worksheet = workbook.Sheets[firstSheetName];
   const rawRows: Record<string, any>[] = XLSX.utils.sheet_to_json(worksheet, { defval: '' });
-  return parseMeeshoRawRows(rawRows);
+  return parseMeeshoRawRows(rawRows, options);
 };
 
 // Core Execution: Process parsed Meesho rows into Database (Orders & Returns)
@@ -436,14 +457,29 @@ export const importMeeshoOrdersAndReturns = async (params: {
   businessAccount: string;
   rows: ParsedMeeshoRow[];
   userId?: string;
+  skipHoldAndReadyToShip?: boolean;
 }): Promise<ImportSummary> => {
-  const { businessAccount, rows, userId } = params;
+  const { businessAccount, rows, userId, skipHoldAndReadyToShip = true } = params;
+
+  // Filter out HOLD and READY_TO_SHIP rows if enabled
+  const activeRows = skipHoldAndReadyToShip
+    ? rows.filter((r) => {
+        const upper = (r.rawStatus || '').toUpperCase();
+        return !(
+          upper === 'HOLD' ||
+          upper.includes('HOLD') ||
+          upper === 'READY_TO_SHIP' ||
+          upper.includes('READY TO SHIP') ||
+          upper.includes('READY_TO_SHIP')
+        );
+      })
+    : rows;
 
   const summary: ImportSummary = {
-    totalRows: rows.length,
+    totalRows: activeRows.length,
     ordersCreated: 0,
     ordersUpdated: 0,
-    ordersSkipped: 0,
+    ordersSkipped: rows.length - activeRows.length,
     returnsCreated: 0,
     productsAutoCreated: 0,
     errors: [],
@@ -458,7 +494,7 @@ export const importMeeshoOrdersAndReturns = async (params: {
   // Product cache to minimize DB queries
   const productCache = new Map<string, any>();
 
-  for (const row of rows) {
+  for (const row of activeRows) {
     try {
       // 1. Resolve Product by SKU or Name (or Auto-Create)
       const skuKey = row.sku.toUpperCase();

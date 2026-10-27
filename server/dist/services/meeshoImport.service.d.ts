@@ -42,12 +42,17 @@ export declare const mapMeeshoStatus: (rawStatusStr?: string, rawReturnTypeStr?:
     returnStatus?: ReturnStatus;
     itemCondition?: ItemCondition;
 };
-export declare const parseMeeshoRawRows: (rawRows: Record<string, any>[]) => ParsedMeeshoRow[];
-export declare const parseMeeshoWorkbook: (buffer: Buffer) => ParsedMeeshoRow[];
+export declare const parseMeeshoRawRows: (rawRows: Record<string, any>[], options?: {
+    skipHoldAndReadyToShip?: boolean;
+}) => ParsedMeeshoRow[];
+export declare const parseMeeshoWorkbook: (buffer: Buffer, options?: {
+    skipHoldAndReadyToShip?: boolean;
+}) => ParsedMeeshoRow[];
 export declare const importMeeshoOrdersAndReturns: (params: {
     businessAccount: string;
     rows: ParsedMeeshoRow[];
     userId?: string;
+    skipHoldAndReadyToShip?: boolean;
 }) => Promise<ImportSummary>;
 export declare const generateMeeshoSampleTemplate: () => Buffer;
 //# sourceMappingURL=meeshoImport.service.d.ts.map
