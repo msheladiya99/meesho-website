@@ -104,6 +104,9 @@ router.post('/', auth_1.requireManagerOrAdmin, async (req, res) => {
         data.bagCardCost = bc;
         data.printLabelCost = pl;
         data.packingCost = b + s + bc + pl;
+        if (!data.packingPreset) {
+            data.packingPreset = s === 400 ? 'special' : (s === 100 && b === 200 && bc === 100 && pl === 100 ? 'standard' : 'custom');
+        }
         const p = await Product_1.Product.create(data);
         await (0, audit_service_1.createAuditLog)({ action: 'CREATE', resource: 'Product', resourceId: p._id.toString(), userId: req.user?._id, details: `Created product ${p.sku}` });
         res.status(201).json({ success: true, data: p });
@@ -127,6 +130,9 @@ router.put('/:id', auth_1.requireManagerOrAdmin, async (req, res) => {
             data.bagCardCost = bc;
             data.printLabelCost = pl;
             data.packingCost = b + s + bc + pl;
+            if (!data.packingPreset) {
+                data.packingPreset = s === 400 ? 'special' : (s === 100 && b === 200 && bc === 100 && pl === 100 ? 'standard' : 'custom');
+            }
         }
         const p = await Product_1.Product.findByIdAndUpdate(id, data, { new: true, runValidators: true }).populate('category');
         if (!p) {
@@ -135,6 +141,50 @@ router.put('/:id', auth_1.requireManagerOrAdmin, async (req, res) => {
         }
         await (0, audit_service_1.createAuditLog)({ action: 'UPDATE', resource: 'Product', resourceId: id, userId: req.user?._id });
         res.json({ success: true, data: p });
+    }
+    catch (err) {
+        res.status(400).json({ success: false, message: err.message });
+    }
+});
+router.post('/bulk-update-packing', auth_1.requireManagerOrAdmin, async (req, res) => {
+    try {
+        const { productIds, boxCost, stickerCost, bagCardCost, printLabelCost, packingPreset } = req.body;
+        const b = Number(boxCost) || 0;
+        const s = Number(stickerCost) || 0;
+        const bc = Number(bagCardCost) || 0;
+        const pl = Number(printLabelCost) || 0;
+        const totalPacking = b + s + bc + pl;
+        const filter = {};
+        if (productIds === 'all') {
+            filter.isActive = true;
+        }
+        else if (Array.isArray(productIds) && productIds.length > 0) {
+            filter._id = { $in: productIds.map((pid) => new mongoose_1.default.Types.ObjectId(pid)) };
+        }
+        else {
+            res.status(400).json({ success: false, message: 'productIds array or "all" is required' });
+            return;
+        }
+        const updateData = {
+            boxCost: b,
+            stickerCost: s,
+            bagCardCost: bc,
+            printLabelCost: pl,
+            packingCost: totalPacking,
+            packingPreset: packingPreset || (s === 400 ? 'special' : (s === 100 && b === 200 && bc === 100 && pl === 100 ? 'standard' : 'custom')),
+        };
+        const result = await Product_1.Product.updateMany(filter, { $set: updateData });
+        await (0, audit_service_1.createAuditLog)({
+            action: 'UPDATE',
+            resource: 'Product',
+            userId: req.user?._id,
+            details: `Bulk updated packaging charges for ${result.modifiedCount} products (Total: ₹${(totalPacking / 100).toFixed(2)}, Preset: ${updateData.packingPreset})`,
+        });
+        res.json({
+            success: true,
+            message: `Updated packaging charges for ${result.modifiedCount} product(s)`,
+            modifiedCount: result.modifiedCount,
+        });
     }
     catch (err) {
         res.status(400).json({ success: false, message: err.message });

@@ -14,6 +14,7 @@ export interface IProduct extends Document {
   bagCardCost: number;        // paise (default 100 = ₹1 for 1 POP bag + review card)
   printLabelCost: number;     // paise (default 100 = ₹1 for order print label)
   packingCost: number;        // paise (sum of packaging costs)
+  packingPreset?: string;     // 'standard' | 'special' | 'custom'
   reorderThreshold: number;
   currentStock: number;
   damagedStock: number;
@@ -36,6 +37,7 @@ const productSchema = new Schema<IProduct>({
   bagCardCost: { type: Number, default: 100, min: 0 },     // paise (₹1.00 for POP bag + review card)
   printLabelCost: { type: Number, default: 100, min: 0 },  // paise (₹1.00 for order print label)
   packingCost: { type: Number, default: 500, min: 0 },     // paise (total packing charges)
+  packingPreset: { type: String, default: 'standard', trim: true },
   reorderThreshold: { type: Number, default: 5 },
   currentStock: { type: Number, default: 0 },
   damagedStock: { type: Number, default: 0, min: 0 },

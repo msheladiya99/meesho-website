@@ -1,6 +1,9 @@
 import React, { useState } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
-import { Plus, Edit2, Trash2, Package, Tag, CheckSquare2, Square } from 'lucide-react';
+import {
+  Plus, Edit2, Trash2, Package, Tag, CheckSquare2, Square,
+  Sparkles, SlidersHorizontal, Check, Search, Filter, RefreshCw, ArrowRight
+} from 'lucide-react';
 import { useForm } from 'react-hook-form';
 import { zodResolver } from '@hookform/resolvers/zod';
 import { z } from 'zod';
@@ -40,15 +43,26 @@ type CategoryForm = z.infer<typeof categorySchema>;
 const ProductsPage: React.FC = () => {
   const { activeAccountId } = useAccountStore();
   const qc = useQueryClient();
-  const [tab, setTab] = useState<'products' | 'categories'>('products');
+  const [tab, setTab] = useState<'products' | 'packaging' | 'categories'>('products');
   const [isProductModalOpen, setIsProductModalOpen] = useState(false);
   const [isCategoryModalOpen, setIsCategoryModalOpen] = useState(false);
+  const [isBulkPackingModalOpen, setIsBulkPackingModalOpen] = useState(false);
   const [editingProduct, setEditingProduct] = useState<Product | null>(null);
   const [editingCategory, setEditingCategory] = useState<Category | null>(null);
   const [deleteProductId, setDeleteProductId] = useState<string | null>(null);
   const [deleteCategoryId, setDeleteCategoryId] = useState<string | null>(null);
   const [selectedProductIds, setSelectedProductIds] = useState<Set<string>>(new Set());
   const [showBulkDelete, setShowBulkDelete] = useState(false);
+
+  // Bulk packaging customization state
+  const [bulkTarget, setBulkTarget] = useState<'selected' | 'all'>('selected');
+  const [bulkPreset, setBulkPreset] = useState<'standard' | 'special' | 'custom'>('standard');
+  const [customBoxCost, setCustomBoxCost] = useState<number>(2);
+  const [customStickerCost, setCustomStickerCost] = useState<number>(1);
+  const [customBagCardCost, setCustomBagCardCost] = useState<number>(1);
+  const [customPrintLabelCost, setCustomPrintLabelCost] = useState<number>(1);
+  const [packagingSearch, setPackagingSearch] = useState('');
+  const [packagingFilter, setPackagingFilter] = useState<'all' | 'standard' | 'special' | 'custom'>('all');
 
   const { data: productsData, isLoading: prodLoading } = useQuery({
     queryKey: ['products', activeAccountId],
@@ -84,6 +98,105 @@ const ProductsPage: React.FC = () => {
     const bc = p.bagCardCost ?? 100;
     const pl = p.printLabelCost ?? 100;
     return b + s + bc + pl;
+  };
+
+  const getPresetInfo = (p: Product) => {
+    const s = p.stickerCost ?? 100;
+    const b = p.boxCost ?? 200;
+    const bc = p.bagCardCost ?? 100;
+    const pl = p.printLabelCost ?? 100;
+
+    if (s === 400 || p.packingPreset === 'special') {
+      return { id: 'special', label: 'Special Perfume (₹8)', badge: '★ Special (₹8)', isSpecial: true, color: 'text-amber-800 bg-amber-50 border-amber-300' };
+    }
+    if (s === 100 && b === 200 && bc === 100 && pl === 100) {
+      return { id: 'standard', label: 'Standard Pack (₹5)', badge: 'Standard (₹5)', isSpecial: false, color: 'text-blue-700 bg-blue-50 border-blue-200' };
+    }
+    const tot = (b + s + bc + pl) / 100;
+    return { id: 'custom', label: `Custom Pack (₹${tot.toFixed(2)})`, badge: `Custom (₹${tot.toFixed(2)})`, isSpecial: false, color: 'text-gray-700 bg-gray-50 border-gray-200' };
+  };
+
+  const bulkPackingMut = useMutation({
+    mutationFn: (data: {
+      productIds: string[] | 'all';
+      boxCost: number;
+      stickerCost: number;
+      bagCardCost: number;
+      printLabelCost: number;
+      packingPreset?: string;
+    }) => productsApi.bulkUpdatePacking(data),
+    onSuccess: (res) => {
+      qc.invalidateQueries({ queryKey: ['products'] });
+      qc.invalidateQueries({ queryKey: ['inventory'] });
+      qc.invalidateQueries({ queryKey: ['pnl'] });
+      qc.invalidateQueries({ queryKey: ['perfume-performance'] });
+      toast.success(res.data?.message || 'Packaging charges updated successfully!');
+      setIsBulkPackingModalOpen(false);
+      setSelectedProductIds(new Set());
+    },
+    onError: (e: unknown) => {
+      toast.error((e as { response?: { data?: { message?: string } } })?.response?.data?.message || 'Failed to update packaging charges');
+    },
+  });
+
+  const setProductPreset = (productId: string, preset: 'standard' | 'special') => {
+    const isSpecial = preset === 'special';
+    bulkPackingMut.mutate({
+      productIds: [productId],
+      boxCost: rupeesToPaise(2),
+      stickerCost: rupeesToPaise(isSpecial ? 4 : 1),
+      bagCardCost: rupeesToPaise(1),
+      printLabelCost: rupeesToPaise(1),
+      packingPreset: preset,
+    });
+  };
+
+  const handleQuickBulkApply = (preset: 'standard' | 'special', target: 'selected' | 'all' = 'selected') => {
+    const isSpecial = preset === 'special';
+    const targetIds = target === 'all' ? 'all' : Array.from(selectedProductIds);
+    if (target !== 'all' && targetIds.length === 0) {
+      toast.error('Please select at least one perfume');
+      return;
+    }
+    bulkPackingMut.mutate({
+      productIds: targetIds,
+      boxCost: rupeesToPaise(2),
+      stickerCost: rupeesToPaise(isSpecial ? 4 : 1),
+      bagCardCost: rupeesToPaise(1),
+      printLabelCost: rupeesToPaise(1),
+      packingPreset: preset,
+    });
+  };
+
+  const handleApplyBulkPackingModal = () => {
+    let b = 2;
+    let s = 1;
+    let bc = 1;
+    let pl = 1;
+
+    if (bulkPreset === 'special') {
+      s = 4;
+    } else if (bulkPreset === 'custom') {
+      b = customBoxCost;
+      s = customStickerCost;
+      bc = customBagCardCost;
+      pl = customPrintLabelCost;
+    }
+
+    const targetIds = bulkTarget === 'all' ? 'all' : Array.from(selectedProductIds);
+    if (bulkTarget !== 'all' && targetIds.length === 0) {
+      toast.error('Please select at least one perfume');
+      return;
+    }
+
+    bulkPackingMut.mutate({
+      productIds: targetIds,
+      boxCost: rupeesToPaise(b),
+      stickerCost: rupeesToPaise(s),
+      bagCardCost: rupeesToPaise(bc),
+      printLabelCost: rupeesToPaise(pl),
+      packingPreset: bulkPreset,
+    });
   };
 
   const createProductMut = useMutation({
@@ -213,20 +326,46 @@ const ProductsPage: React.FC = () => {
 
   return (
     <div className="space-y-5">
-      <div className="flex items-center justify-between">
-        <h1 className="text-xl font-bold text-gray-900">Products & Categories</h1>
-        <div className="flex gap-2">
-          <button onClick={() => { setEditingCategory(null); cForm.reset(); setIsCategoryModalOpen(true); }} className="btn-secondary"><Tag className="w-4 h-4" /> Add Category</button>
-          <button onClick={() => { setEditingProduct(null); pForm.reset({ isActive: true, reorderThreshold: 5 }); setIsProductModalOpen(true); }} className="btn-primary"><Plus className="w-4 h-4" /> Add Product</button>
+      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+        <div>
+          <h1 className="text-xl font-bold text-gray-900">Products & Packaging</h1>
+          <p className="text-xs text-gray-500">Manage perfume catalogue and customize packaging charges (Standard ₹5 vs Special ₹8)</p>
+        </div>
+        <div className="flex flex-wrap items-center gap-2">
+          <button
+            onClick={() => {
+              setBulkTarget('all');
+              setBulkPreset('standard');
+              setIsBulkPackingModalOpen(true);
+            }}
+            className="btn-secondary text-xs sm:text-sm font-medium"
+          >
+            <SlidersHorizontal className="w-4 h-4 text-primary-600" /> Bulk Set Packaging
+          </button>
+          <button onClick={() => { setEditingCategory(null); cForm.reset(); setIsCategoryModalOpen(true); }} className="btn-secondary text-xs sm:text-sm">
+            <Tag className="w-4 h-4" /> Add Category
+          </button>
+          <button onClick={() => { setEditingProduct(null); pForm.reset({ isActive: true, reorderThreshold: 5, boxCost: 2, stickerCost: 1, bagCardCost: 1, printLabelCost: 1 }); setIsProductModalOpen(true); }} className="btn-primary text-xs sm:text-sm">
+            <Plus className="w-4 h-4" /> Add Product
+          </button>
         </div>
       </div>
 
       {/* Tabs */}
       <div className="flex gap-1 p-1 bg-gray-100 rounded-lg w-fit">
-        {(['products', 'categories'] as const).map(t => (
-          <button key={t} onClick={() => setTab(t)}
-            className={`px-4 py-1.5 text-sm font-medium rounded-md capitalize transition-all ${tab === t ? 'bg-white text-gray-900 shadow-sm' : 'text-gray-500 hover:text-gray-700'}`}>
-            {t}
+        {[
+          { id: 'products', label: 'All Products' },
+          { id: 'packaging', label: 'Packaging Charges Manager' },
+          { id: 'categories', label: 'Categories' },
+        ].map(t => (
+          <button
+            key={t.id}
+            onClick={() => setTab(t.id as any)}
+            className={`px-3 sm:px-4 py-1.5 text-xs sm:text-sm font-medium rounded-md transition-all ${
+              tab === t.id ? 'bg-white text-gray-900 shadow-sm font-semibold' : 'text-gray-500 hover:text-gray-700'
+            }`}
+          >
+            {t.label}
           </button>
         ))}
       </div>
@@ -239,10 +378,40 @@ const ProductsPage: React.FC = () => {
           ) : (
             <>
               {selectedProductIds.size > 0 && (
-                <div className="flex items-center justify-between p-3 bg-primary-50 border-b border-primary-100 mb-4">
-                  <span className="text-sm font-medium text-primary-700">{selectedProductIds.size} product(s) selected</span>
-                  <button onClick={() => setShowBulkDelete(true)} className="flex items-center gap-2 px-3 py-1.5 bg-red-600 text-white rounded-lg hover:bg-red-700 text-sm">
-                    <Trash2 className="w-4 h-4" /> Delete Selected
+                <div className="flex flex-wrap items-center justify-between p-2.5 sm:p-3 bg-primary-50 border border-primary-200 mb-4 rounded-xl gap-2">
+                  <div className="flex flex-wrap items-center gap-1.5 sm:gap-2">
+                    <span className="text-xs sm:text-sm font-bold text-primary-900">
+                      {selectedProductIds.size} selected:
+                    </span>
+                    <button
+                      onClick={() => handleQuickBulkApply('standard', 'selected')}
+                      className="px-2.5 py-1 text-xs font-semibold rounded-lg bg-white border border-blue-200 text-blue-700 hover:bg-blue-50 transition-all shadow-2xs"
+                    >
+                      Set Standard Pack (₹5)
+                    </button>
+                    <button
+                      onClick={() => handleQuickBulkApply('special', 'selected')}
+                      className="px-2.5 py-1 text-xs font-semibold rounded-lg bg-white border border-amber-300 text-amber-800 hover:bg-amber-50 transition-all shadow-2xs flex items-center gap-1"
+                    >
+                      <Sparkles className="w-3 h-3 text-amber-600" />
+                      ★ Set Special Pack (₹8)
+                    </button>
+                    <button
+                      onClick={() => {
+                        setBulkTarget('selected');
+                        setIsBulkPackingModalOpen(true);
+                      }}
+                      className="px-2.5 py-1 text-xs font-semibold rounded-lg bg-white border border-gray-300 text-gray-700 hover:bg-gray-50 transition-all shadow-2xs flex items-center gap-1"
+                    >
+                      <SlidersHorizontal className="w-3 h-3 text-gray-500" />
+                      Customize...
+                    </button>
+                  </div>
+                  <button
+                    onClick={() => setShowBulkDelete(true)}
+                    className="flex items-center gap-1.5 px-3 py-1 bg-red-600 text-white rounded-lg hover:bg-red-700 text-xs font-medium ml-auto"
+                  >
+                    <Trash2 className="w-3.5 h-3.5" /> Delete Selected
                   </button>
                 </div>
               )}
@@ -278,6 +447,7 @@ const ProductsPage: React.FC = () => {
                       const isSelected = selectedProductIds.has(p._id);
                       const packCost = getProductPackingCost(p);
                       const purchaseCost = getProductCost(p);
+                      const info = getPresetInfo(p);
                       return (
                         <tr key={p._id} className={isSelected ? 'bg-primary-50' : ''}>
                           <td>
@@ -303,7 +473,17 @@ const ProductsPage: React.FC = () => {
                             {formatCurrency(purchaseCost)}
                           </td>
                           <td className="hidden md:table-cell text-right sm:text-left text-xs font-mono">
-                            <span className="text-primary-700 font-medium">+{formatCurrency(packCost)}</span>
+                            <button
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                const next = info.id === 'special' ? 'standard' : 'special';
+                                setProductPreset(p._id, next);
+                              }}
+                              className={`px-2 py-0.5 rounded text-[10px] font-bold border transition-all ${info.color}`}
+                              title="Click to toggle between Standard (₹5) and Special (₹8) packaging"
+                            >
+                              {info.badge}
+                            </button>
                           </td>
                           <td className={`text-center sm:text-left text-xs ${lowStock ? 'text-red-600 font-semibold' : ''}`}>
                             <span>{p.currentStock}</span>
@@ -329,6 +509,263 @@ const ProductsPage: React.FC = () => {
               </div>
             </>
           )}
+        </div>
+      )}
+
+      {/* Packaging Charges Manager Tab */}
+      {tab === 'packaging' && (
+        <div className="space-y-4">
+          {/* Packaging Presets Overview Cards */}
+          <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+            {/* Standard Pack Card */}
+            <div className="card p-4 border border-blue-200 bg-gradient-to-br from-blue-50/50 to-white space-y-2.5">
+              <div className="flex items-center justify-between">
+                <span className="text-xs font-bold uppercase tracking-wider text-blue-800">
+                  Standard Packaging
+                </span>
+                <span className="text-base font-extrabold text-blue-900">₹5.00</span>
+              </div>
+              <p className="text-xs text-gray-600">
+                Box ₹2.00 + Sticker ₹1.00 + POP Bag/Card ₹1.00 + Print Label ₹1.00
+              </p>
+              <div className="flex items-center justify-between pt-1 border-t border-blue-100">
+                <span className="text-xs font-semibold text-gray-700">
+                  {products.filter(p => getPresetInfo(p).id === 'standard').length} perfumes
+                </span>
+                <button
+                  onClick={() => handleQuickBulkApply('standard', 'all')}
+                  className="text-xs font-bold text-blue-700 bg-blue-100 hover:bg-blue-200 px-2.5 py-1 rounded-lg transition-colors"
+                >
+                  Apply to All Perfumes
+                </button>
+              </div>
+            </div>
+
+            {/* Special Pack Card */}
+            <div className="card p-4 border border-amber-200 bg-gradient-to-br from-amber-50/50 to-white space-y-2.5">
+              <div className="flex items-center justify-between">
+                <span className="text-xs font-bold uppercase tracking-wider text-amber-900 flex items-center gap-1">
+                  <Sparkles className="w-3.5 h-3.5 text-amber-600" />
+                  Special Perfume Pack
+                </span>
+                <span className="text-base font-extrabold text-amber-900">₹8.00</span>
+              </div>
+              <p className="text-xs text-gray-600">
+                Box ₹2.00 + <strong className="text-amber-800">Special Sticker ₹4.00</strong> + POP Bag/Card ₹1.00 + Print Label ₹1.00
+              </p>
+              <div className="flex items-center justify-between pt-1 border-t border-amber-100">
+                <span className="text-xs font-semibold text-gray-700">
+                  {products.filter(p => getPresetInfo(p).id === 'special').length} perfumes
+                </span>
+                <button
+                  onClick={() => {
+                    if (selectedProductIds.size === 0) {
+                      toast('Select perfumes using checkboxes to assign Special Packaging', { icon: '👉' });
+                    } else {
+                      handleQuickBulkApply('special', 'selected');
+                    }
+                  }}
+                  className="text-xs font-bold text-amber-800 bg-amber-100 hover:bg-amber-200 px-2.5 py-1 rounded-lg transition-colors"
+                >
+                  {selectedProductIds.size > 0 ? `Apply to ${selectedProductIds.size} Selected` : 'Select for Special'}
+                </button>
+              </div>
+            </div>
+
+            {/* Custom Packaging Card */}
+            <div className="card p-4 border border-gray-200 bg-gradient-to-br from-gray-50/50 to-white space-y-2.5">
+              <div className="flex items-center justify-between">
+                <span className="text-xs font-bold uppercase tracking-wider text-gray-800">
+                  Custom Packaging
+                </span>
+                <span className="text-xs font-semibold text-gray-500">Custom rates</span>
+              </div>
+              <p className="text-xs text-gray-600">
+                Custom packaging charges tailored for specific perfume lines.
+              </p>
+              <div className="flex items-center justify-between pt-1 border-t border-gray-100">
+                <span className="text-xs font-semibold text-gray-700">
+                  {products.filter(p => getPresetInfo(p).id === 'custom').length} perfumes
+                </span>
+                <button
+                  onClick={() => {
+                    setBulkTarget(selectedProductIds.size > 0 ? 'selected' : 'all');
+                    setBulkPreset('custom');
+                    setIsBulkPackingModalOpen(true);
+                  }}
+                  className="text-xs font-bold text-gray-700 bg-gray-100 hover:bg-gray-200 px-2.5 py-1 rounded-lg transition-colors"
+                >
+                  Configure Custom...
+                </button>
+              </div>
+            </div>
+          </div>
+
+          {/* Packaging Management Table Card */}
+          <div className="card">
+            {/* Filter and Bulk Bar */}
+            <div className="p-3 sm:p-4 border-b border-gray-100 flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+              <div className="flex flex-wrap items-center gap-2">
+                <div className="relative">
+                  <Search className="w-3.5 h-3.5 absolute left-3 top-1/2 -translate-y-1/2 text-gray-400" />
+                  <input
+                    type="text"
+                    value={packagingSearch}
+                    onChange={(e) => setPackagingSearch(e.target.value)}
+                    placeholder="Search perfumes..."
+                    className="input text-xs pl-8 h-8 w-44"
+                  />
+                </div>
+                <select
+                  value={packagingFilter}
+                  onChange={(e) => setPackagingFilter(e.target.value as any)}
+                  className="select text-xs h-8 py-1"
+                >
+                  <option value="all">All Packaging Types</option>
+                  <option value="standard">Standard Pack (₹5) Only</option>
+                  <option value="special">Special Pack (₹8) Only</option>
+                  <option value="custom">Custom Pack Only</option>
+                </select>
+              </div>
+
+              {selectedProductIds.size > 0 ? (
+                <div className="flex items-center gap-1.5 flex-wrap">
+                  <span className="text-xs font-bold text-primary-800">
+                    {selectedProductIds.size} selected:
+                  </span>
+                  <button
+                    onClick={() => handleQuickBulkApply('standard', 'selected')}
+                    className="px-2.5 py-1 text-xs font-bold rounded-lg bg-blue-50 border border-blue-200 text-blue-700 hover:bg-blue-100"
+                  >
+                    Set Standard (₹5)
+                  </button>
+                  <button
+                    onClick={() => handleQuickBulkApply('special', 'selected')}
+                    className="px-2.5 py-1 text-xs font-bold rounded-lg bg-amber-50 border border-amber-300 text-amber-800 hover:bg-amber-100 flex items-center gap-1"
+                  >
+                    <Sparkles className="w-3 h-3 text-amber-600" />
+                    ★ Set Special (₹8)
+                  </button>
+                </div>
+              ) : (
+                <div className="text-xs text-gray-500">
+                  Select perfumes with checkboxes to change packaging in bulk
+                </div>
+              )}
+            </div>
+
+            {/* Table */}
+            <div className="table-container">
+              <table className="table">
+                <thead>
+                  <tr>
+                    <th className="w-8 sm:w-10">
+                      <button onClick={toggleSelectAll} className="p-1 hover:bg-gray-100 rounded">
+                        {selectedProductIds.size === products.length && products.length > 0 ? (
+                          <CheckSquare2 className="w-4 h-4 text-primary-600" />
+                        ) : (
+                          <Square className="w-4 h-4 text-gray-400" />
+                        )}
+                      </button>
+                    </th>
+                    <th>Perfume Product</th>
+                    <th>Assigned Pack</th>
+                    <th className="text-right">Box</th>
+                    <th className="text-right">Sticker</th>
+                    <th className="text-right">Bag+Card</th>
+                    <th className="text-right">Print Label</th>
+                    <th className="text-right font-bold">Total Pack</th>
+                    <th className="text-right">Landed Cost</th>
+                    <th className="text-center">Quick Assign</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {products
+                    .filter((p) => {
+                      if (packagingFilter !== 'all' && getPresetInfo(p).id !== packagingFilter) return false;
+                      if (packagingSearch) {
+                        const q = packagingSearch.toLowerCase();
+                        return p.name.toLowerCase().includes(q) || p.sku.toLowerCase().includes(q);
+                      }
+                      return true;
+                    })
+                    .map((p) => {
+                      const isSelected = selectedProductIds.has(p._id);
+                      const info = getPresetInfo(p);
+                      const packCost = getProductPackingCost(p);
+                      const purchaseCost = getProductCost(p);
+                      const box = (p.boxCost ?? 200) / 100;
+                      const sticker = (p.stickerCost ?? 100) / 100;
+                      const bagCard = (p.bagCardCost ?? 100) / 100;
+                      const label = (p.printLabelCost ?? 100) / 100;
+
+                      return (
+                        <tr key={p._id} className={isSelected ? 'bg-primary-50' : ''}>
+                          <td>
+                            <button onClick={() => toggleSelectProduct(p._id)} className="p-1 hover:bg-gray-100 rounded">
+                              {isSelected ? (
+                                <CheckSquare2 className="w-4 h-4 text-primary-600" />
+                              ) : (
+                                <Square className="w-4 h-4 text-gray-400" />
+                              )}
+                            </button>
+                          </td>
+                          <td className="font-medium">
+                            <div className="text-xs text-gray-900 font-bold">{p.name}</div>
+                            <div className="font-mono text-[10px] text-gray-400">
+                              {p.sku} {p.sizeml ? `· ${p.sizeml}ml` : ''}
+                            </div>
+                          </td>
+                          <td>
+                            <span className={`px-2 py-0.5 rounded text-[11px] font-bold border ${info.color}`}>
+                              {info.badge}
+                            </span>
+                          </td>
+                          <td className="text-right font-mono text-xs">₹{box.toFixed(2)}</td>
+                          <td className="text-right font-mono text-xs">
+                            <span className={sticker > 1 ? 'font-bold text-amber-800 bg-amber-50 px-1 py-0.2 rounded border border-amber-200' : ''}>
+                              ₹{sticker.toFixed(2)}
+                            </span>
+                          </td>
+                          <td className="text-right font-mono text-xs">₹{bagCard.toFixed(2)}</td>
+                          <td className="text-right font-mono text-xs">₹{label.toFixed(2)}</td>
+                          <td className="text-right font-mono text-xs font-extrabold text-primary-800">
+                            {formatCurrency(packCost)}
+                          </td>
+                          <td className="text-right font-mono text-xs font-bold text-emerald-700">
+                            {formatCurrency(purchaseCost + packCost)}
+                          </td>
+                          <td className="text-center">
+                            <div className="flex items-center justify-center gap-1">
+                              <button
+                                onClick={() => setProductPreset(p._id, 'standard')}
+                                className={`px-2 py-0.5 rounded text-[10px] font-medium transition-all ${
+                                  info.id === 'standard'
+                                    ? 'bg-blue-100 text-blue-800 font-bold'
+                                    : 'bg-gray-100 text-gray-600 hover:bg-gray-200'
+                                }`}
+                              >
+                                Standard (₹5)
+                              </button>
+                              <button
+                                onClick={() => setProductPreset(p._id, 'special')}
+                                className={`px-2 py-0.5 rounded text-[10px] font-medium transition-all ${
+                                  info.id === 'special'
+                                    ? 'bg-amber-100 text-amber-900 font-bold'
+                                    : 'bg-gray-100 text-gray-600 hover:bg-amber-50 hover:text-amber-800'
+                                }`}
+                              >
+                                ★ Special (₹8)
+                              </button>
+                            </div>
+                          </td>
+                        </tr>
+                      );
+                    })}
+                </tbody>
+              </table>
+            </div>
+          </div>
         </div>
       )}
 
@@ -395,16 +832,58 @@ const ProductsPage: React.FC = () => {
           <div className="border-t border-gray-100 pt-3 space-y-2.5">
             <div className="flex items-center justify-between">
               <div>
-                <h4 className="text-xs font-bold text-gray-800 uppercase tracking-wider">
-                  Packaging Charges Breakdown
+                <h4 className="text-xs font-bold text-gray-800 uppercase tracking-wider flex items-center gap-1.5">
+                  <Package className="w-3.5 h-3.5 text-primary-600" />
+                  <span>Packaging Charges Breakdown</span>
                 </h4>
                 <p className="text-[11px] text-gray-500">
-                  Per-unit packing material costs (Box ₹2, Sticker ₹1/₹4, POP Bag+Card ₹1, Print Label ₹1)
+                  Select standard packaging or special packaging (e.g. Sticker ₹4) for this perfume
                 </p>
               </div>
               <span className="text-xs font-bold text-primary-700 bg-primary-50 px-2 py-0.5 rounded border border-primary-200">
                 Pack Total: ₹{((Number(pForm.watch('boxCost') ?? 2) || 0) + (Number(pForm.watch('stickerCost') ?? 1) || 0) + (Number(pForm.watch('bagCardCost') ?? 1) || 0) + (Number(pForm.watch('printLabelCost') ?? 1) || 0)).toFixed(2)}
               </span>
+            </div>
+
+            {/* Quick 1-Click Preset Buttons */}
+            <div className="flex flex-wrap items-center gap-2 pt-1">
+              <button
+                type="button"
+                onClick={() => {
+                  pForm.setValue('boxCost', 2);
+                  pForm.setValue('stickerCost', 1);
+                  pForm.setValue('bagCardCost', 1);
+                  pForm.setValue('printLabelCost', 1);
+                }}
+                className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-semibold border transition-all ${
+                  Number(pForm.watch('stickerCost')) === 1 && Number(pForm.watch('boxCost')) === 2 && Number(pForm.watch('bagCardCost')) === 1 && Number(pForm.watch('printLabelCost')) === 1
+                    ? 'bg-blue-50 border-blue-400 text-blue-800 ring-2 ring-blue-100 shadow-xs'
+                    : 'bg-white border-gray-200 text-gray-600 hover:bg-gray-50'
+                }`}
+              >
+                <Check className={`w-3.5 h-3.5 ${Number(pForm.watch('stickerCost')) === 1 && Number(pForm.watch('boxCost')) === 2 ? 'opacity-100 text-blue-600' : 'opacity-0'}`} />
+                <span>Standard Pack (₹5.00)</span>
+                <span className="text-[10px] text-gray-500 font-normal ml-0.5">(Sticker ₹1)</span>
+              </button>
+
+              <button
+                type="button"
+                onClick={() => {
+                  pForm.setValue('boxCost', 2);
+                  pForm.setValue('stickerCost', 4);
+                  pForm.setValue('bagCardCost', 1);
+                  pForm.setValue('printLabelCost', 1);
+                }}
+                className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-semibold border transition-all ${
+                  Number(pForm.watch('stickerCost')) === 4 && Number(pForm.watch('boxCost')) === 2 && Number(pForm.watch('bagCardCost')) === 1 && Number(pForm.watch('printLabelCost')) === 1
+                    ? 'bg-amber-50 border-amber-400 text-amber-900 ring-2 ring-amber-100 shadow-xs'
+                    : 'bg-white border-gray-200 text-gray-600 hover:bg-gray-50'
+                }`}
+              >
+                <Sparkles className={`w-3.5 h-3.5 ${Number(pForm.watch('stickerCost')) === 4 ? 'opacity-100 text-amber-600' : 'text-gray-400'}`} />
+                <span>★ Special Perfume Pack (₹8.00)</span>
+                <span className="text-[10px] text-amber-700 font-normal ml-0.5">(Sticker ₹4)</span>
+              </button>
             </div>
 
             <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 bg-gray-50 p-3 rounded-lg border border-gray-200">
@@ -466,6 +945,172 @@ const ProductsPage: React.FC = () => {
             <label htmlFor="isActive" className="text-sm text-gray-700">Active product</label>
           </div>
         </form>
+      </Modal>
+
+      {/* Bulk Packaging Charges Customization Modal */}
+      <Modal
+        isOpen={isBulkPackingModalOpen}
+        onClose={() => setIsBulkPackingModalOpen(false)}
+        title="Customize & Assign Packaging Charges"
+        size="md"
+        footer={
+          <div className="flex gap-2 justify-end">
+            <button onClick={() => setIsBulkPackingModalOpen(false)} className="btn-secondary">
+              Cancel
+            </button>
+            <button
+              onClick={handleApplyBulkPackingModal}
+              disabled={bulkPackingMut.isPending}
+              className="btn-primary"
+            >
+              {bulkPackingMut.isPending ? 'Applying...' : 'Apply Packaging Charges'}
+            </button>
+          </div>
+        }
+      >
+        <div className="space-y-4">
+          {/* Target Selection */}
+          <div>
+            <label className="label">Apply Packaging Charge To:</label>
+            <div className="grid grid-cols-2 gap-3 mt-1">
+              <label className={`flex items-center gap-2 p-3 rounded-xl border cursor-pointer transition-all ${bulkTarget === 'selected' ? 'bg-primary-50 border-primary-300 ring-2 ring-primary-100' : 'bg-gray-50 border-gray-200'}`}>
+                <input
+                  type="radio"
+                  name="bulkTarget"
+                  checked={bulkTarget === 'selected'}
+                  onChange={() => setBulkTarget('selected')}
+                  disabled={selectedProductIds.size === 0}
+                  className="rounded-full text-primary-600"
+                />
+                <div>
+                  <p className="text-xs font-bold text-gray-900">Selected Perfumes</p>
+                  <p className="text-[11px] text-gray-500">
+                    {selectedProductIds.size} product(s) selected
+                  </p>
+                </div>
+              </label>
+
+              <label className={`flex items-center gap-2 p-3 rounded-xl border cursor-pointer transition-all ${bulkTarget === 'all' ? 'bg-primary-50 border-primary-300 ring-2 ring-primary-100' : 'bg-gray-50 border-gray-200'}`}>
+                <input
+                  type="radio"
+                  name="bulkTarget"
+                  checked={bulkTarget === 'all'}
+                  onChange={() => setBulkTarget('all')}
+                  className="rounded-full text-primary-600"
+                />
+                <div>
+                  <p className="text-xs font-bold text-gray-900">All Perfumes</p>
+                  <p className="text-[11px] text-gray-500">
+                    All {products.length} perfume products
+                  </p>
+                </div>
+              </label>
+            </div>
+          </div>
+
+          {/* Packaging Preset Selection */}
+          <div>
+            <label className="label">Choose Packaging Charge Preset:</label>
+            <div className="space-y-2 mt-1">
+              {/* Standard */}
+              <label className={`flex items-center justify-between p-3 rounded-xl border cursor-pointer transition-all ${bulkPreset === 'standard' ? 'bg-blue-50 border-blue-300 ring-2 ring-blue-100' : 'bg-white border-gray-200 hover:bg-gray-50'}`}>
+                <div className="flex items-center gap-2.5">
+                  <input
+                    type="radio"
+                    name="bulkPreset"
+                    checked={bulkPreset === 'standard'}
+                    onChange={() => setBulkPreset('standard')}
+                    className="text-blue-600"
+                  />
+                  <div>
+                    <p className="text-xs font-bold text-blue-900">Standard Packaging</p>
+                    <p className="text-[11px] text-gray-500">Box ₹2 + Sticker ₹1 + POP Bag/Card ₹1 + Print Label ₹1</p>
+                  </div>
+                </div>
+                <span className="text-xs font-extrabold text-blue-800 bg-blue-100/80 px-2.5 py-1 rounded-lg">₹5.00</span>
+              </label>
+
+              {/* Special */}
+              <label className={`flex items-center justify-between p-3 rounded-xl border cursor-pointer transition-all ${bulkPreset === 'special' ? 'bg-amber-50 border-amber-300 ring-2 ring-amber-100' : 'bg-white border-gray-200 hover:bg-gray-50'}`}>
+                <div className="flex items-center gap-2.5">
+                  <input
+                    type="radio"
+                    name="bulkPreset"
+                    checked={bulkPreset === 'special'}
+                    onChange={() => setBulkPreset('special')}
+                    className="text-amber-600"
+                  />
+                  <div>
+                    <p className="text-xs font-bold text-amber-900 flex items-center gap-1">
+                      <Sparkles className="w-3.5 h-3.5 text-amber-600" />
+                      Special Perfume Packaging
+                    </p>
+                    <p className="text-[11px] text-gray-500">Box ₹2 + <strong className="text-amber-800">Special Sticker ₹4</strong> + POP Bag/Card ₹1 + Print Label ₹1</p>
+                  </div>
+                </div>
+                <span className="text-xs font-extrabold text-amber-900 bg-amber-100/80 px-2.5 py-1 rounded-lg">₹8.00</span>
+              </label>
+
+              {/* Custom */}
+              <label className={`flex items-center justify-between p-3 rounded-xl border cursor-pointer transition-all ${bulkPreset === 'custom' ? 'bg-purple-50 border-purple-300 ring-2 ring-purple-100' : 'bg-white border-gray-200 hover:bg-gray-50'}`}>
+                <div className="flex items-center gap-2.5">
+                  <input
+                    type="radio"
+                    name="bulkPreset"
+                    checked={bulkPreset === 'custom'}
+                    onChange={() => setBulkPreset('custom')}
+                    className="text-purple-600"
+                  />
+                  <div>
+                    <p className="text-xs font-bold text-purple-900">Custom Packaging Charge</p>
+                    <p className="text-[11px] text-gray-500">Define individual material costs</p>
+                  </div>
+                </div>
+                <span className="text-xs font-extrabold text-purple-900 bg-purple-100/80 px-2.5 py-1 rounded-lg">
+                  ₹{(customBoxCost + customStickerCost + customBagCardCost + customPrintLabelCost).toFixed(2)}
+                </span>
+              </label>
+            </div>
+          </div>
+
+          {/* If custom is selected, show inputs */}
+          {bulkPreset === 'custom' && (
+            <div className="p-3 bg-gray-50 rounded-xl border border-gray-200 space-y-2.5">
+              <h5 className="text-xs font-bold text-gray-700 uppercase tracking-wider">Custom Material Breakdown</h5>
+              <div className="grid grid-cols-2 sm:grid-cols-4 gap-2">
+                <div>
+                  <label className="text-[10px] font-medium text-gray-600">Box (₹)</label>
+                  <input type="number" step="0.5" value={customBoxCost} onChange={e => setCustomBoxCost(Number(e.target.value))} className="input text-xs py-1" />
+                </div>
+                <div>
+                  <label className="text-[10px] font-medium text-gray-600">Sticker (₹)</label>
+                  <input type="number" step="0.5" value={customStickerCost} onChange={e => setCustomStickerCost(Number(e.target.value))} className="input text-xs py-1" />
+                </div>
+                <div>
+                  <label className="text-[10px] font-medium text-gray-600">POP Bag/Card (₹)</label>
+                  <input type="number" step="0.5" value={customBagCardCost} onChange={e => setCustomBagCardCost(Number(e.target.value))} className="input text-xs py-1" />
+                </div>
+                <div>
+                  <label className="text-[10px] font-medium text-gray-600">Print Label (₹)</label>
+                  <input type="number" step="0.5" value={customPrintLabelCost} onChange={e => setCustomPrintLabelCost(Number(e.target.value))} className="input text-xs py-1" />
+                </div>
+              </div>
+            </div>
+          )}
+
+          {/* Confirmation summary */}
+          <div className="p-3 bg-emerald-50 border border-emerald-200 rounded-xl text-xs text-emerald-800 space-y-1">
+            <p className="font-bold flex items-center gap-1.5">
+              <Check className="w-4 h-4 text-emerald-600" />
+              <span>
+                Ready to apply to {bulkTarget === 'all' ? `all ${products.length} perfumes` : `${selectedProductIds.size} selected perfumes`}
+              </span>
+            </p>
+            <p className="text-[11px] text-emerald-700 pl-5">
+              Every unit sold will be accounted in Profit & Loss with this exact packaging charge!
+            </p>
+          </div>
+        </div>
       </Modal>
 
       {/* Category Modal */}

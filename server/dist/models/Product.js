@@ -49,6 +49,7 @@ const productSchema = new mongoose_1.Schema({
     bagCardCost: { type: Number, default: 100, min: 0 }, // paise (₹1.00 for POP bag + review card)
     printLabelCost: { type: Number, default: 100, min: 0 }, // paise (₹1.00 for order print label)
     packingCost: { type: Number, default: 500, min: 0 }, // paise (total packing charges)
+    packingPreset: { type: String, default: 'standard', trim: true },
     reorderThreshold: { type: Number, default: 5 },
     currentStock: { type: Number, default: 0 },
     damagedStock: { type: Number, default: 0, min: 0 },

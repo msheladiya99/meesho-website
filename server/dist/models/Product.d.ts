@@ -13,6 +13,7 @@ export interface IProduct extends Document {
     bagCardCost: number;
     printLabelCost: number;
     packingCost: number;
+    packingPreset?: string;
     reorderThreshold: number;
     currentStock: number;
     damagedStock: number;

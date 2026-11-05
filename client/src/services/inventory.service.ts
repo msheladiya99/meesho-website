@@ -8,6 +8,14 @@ export const productsApi = {
   create: (data: Partial<Product>) => api.post<ApiResponse<Product>>('/products', data),
   update: (id: string, data: Partial<Product>) => api.put<ApiResponse<Product>>(`/products/${id}`, data),
   delete: (id: string) => api.delete(`/products/${id}`),
+  bulkUpdatePacking: (data: {
+    productIds: string[] | 'all';
+    boxCost: number;
+    stickerCost: number;
+    bagCardCost: number;
+    printLabelCost: number;
+    packingPreset?: string;
+  }) => api.post<ApiResponse<{ modifiedCount: number }>>('/products/bulk-update-packing', data),
 };
 
 export const categoriesApi = {

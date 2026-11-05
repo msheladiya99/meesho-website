@@ -62,6 +62,7 @@ export interface Product {
   bagCardCost?: number; // in paise (e.g. 100 = ₹1 for POP bag + review card)
   printLabelCost?: number; // in paise (e.g. 100 = ₹1 for print label)
   packingCost?: number; // in paise (sum of packing items)
+  packingPreset?: 'standard' | 'special' | 'custom' | string;
   reorderThreshold: number;
   currentStock: number;
   damagedStock?: number;
