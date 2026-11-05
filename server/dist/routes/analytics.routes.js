@@ -296,6 +296,13 @@ router.get('/perfume-performance', auth_1.enforceAccountAccess, async (req, res)
             const stock = accountId && accountId !== 'all'
                 ? (accountStockMap.get(pIdStr) ?? 0)
                 : Math.max(0, p.currentStock || 0);
+            const bCost = p.boxCost ?? 200;
+            const sCost = p.stickerCost ?? 100;
+            const bcCost = p.bagCardCost ?? 100;
+            const plCost = p.printLabelCost ?? 100;
+            const packCost = p.packingCost ?? (bCost + sCost + bcCost + plCost);
+            const purchaseCost = p.defaultPurchaseCost || 0;
+            const unitCost = purchaseCost + packCost;
             statsMap.set(pIdStr, {
                 _id: pIdStr,
                 name: p.name,
@@ -306,7 +313,13 @@ router.get('/perfume-performance', auth_1.enforceAccountAccess, async (req, res)
                 brand: p.brand,
                 currentStock: stock,
                 isSharedStock,
-                defaultPurchaseCost: p.defaultPurchaseCost || 0,
+                defaultPurchaseCost: purchaseCost,
+                boxCost: bCost,
+                stickerCost: sCost,
+                bagCardCost: bcCost,
+                printLabelCost: plCost,
+                packingCost: packCost,
+                totalUnitCost: unitCost,
                 sellingPrice: p.sellingPrice || 0,
                 soldCount: 0,
                 directSoldCount: 0,
@@ -321,6 +334,8 @@ router.get('/perfume-performance', auth_1.enforceAccountAccess, async (req, res)
                 netSoldCount: 0,
                 returnRate: 0,
                 netRevenue: 0,
+                totalCost: 0,
+                estimatedProfit: 0,
             });
         }
         // Set of orders counted in ReturnOrder
@@ -398,11 +413,16 @@ router.get('/perfume-performance', auth_1.enforceAccountAccess, async (req, res)
                 ? Number(((item.returnCount / item.soldCount) * 100).toFixed(1))
                 : 0;
             const netRevenue = item.salesRevenue - item.returnAmount;
+            const unitCost = item.defaultPurchaseCost + item.packingCost;
+            const totalCost = unitCost * item.soldCount;
+            const estimatedProfit = netRevenue - (unitCost * Math.max(0, netSoldCount));
             return {
                 ...item,
                 netSoldCount,
                 returnRate,
                 netRevenue,
+                totalCost,
+                estimatedProfit,
             };
         });
         // Summary totals

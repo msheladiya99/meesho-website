@@ -168,7 +168,12 @@ const ReportsPage: React.FC = () => {
 
           {/* Financials */}
           <div className="card p-5">
-            <h2 className="text-sm font-bold text-gray-700 mb-3 uppercase tracking-wider">Financials</h2>
+            <div className="flex items-center justify-between mb-3">
+              <h2 className="text-sm font-bold text-gray-700 uppercase tracking-wider">Financials</h2>
+              <a href="/pnl" className="text-xs text-primary-600 hover:text-primary-700 font-semibold hover:underline">
+                View Itemized P&L →
+              </a>
+            </div>
             <MetricRow label="Net Sales" value={formatCurrency(report.netSales || 0)} />
             <MetricRow label="Stock Purchases" value={formatCurrency(report.stockPurchases || 0)} />
             <MetricRow label="Total Expenses" value={formatCurrency(report.totalExpenses || 0)} />

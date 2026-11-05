@@ -550,13 +550,17 @@ const PerfumePerformancePage: React.FC = () => {
                             <div className="font-bold text-gray-900 group-hover:text-primary-700 transition-colors text-xs sm:text-sm truncate max-w-[115px] sm:max-w-none">
                               {perfume.name}
                             </div>
-                            <div className="flex items-center gap-1 mt-0.5">
+                            <div className="flex items-center gap-1.5 mt-0.5 flex-wrap">
                               <span className="font-mono text-[9px] sm:text-[11px] text-gray-500 bg-gray-100 px-1 py-0.2 rounded truncate max-w-[80px] sm:max-w-none">
                                 {perfume.sku}
                               </span>
+                              <span className="text-[10px] text-emerald-800 bg-emerald-50 px-1.5 py-0.2 rounded border border-emerald-100 font-medium">
+                                Cost: {formatCurrency(perfume.defaultPurchaseCost || 0)} + {formatCurrency(perfume.packingCost ?? 500)} pack
+                                {perfume.stickerCost && perfume.stickerCost > 100 ? ` (Sticker ${formatCurrency(perfume.stickerCost)})` : ''}
+                              </span>
                               {perfume.category && perfume.category !== 'Uncategorized' && (
                                 <span className="hidden sm:inline text-[10px] text-gray-500">
-                                  {perfume.category}
+                                  · {perfume.category}
                                 </span>
                               )}
                               {perfume.sizeml ? (
@@ -765,8 +769,39 @@ const PerfumePerformancePage: React.FC = () => {
 
               {/* Inventory & Financial Overview */}
               <div className="space-y-3">
-                <h4 className="text-xs font-bold uppercase tracking-wider text-gray-500">Stock & Financials</h4>
-                <div className="grid grid-cols-2 gap-2.5">
+                <h4 className="text-xs font-bold uppercase tracking-wider text-gray-500">Unit Cost & Packaging Breakdown</h4>
+                <div className="bg-gray-50/70 p-3.5 rounded-xl border border-gray-200/80 space-y-2 text-xs">
+                  <div className="flex justify-between items-center text-gray-700">
+                    <span>Base Purchase Cost:</span>
+                    <span className="font-semibold">{formatCurrency(selectedPerfume.defaultPurchaseCost || 0)}</span>
+                  </div>
+                  <div className="flex justify-between items-center text-gray-600 pl-2">
+                    <span>• Box Price:</span>
+                    <span>{formatCurrency(selectedPerfume.boxCost ?? 200)}</span>
+                  </div>
+                  <div className="flex justify-between items-center text-gray-600 pl-2">
+                    <span>• Sticker Price:</span>
+                    <span className="font-semibold text-primary-700">{formatCurrency(selectedPerfume.stickerCost ?? 100)}</span>
+                  </div>
+                  <div className="flex justify-between items-center text-gray-600 pl-2">
+                    <span>• 1 POP Bag + Review Card:</span>
+                    <span>{formatCurrency(selectedPerfume.bagCardCost ?? 100)}</span>
+                  </div>
+                  <div className="flex justify-between items-center text-gray-600 pl-2">
+                    <span>• 1 Order Print Label:</span>
+                    <span>{formatCurrency(selectedPerfume.printLabelCost ?? 100)}</span>
+                  </div>
+                  <div className="flex justify-between items-center border-t border-gray-200 pt-1.5 font-medium text-gray-800">
+                    <span>Total Packing Charge:</span>
+                    <span className="font-bold text-primary-700">{formatCurrency(selectedPerfume.packingCost ?? 500)}</span>
+                  </div>
+                  <div className="flex justify-between items-center border-t border-dashed border-gray-300 pt-1.5 font-bold text-gray-900 bg-emerald-50/60 p-2 rounded">
+                    <span>Total Landed Cost (Purchase + Packing):</span>
+                    <span className="text-emerald-700 font-extrabold">{formatCurrency(selectedPerfume.totalUnitCost ?? ((selectedPerfume.defaultPurchaseCost || 0) + (selectedPerfume.packingCost ?? 500)))}</span>
+                  </div>
+                </div>
+
+                <div className="grid grid-cols-2 gap-2.5 pt-1">
                   <div className="p-3 bg-gray-50 rounded-xl border border-gray-100">
                     <p className="text-[11px] text-gray-500">Current Warehouse Stock</p>
                     <p className={`text-base font-bold mt-0.5 ${selectedPerfume.currentStock === 0 ? 'text-red-600' : 'text-gray-900'}`}>
@@ -790,9 +825,9 @@ const PerfumePerformancePage: React.FC = () => {
                   </div>
 
                   <div className="p-3 bg-gray-50 rounded-xl border border-gray-100">
-                    <p className="text-[11px] text-gray-500">Net Revenue (After Returns)</p>
-                    <p className="text-base font-bold text-emerald-700 mt-0.5">
-                      {formatCurrency(selectedPerfume.netRevenue)}
+                    <p className="text-[11px] text-gray-500">Est. Profit (Net Rev − Cost)</p>
+                    <p className={`text-base font-bold mt-0.5 ${(selectedPerfume.estimatedProfit ?? 0) >= 0 ? 'text-emerald-700' : 'text-red-600'}`}>
+                      {formatCurrency(selectedPerfume.estimatedProfit ?? 0)}
                     </p>
                   </div>
                 </div>

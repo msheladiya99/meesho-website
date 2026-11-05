@@ -21,6 +21,10 @@ const productSchema = z.object({
   brand: z.string().optional(),
   sellingPrice: z.number().positive(),
   defaultPurchaseCost: z.number().positive(),
+  boxCost: z.number().min(0).default(2),
+  stickerCost: z.number().min(0).default(1),
+  bagCardCost: z.number().min(0).default(1),
+  printLabelCost: z.number().min(0).default(1),
   reorderThreshold: z.number().int().min(0),
   isActive: z.boolean().default(true),
 });
@@ -62,10 +66,25 @@ const ProductsPage: React.FC = () => {
   // Product form
   const pForm = useForm<ProductForm>({
     resolver: zodResolver(productSchema) as any,
-    defaultValues: { isActive: true, reorderThreshold: 5 },
+    defaultValues: {
+      isActive: true,
+      reorderThreshold: 5,
+      boxCost: 2,
+      stickerCost: 1,
+      bagCardCost: 1,
+      printLabelCost: 1,
+    },
   });
 
   const getProductCost = (p: Product) => (p.defaultPurchaseCost > 0 ? p.defaultPurchaseCost : (p.weightedAvgCost || 0));
+  const getProductPackingCost = (p: Product) => {
+    if (p.packingCost !== undefined && p.packingCost > 0) return p.packingCost;
+    const b = p.boxCost ?? 200;
+    const s = p.stickerCost ?? 100;
+    const bc = p.bagCardCost ?? 100;
+    const pl = p.printLabelCost ?? 100;
+    return b + s + bc + pl;
+  };
 
   const createProductMut = useMutation({
     mutationFn: (d: Partial<Product>) => productsApi.create(d),
@@ -133,7 +152,15 @@ const ProductsPage: React.FC = () => {
   };
 
   const onProductSubmit = (d: ProductForm) => {
-    const payload = { ...d, sellingPrice: rupeesToPaise(d.sellingPrice), defaultPurchaseCost: rupeesToPaise(d.defaultPurchaseCost) };
+    const payload = {
+      ...d,
+      sellingPrice: rupeesToPaise(d.sellingPrice),
+      defaultPurchaseCost: rupeesToPaise(d.defaultPurchaseCost),
+      boxCost: rupeesToPaise(d.boxCost ?? 2),
+      stickerCost: rupeesToPaise(d.stickerCost ?? 1),
+      bagCardCost: rupeesToPaise(d.bagCardCost ?? 1),
+      printLabelCost: rupeesToPaise(d.printLabelCost ?? 1),
+    };
     if (editingProduct) updateProductMut.mutate({ id: editingProduct._id, data: payload });
     else createProductMut.mutate(payload);
   };
@@ -146,6 +173,10 @@ const ProductsPage: React.FC = () => {
       sizeml: p.sizeml, fragranceType: p.fragranceType, brand: p.brand,
       sellingPrice: paiseToRupees(p.sellingPrice),
       defaultPurchaseCost: paiseToRupees(getProductCost(p)),
+      boxCost: p.boxCost !== undefined ? paiseToRupees(p.boxCost) : 2,
+      stickerCost: p.stickerCost !== undefined ? paiseToRupees(p.stickerCost) : 1,
+      bagCardCost: p.bagCardCost !== undefined ? paiseToRupees(p.bagCardCost) : 1,
+      printLabelCost: p.printLabelCost !== undefined ? paiseToRupees(p.printLabelCost) : 1,
       reorderThreshold: p.reorderThreshold, isActive: p.isActive,
     });
     setIsProductModalOpen(true);
@@ -232,7 +263,9 @@ const ProductsPage: React.FC = () => {
                       <th className="hidden sm:table-cell">SKU</th>
                       <th className="hidden md:table-cell">Category</th>
                       <th className="hidden sm:table-cell">Size</th>
-                      <th className="text-right sm:text-left">Price</th>
+                      <th className="text-right sm:text-left">Selling Price</th>
+                      <th className="hidden lg:table-cell text-right sm:text-left">Purchase Cost</th>
+                      <th className="hidden md:table-cell text-right sm:text-left">Packing Charge</th>
                       <th className="text-center sm:text-left">Stock</th>
                       <th className="hidden sm:table-cell">Status</th>
                       <th className="text-right pr-2">Actions</th>
@@ -243,6 +276,8 @@ const ProductsPage: React.FC = () => {
                       const cat = typeof p.category === 'object' ? p.category : categories.find(c => c._id === p.category);
                       const lowStock = p.currentStock <= p.reorderThreshold;
                       const isSelected = selectedProductIds.has(p._id);
+                      const packCost = getProductPackingCost(p);
+                      const purchaseCost = getProductCost(p);
                       return (
                         <tr key={p._id} className={isSelected ? 'bg-primary-50' : ''}>
                           <td>
@@ -257,13 +292,19 @@ const ProductsPage: React.FC = () => {
                           <td className="font-medium">
                             <div className="text-xs text-gray-900 truncate max-w-[130px] sm:max-w-none">{p.name}</div>
                             <div className="sm:hidden font-mono text-[10px] text-gray-400">
-                              {p.sku} {p.sizeml ? `• ${p.sizeml}ml` : ''}
+                              {p.sku} {p.sizeml ? `• ${p.sizeml}ml` : ''} • Cost: {formatCurrency(purchaseCost + packCost)}
                             </div>
                           </td>
                           <td className="hidden sm:table-cell font-mono text-xs">{p.sku}</td>
                           <td className="hidden md:table-cell text-xs">{(cat as Category)?.name || '—'}</td>
                           <td className="hidden sm:table-cell text-xs">{p.sizeml}ml</td>
                           <td className="text-right sm:text-left text-xs font-semibold">{formatCurrency(p.sellingPrice)}</td>
+                          <td className="hidden lg:table-cell text-right sm:text-left text-xs text-gray-700 font-mono">
+                            {formatCurrency(purchaseCost)}
+                          </td>
+                          <td className="hidden md:table-cell text-right sm:text-left text-xs font-mono">
+                            <span className="text-primary-700 font-medium">+{formatCurrency(packCost)}</span>
+                          </td>
                           <td className={`text-center sm:text-left text-xs ${lowStock ? 'text-red-600 font-semibold' : ''}`}>
                             <span>{p.currentStock}</span>
                             {p.isSharedStock && (
@@ -348,6 +389,77 @@ const ProductsPage: React.FC = () => {
             <div><label className="label">Selling Price (₹) *</label><input type="number" step="0.01" {...pForm.register('sellingPrice', { valueAsNumber: true })} className="input" />{pForm.formState.errors.sellingPrice && <p className="text-xs text-red-500 mt-1">{pForm.formState.errors.sellingPrice.message}</p>}</div>
             <div><label className="label">Purchase Cost (₹) *</label><input type="number" step="0.01" {...pForm.register('defaultPurchaseCost', { valueAsNumber: true })} className="input" /></div>
             <div><label className="label">Reorder At (Qty)</label><input type="number" {...pForm.register('reorderThreshold', { valueAsNumber: true })} className="input" /></div>
+          </div>
+
+          {/* Packaging Cost Breakdown */}
+          <div className="border-t border-gray-100 pt-3 space-y-2.5">
+            <div className="flex items-center justify-between">
+              <div>
+                <h4 className="text-xs font-bold text-gray-800 uppercase tracking-wider">
+                  Packaging Charges Breakdown
+                </h4>
+                <p className="text-[11px] text-gray-500">
+                  Per-unit packing material costs (Box ₹2, Sticker ₹1/₹4, POP Bag+Card ₹1, Print Label ₹1)
+                </p>
+              </div>
+              <span className="text-xs font-bold text-primary-700 bg-primary-50 px-2 py-0.5 rounded border border-primary-200">
+                Pack Total: ₹{((Number(pForm.watch('boxCost') ?? 2) || 0) + (Number(pForm.watch('stickerCost') ?? 1) || 0) + (Number(pForm.watch('bagCardCost') ?? 1) || 0) + (Number(pForm.watch('printLabelCost') ?? 1) || 0)).toFixed(2)}
+              </span>
+            </div>
+
+            <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 bg-gray-50 p-3 rounded-lg border border-gray-200">
+              <div>
+                <label className="text-[11px] font-medium text-gray-700">Box Price (₹)</label>
+                <input
+                  type="number"
+                  step="0.01"
+                  {...pForm.register('boxCost', { valueAsNumber: true })}
+                  className="input text-xs py-1.5"
+                  placeholder="2.00"
+                />
+              </div>
+              <div>
+                <label className="text-[11px] font-medium text-gray-700">Sticker (₹)</label>
+                <input
+                  type="number"
+                  step="0.01"
+                  {...pForm.register('stickerCost', { valueAsNumber: true })}
+                  className="input text-xs py-1.5"
+                  placeholder="1.00 or 4.00"
+                />
+              </div>
+              <div>
+                <label className="text-[11px] font-medium text-gray-700">POP Bag + Card (₹)</label>
+                <input
+                  type="number"
+                  step="0.01"
+                  {...pForm.register('bagCardCost', { valueAsNumber: true })}
+                  className="input text-xs py-1.5"
+                  placeholder="1.00"
+                />
+              </div>
+              <div>
+                <label className="text-[11px] font-medium text-gray-700">Print Label (₹)</label>
+                <input
+                  type="number"
+                  step="0.01"
+                  {...pForm.register('printLabelCost', { valueAsNumber: true })}
+                  className="input text-xs py-1.5"
+                  placeholder="1.00"
+                />
+              </div>
+            </div>
+
+            {/* Live Cost Summary Preview */}
+            <div className="flex flex-col sm:flex-row sm:items-center justify-between bg-primary-50 border border-primary-100 rounded-lg px-3 py-2 text-xs gap-1">
+              <span className="text-gray-700">
+                Combined Landed Cost: <strong>₹{(Number(pForm.watch('defaultPurchaseCost') || 0)).toFixed(2)}</strong> (Purchase) +{' '}
+                <strong>₹{((Number(pForm.watch('boxCost') ?? 2) || 0) + (Number(pForm.watch('stickerCost') ?? 1) || 0) + (Number(pForm.watch('bagCardCost') ?? 1) || 0) + (Number(pForm.watch('printLabelCost') ?? 1) || 0)).toFixed(2)}</strong> (Packing)
+              </span>
+              <span className="text-xs font-bold text-primary-900">
+                = <span className="text-emerald-700 text-sm font-extrabold">₹{((Number(pForm.watch('defaultPurchaseCost') || 0)) + (Number(pForm.watch('boxCost') ?? 2) || 0) + (Number(pForm.watch('stickerCost') ?? 1) || 0) + (Number(pForm.watch('bagCardCost') ?? 1) || 0) + (Number(pForm.watch('printLabelCost') ?? 1) || 0)).toFixed(2)}</span> / unit
+              </span>
+            </div>
           </div>
           <div className="flex items-center gap-2">
             <input type="checkbox" id="isActive" {...pForm.register('isActive')} className="rounded" />

@@ -94,7 +94,17 @@ router.get('/:id', async (req, res) => {
 });
 router.post('/', auth_1.requireManagerOrAdmin, async (req, res) => {
     try {
-        const p = await Product_1.Product.create(req.body);
+        const data = { ...req.body };
+        const b = data.boxCost !== undefined ? Number(data.boxCost) : 200;
+        const s = data.stickerCost !== undefined ? Number(data.stickerCost) : 100;
+        const bc = data.bagCardCost !== undefined ? Number(data.bagCardCost) : 100;
+        const pl = data.printLabelCost !== undefined ? Number(data.printLabelCost) : 100;
+        data.boxCost = b;
+        data.stickerCost = s;
+        data.bagCardCost = bc;
+        data.printLabelCost = pl;
+        data.packingCost = b + s + bc + pl;
+        const p = await Product_1.Product.create(data);
         await (0, audit_service_1.createAuditLog)({ action: 'CREATE', resource: 'Product', resourceId: p._id.toString(), userId: req.user?._id, details: `Created product ${p.sku}` });
         res.status(201).json({ success: true, data: p });
     }
@@ -105,7 +115,20 @@ router.post('/', auth_1.requireManagerOrAdmin, async (req, res) => {
 router.put('/:id', auth_1.requireManagerOrAdmin, async (req, res) => {
     try {
         const id = req.params.id;
-        const p = await Product_1.Product.findByIdAndUpdate(id, req.body, { new: true, runValidators: true }).populate('category');
+        const data = { ...req.body };
+        if (data.boxCost !== undefined || data.stickerCost !== undefined || data.bagCardCost !== undefined || data.printLabelCost !== undefined) {
+            const existing = await Product_1.Product.findById(id);
+            const b = data.boxCost !== undefined ? Number(data.boxCost) : (existing?.boxCost ?? 200);
+            const s = data.stickerCost !== undefined ? Number(data.stickerCost) : (existing?.stickerCost ?? 100);
+            const bc = data.bagCardCost !== undefined ? Number(data.bagCardCost) : (existing?.bagCardCost ?? 100);
+            const pl = data.printLabelCost !== undefined ? Number(data.printLabelCost) : (existing?.printLabelCost ?? 100);
+            data.boxCost = b;
+            data.stickerCost = s;
+            data.bagCardCost = bc;
+            data.printLabelCost = pl;
+            data.packingCost = b + s + bc + pl;
+        }
+        const p = await Product_1.Product.findByIdAndUpdate(id, data, { new: true, runValidators: true }).populate('category');
         if (!p) {
             res.status(404).json({ success: false, message: 'Product not found' });
             return;

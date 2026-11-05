@@ -95,7 +95,18 @@ router.get('/:id', async (req, res: Response): Promise<void> => {
 
 router.post('/', requireManagerOrAdmin, async (req: AuthRequest, res: Response): Promise<void> => {
   try {
-    const p = await Product.create(req.body);
+    const data = { ...req.body };
+    const b = data.boxCost !== undefined ? Number(data.boxCost) : 200;
+    const s = data.stickerCost !== undefined ? Number(data.stickerCost) : 100;
+    const bc = data.bagCardCost !== undefined ? Number(data.bagCardCost) : 100;
+    const pl = data.printLabelCost !== undefined ? Number(data.printLabelCost) : 100;
+    data.boxCost = b;
+    data.stickerCost = s;
+    data.bagCardCost = bc;
+    data.printLabelCost = pl;
+    data.packingCost = b + s + bc + pl;
+
+    const p = await Product.create(data);
     await createAuditLog({ action: 'CREATE', resource: 'Product', resourceId: p._id.toString(), userId: req.user?._id, details: `Created product ${p.sku}` });
     res.status(201).json({ success: true, data: p });
   } catch (err) {
@@ -106,7 +117,20 @@ router.post('/', requireManagerOrAdmin, async (req: AuthRequest, res: Response):
 router.put('/:id', requireManagerOrAdmin, async (req: AuthRequest, res: Response): Promise<void> => {
   try {
     const id = req.params.id as string;
-    const p = await Product.findByIdAndUpdate(id, req.body, { new: true, runValidators: true }).populate('category');
+    const data = { ...req.body };
+    if (data.boxCost !== undefined || data.stickerCost !== undefined || data.bagCardCost !== undefined || data.printLabelCost !== undefined) {
+      const existing = await Product.findById(id);
+      const b = data.boxCost !== undefined ? Number(data.boxCost) : (existing?.boxCost ?? 200);
+      const s = data.stickerCost !== undefined ? Number(data.stickerCost) : (existing?.stickerCost ?? 100);
+      const bc = data.bagCardCost !== undefined ? Number(data.bagCardCost) : (existing?.bagCardCost ?? 100);
+      const pl = data.printLabelCost !== undefined ? Number(data.printLabelCost) : (existing?.printLabelCost ?? 100);
+      data.boxCost = b;
+      data.stickerCost = s;
+      data.bagCardCost = bc;
+      data.printLabelCost = pl;
+      data.packingCost = b + s + bc + pl;
+    }
+    const p = await Product.findByIdAndUpdate(id, data, { new: true, runValidators: true }).populate('category');
     if (!p) { res.status(404).json({ success: false, message: 'Product not found' }); return; }
     await createAuditLog({ action: 'UPDATE', resource: 'Product', resourceId: id, userId: req.user?._id });
     res.json({ success: true, data: p });

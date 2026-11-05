@@ -57,6 +57,11 @@ export interface Product {
   brand?: string;
   sellingPrice: number; // in paise
   defaultPurchaseCost: number; // in paise
+  boxCost?: number; // in paise (e.g. 200 = ₹2)
+  stickerCost?: number; // in paise (e.g. 100 = ₹1, or 400 = ₹4 for perfume sticker)
+  bagCardCost?: number; // in paise (e.g. 100 = ₹1 for POP bag + review card)
+  printLabelCost?: number; // in paise (e.g. 100 = ₹1 for print label)
+  packingCost?: number; // in paise (sum of packing items)
   reorderThreshold: number;
   currentStock: number;
   damagedStock?: number;
@@ -352,6 +357,12 @@ export interface PerfumePerformance {
   currentStock: number;
   isSharedStock: boolean;
   defaultPurchaseCost: number;
+  boxCost?: number;
+  stickerCost?: number;
+  bagCardCost?: number;
+  printLabelCost?: number;
+  packingCost?: number;
+  totalUnitCost?: number;
   sellingPrice: number;
   soldCount: number;
   directSoldCount: number;
@@ -366,6 +377,8 @@ export interface PerfumePerformance {
   netSoldCount: number;
   returnRate: number;
   netRevenue: number;
+  totalCost?: number;
+  estimatedProfit?: number;
 }
 
 export interface PerfumePerformanceSummary {
@@ -441,7 +454,17 @@ export interface PnLData {
   returnsRefunds: number;
   salesReturns: number;
   netSales: number;
+  totalOrdersCount?: number;
+  totalUnitsSold?: number;
   costOfGoodsSold: number;
+  purchaseCost?: number;
+  totalPurchaseCost?: number;
+  totalBoxCost?: number;
+  totalStickerCost?: number;
+  totalBagCardCost?: number;
+  totalPrintLabelCost?: number;
+  totalPackingCharges?: number;
+  totalPurchaseAndPackingCost?: number;
   grossProfit: number;
   meeshoFees: number;
   shippingCosts: number;

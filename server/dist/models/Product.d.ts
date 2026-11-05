@@ -8,6 +8,11 @@ export interface IProduct extends Document {
     brand?: string;
     sellingPrice: number;
     defaultPurchaseCost: number;
+    boxCost: number;
+    stickerCost: number;
+    bagCardCost: number;
+    printLabelCost: number;
+    packingCost: number;
     reorderThreshold: number;
     currentStock: number;
     damagedStock: number;

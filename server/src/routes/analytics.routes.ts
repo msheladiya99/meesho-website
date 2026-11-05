@@ -281,6 +281,12 @@ router.get('/perfume-performance', enforceAccountAccess, async (req: AuthRequest
       currentStock: number;
       isSharedStock: boolean;
       defaultPurchaseCost: number;
+      boxCost: number;
+      stickerCost: number;
+      bagCardCost: number;
+      printLabelCost: number;
+      packingCost: number;
+      totalUnitCost: number;
       sellingPrice: number;
       soldCount: number;
       directSoldCount: number;
@@ -295,6 +301,8 @@ router.get('/perfume-performance', enforceAccountAccess, async (req: AuthRequest
       netSoldCount: number;
       returnRate: number;
       netRevenue: number;
+      totalCost: number;
+      estimatedProfit: number;
     }>();
 
     for (const p of products) {
@@ -302,6 +310,14 @@ router.get('/perfume-performance', enforceAccountAccess, async (req: AuthRequest
       const stock = accountId && accountId !== 'all'
         ? (accountStockMap.get(pIdStr) ?? 0)
         : Math.max(0, p.currentStock || 0);
+
+      const bCost = p.boxCost ?? 200;
+      const sCost = p.stickerCost ?? 100;
+      const bcCost = p.bagCardCost ?? 100;
+      const plCost = p.printLabelCost ?? 100;
+      const packCost = p.packingCost ?? (bCost + sCost + bcCost + plCost);
+      const purchaseCost = p.defaultPurchaseCost || 0;
+      const unitCost = purchaseCost + packCost;
 
       statsMap.set(pIdStr, {
         _id: pIdStr,
@@ -313,7 +329,13 @@ router.get('/perfume-performance', enforceAccountAccess, async (req: AuthRequest
         brand: p.brand,
         currentStock: stock,
         isSharedStock,
-        defaultPurchaseCost: p.defaultPurchaseCost || 0,
+        defaultPurchaseCost: purchaseCost,
+        boxCost: bCost,
+        stickerCost: sCost,
+        bagCardCost: bcCost,
+        printLabelCost: plCost,
+        packingCost: packCost,
+        totalUnitCost: unitCost,
         sellingPrice: p.sellingPrice || 0,
         soldCount: 0,
         directSoldCount: 0,
@@ -328,6 +350,8 @@ router.get('/perfume-performance', enforceAccountAccess, async (req: AuthRequest
         netSoldCount: 0,
         returnRate: 0,
         netRevenue: 0,
+        totalCost: 0,
+        estimatedProfit: 0,
       });
     }
 
@@ -405,12 +429,17 @@ router.get('/perfume-performance', enforceAccountAccess, async (req: AuthRequest
         ? Number(((item.returnCount / item.soldCount) * 100).toFixed(1))
         : 0;
       const netRevenue = item.salesRevenue - item.returnAmount;
+      const unitCost = item.defaultPurchaseCost + item.packingCost;
+      const totalCost = unitCost * item.soldCount;
+      const estimatedProfit = netRevenue - (unitCost * Math.max(0, netSoldCount));
 
       return {
         ...item,
         netSoldCount,
         returnRate,
         netRevenue,
+        totalCost,
+        estimatedProfit,
       };
     });
 

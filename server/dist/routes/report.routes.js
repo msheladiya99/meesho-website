@@ -200,7 +200,7 @@ router.get('/pnl', auth_1.enforceAccountAccess, async (req, res) => {
             shipping: 'Shipping',
             advertising: 'Advertising',
         };
-        const [orderAgg, cancelAgg, returnAgg, purchaseAgg, expenseAgg, catExpenses, products, returnChargeAgg] = await Promise.all([
+        const [orderAgg, cancelAgg, returnAgg, purchaseAgg, expenseAgg, catExpenses, products, returnChargeAgg, eligibleOrders] = await Promise.all([
             Order_1.Order.aggregate([{ $match: { isDeleted: false, ...af, ...df, ...prodFilter } }, { $group: { _id: null, gross: { $sum: '$grossAmount' }, qty: { $sum: '$quantity' } } }]),
             Order_1.Order.aggregate([{ $match: { isDeleted: false, status: 'cancelled', ...af, ...df, ...prodFilter } }, { $group: { _id: null, total: { $sum: '$grossAmount' } } }]),
             ReturnOrder_1.ReturnOrder.aggregate([{ $match: { isDeleted: false, ...af, ...rdf, ...prodFilter } }, { $group: { _id: null, total: { $sum: '$returnAmount' } } }]),
@@ -210,7 +210,7 @@ router.get('/pnl', auth_1.enforceAccountAccess, async (req, res) => {
                 { $match: { isDeleted: false, ...af, ...edf } },
                 { $group: { _id: '$category', total: { $sum: '$amount' } } },
             ]),
-            Product_1.Product.find(categoryId && categoryId !== 'all' ? { isActive: true, category: categoryId } : { isActive: true }),
+            Product_1.Product.find(categoryId && categoryId !== 'all' ? { isActive: true, category: categoryId } : { isActive: true }).lean(),
             CustomerReturnCharge_1.CustomerReturnCharge.aggregate([
                 { $match: { isDeleted: false, status: { $in: ['applied', 'adjusted'] }, ...af, ...rdf, ...catChargeFilter } },
                 {
@@ -223,17 +223,70 @@ router.get('/pnl', auth_1.enforceAccountAccess, async (req, res) => {
                     },
                 },
             ]),
+            Order_1.Order.find({
+                isDeleted: false,
+                status: { $nin: ['cancelled'] },
+                ...af,
+                ...df,
+                ...prodFilter,
+            }).select('quantity grossAmount sellingPrice product isCombo items').lean(),
         ]);
         const grossOrderValue = orderAgg[0]?.gross || 0;
         const salesCancellations = cancelAgg[0]?.total || 0;
         const returnsRefunds = returnAgg[0]?.total || 0;
         const netSales = grossOrderValue - salesCancellations - returnsRefunds;
-        const totalQtySold = orderAgg[0]?.qty || 0;
-        const avgWAC = products.length > 0
-            ? products.reduce((s, p) => s + p.weightedAvgCost, 0) / products.length
-            : 0;
-        const costOfGoodsSold = Math.round(totalQtySold * avgWAC);
-        const grossProfit = netSales - costOfGoodsSold;
+        // Build product lookup map for accurate purchase and packaging calculations
+        const allProducts = await Product_1.Product.find().lean();
+        const productMap = new Map();
+        allProducts.forEach((p) => productMap.set(p._id.toString(), p));
+        let totalPurchaseCost = 0;
+        let totalBoxCost = 0;
+        let totalStickerCost = 0;
+        let totalBagCardCost = 0;
+        let totalPrintLabelCost = 0;
+        let totalUnitsSold = 0;
+        const totalOrdersCount = eligibleOrders.length;
+        for (const o of eligibleOrders) {
+            if (o.isCombo && Array.isArray(o.items) && o.items.length > 0) {
+                // 1 print label per parcel
+                totalPrintLabelCost += 100;
+                for (const it of o.items) {
+                    const pid = it.product ? it.product.toString() : '';
+                    const prod = productMap.get(pid);
+                    const qty = it.quantity || 1;
+                    totalUnitsSold += qty;
+                    const pCost = prod ? (prod.defaultPurchaseCost || prod.weightedAvgCost || 5500) : 5500;
+                    const bCost = prod?.boxCost ?? 200;
+                    const sCost = prod?.stickerCost ?? 100;
+                    const bcCost = prod?.bagCardCost ?? 100;
+                    totalPurchaseCost += pCost * qty;
+                    totalBoxCost += bCost * qty;
+                    totalStickerCost += sCost * qty;
+                    totalBagCardCost += bcCost * qty;
+                }
+            }
+            else {
+                const pid = o.product ? o.product.toString() : '';
+                const prod = productMap.get(pid);
+                const qty = o.quantity || 1;
+                totalUnitsSold += qty;
+                const pCost = prod ? (prod.defaultPurchaseCost || prod.weightedAvgCost || 5500) : 5500;
+                const bCost = prod?.boxCost ?? 200;
+                const sCost = prod?.stickerCost ?? 100;
+                const bcCost = prod?.bagCardCost ?? 100;
+                const plCost = prod?.printLabelCost ?? 100;
+                totalPurchaseCost += pCost * qty;
+                totalBoxCost += bCost * qty;
+                totalStickerCost += sCost * qty;
+                totalBagCardCost += bcCost * qty;
+                totalPrintLabelCost += plCost;
+            }
+        }
+        // Packing charges = Box + Sticker + POP Bag & Review Card + Order Print Label
+        const totalPackingCharges = totalBoxCost + totalStickerCost + totalBagCardCost + totalPrintLabelCost;
+        const totalPurchaseAndPackingCost = totalPurchaseCost + totalPackingCharges;
+        const costOfGoodsSold = totalPurchaseCost;
+        const grossProfit = netSales - totalPurchaseAndPackingCost;
         const getCatTotal = (cat) => {
             const found = catExpenses.find((c) => c._id === cat);
             return found ? found.total : 0;
@@ -241,12 +294,14 @@ router.get('/pnl', auth_1.enforceAccountAccess, async (req, res) => {
         const meeshoFees = getCatTotal(EXPENSE_CATEGORIES.meeshoFees);
         const shippingCosts = getCatTotal(EXPENSE_CATEGORIES.shipping) + getCatTotal('Return Shipping');
         const advertising = getCatTotal(EXPENSE_CATEGORIES.advertising) + getCatTotal('Marketing');
-        const totalRtoCharges = getCatTotal('RTO Charges') + getCatTotal('RTO Return Charges');
+        // RTO Returns strictly receive 0 charges (no penalty on Meesho)
+        const totalRtoCharges = 0;
+        // Customer returns charges (LESS customer returns, strictly excluding RTO)
         const totalCustomerReturnCharges = returnChargeAgg[0]?.totalBase || 0;
         const totalCustomerReturnHandlingCharges = returnChargeAgg[0]?.totalHandling || 0;
         const totalCustomerReturnExpenses = returnChargeAgg[0]?.total || 0;
-        const otherExpenses = Math.max(0, (expenseAgg[0]?.total || 0) - meeshoFees - shippingCosts - advertising - totalRtoCharges);
-        const totalOperatingExpenses = meeshoFees + shippingCosts + advertising + totalCustomerReturnExpenses + totalRtoCharges + otherExpenses;
+        const otherExpenses = Math.max(0, (expenseAgg[0]?.total || 0) - meeshoFees - shippingCosts - advertising);
+        const totalOperatingExpenses = meeshoFees + shippingCosts + advertising + totalCustomerReturnExpenses + otherExpenses;
         const operatingProfit = grossProfit - totalOperatingExpenses;
         res.json({
             success: true,
@@ -257,7 +312,17 @@ router.get('/pnl', auth_1.enforceAccountAccess, async (req, res) => {
                 returnsRefunds,
                 salesReturns: returnsRefunds,
                 netSales,
+                totalOrdersCount,
+                totalUnitsSold,
                 costOfGoodsSold,
+                purchaseCost: totalPurchaseCost,
+                totalPurchaseCost,
+                totalBoxCost,
+                totalStickerCost,
+                totalBagCardCost,
+                totalPrintLabelCost,
+                totalPackingCharges,
+                totalPurchaseAndPackingCost,
                 grossProfit,
                 meeshoFees,
                 shippingCosts,
