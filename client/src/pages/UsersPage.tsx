@@ -7,7 +7,9 @@ import { z } from 'zod';
 import { usersApi } from '../services/auth.service';
 import { useAuthStore } from '../store/authStore';
 import Modal from '../components/ui/Modal';
-import { LoadingSpinner, ConfirmDialog } from '../components/ui/Feedback';
+import { LoadingSpinner, ConfirmDialog, EmptyState } from '../components/ui/Feedback';
+import { Pagination, TableSummaryStatus } from '../components/ui/Pagination';
+import { Search } from 'lucide-react';
 import toast from 'react-hot-toast';
 import type { User } from '../types';
 
@@ -38,6 +40,9 @@ const UsersPage: React.FC = () => {
   const [editingUser, setEditingUser] = useState<User | null>(null);
   const [resetPwUserId, setResetPwUserId] = useState<string | null>(null);
   const [newPw, setNewPw] = useState('');
+  const [search, setSearch] = useState('');
+  const [page, setPage] = useState(1);
+  const [pageSize, setPageSize] = useState(10);
 
   const { data, isLoading } = useQuery({
     queryKey: ['users'],
@@ -45,7 +50,21 @@ const UsersPage: React.FC = () => {
     enabled: me?.role === 'admin',
   });
 
-  const users: User[] = data?.data?.data || [];
+  const rawUsers: User[] = data?.data?.data || [];
+
+  const users = React.useMemo(() => {
+    if (!search.trim()) return rawUsers;
+    const q = search.toLowerCase().trim();
+    return rawUsers.filter(u =>
+      u.name?.toLowerCase().includes(q) ||
+      u.email?.toLowerCase().includes(q) ||
+      u.role?.toLowerCase().includes(q)
+    );
+  }, [rawUsers, search]);
+
+  const paginatedUsers = React.useMemo(() => {
+    return users.slice((page - 1) * pageSize, page * pageSize);
+  }, [users, page, pageSize]);
 
   const createForm = useForm<CreateForm>({ resolver: zodResolver(createSchema), defaultValues: { role: 'viewer' } });
   const editForm = useForm<EditForm>({ resolver: zodResolver(editSchema) });
@@ -95,36 +114,71 @@ const UsersPage: React.FC = () => {
         </button>
       </div>
 
-      <div className="card">
-        {isLoading ? <LoadingSpinner /> : (
-          <div className="table-container">
-            <table className="table">
-              <thead><tr><th>Name</th><th>Email</th><th>Role</th><th>Created</th><th>Actions</th></tr></thead>
-              <tbody>
-                {users.map(u => (
-                  <tr key={u._id} className={u._id === me._id ? 'bg-primary-50/50' : ''}>
-                    <td className="font-medium">
-                      {u.name}
-                      {u._id === me._id && <span className="ml-2 text-xs text-primary-600">(you)</span>}
-                    </td>
-                    <td>{u.email}</td>
-                    <td><span className={`badge ${roleColors[u.role]}`}>{u.role}</span></td>
-                    <td className="text-gray-500 text-xs">{new Date(u.createdAt).toLocaleDateString('en-IN')}</td>
-                    <td>
-                      <div className="flex gap-1">
-                        <button onClick={() => openEdit(u)} className="p-1.5 rounded hover:bg-gray-100 text-gray-400 hover:text-gray-700 text-xs">
-                          <Edit2 className="w-3.5 h-3.5" />
-                        </button>
-                        <button onClick={() => { setResetPwUserId(u._id); setNewPw(''); }} className="px-2 py-1 text-xs rounded hover:bg-orange-50 text-gray-400 hover:text-orange-600 border border-transparent hover:border-orange-200">
-                          Reset PW
-                        </button>
-                      </div>
-                    </td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
+      <div className="card p-3 sm:p-4 space-y-3">
+        <div className="relative max-w-sm">
+          <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-400" />
+          <input
+            className="input pl-9 text-xs sm:text-sm"
+            placeholder="Search users by name, email, role..."
+            value={search}
+            onChange={e => { setSearch(e.target.value); setPage(1); }}
+          />
+        </div>
+
+        {users.length > 0 && (
+          <TableSummaryStatus
+            page={page}
+            total={users.length}
+            pageSize={pageSize}
+            itemName="users"
+          />
+        )}
+      </div>
+
+      <div className="card overflow-hidden">
+        {isLoading ? <LoadingSpinner /> : users.length === 0 ? (
+          <EmptyState title="No users found" description={search ? "No users match your search." : "No other users exist."} />
+        ) : (
+          <>
+            <div className="table-container">
+              <table className="table">
+                <thead><tr><th>Name</th><th>Email</th><th>Role</th><th>Created</th><th>Actions</th></tr></thead>
+                <tbody>
+                  {paginatedUsers.map(u => (
+                    <tr key={u._id} className={u._id === me._id ? 'bg-primary-50/50' : ''}>
+                      <td className="font-medium">
+                        {u.name}
+                        {u._id === me._id && <span className="ml-2 text-xs text-primary-600">(you)</span>}
+                      </td>
+                      <td>{u.email}</td>
+                      <td><span className={`badge ${roleColors[u.role]}`}>{u.role}</span></td>
+                      <td className="text-gray-500 text-xs">{new Date(u.createdAt).toLocaleDateString('en-IN')}</td>
+                      <td>
+                        <div className="flex gap-1">
+                          <button onClick={() => openEdit(u)} className="p-1.5 rounded hover:bg-gray-100 text-gray-400 hover:text-gray-700 text-xs">
+                            <Edit2 className="w-3.5 h-3.5" />
+                          </button>
+                          <button onClick={() => { setResetPwUserId(u._id); setNewPw(''); }} className="px-2 py-1 text-xs rounded hover:bg-orange-50 text-gray-400 hover:text-orange-600 border border-transparent hover:border-orange-200">
+                            Reset PW
+                          </button>
+                        </div>
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+
+            <Pagination
+              page={page}
+              total={users.length}
+              pageSize={pageSize}
+              pageSizeOptions={[10, 25, 50, 100]}
+              itemName="users"
+              onPageChange={setPage}
+              onPageSizeChange={setPageSize}
+            />
+          </>
         )}
       </div>
 

@@ -11,6 +11,7 @@ import { formatCurrency, formatDate, rupeesToPaise, paiseToRupees, dateRangePres
 import DateRangePicker from '../components/ui/DateRangePicker';
 import Modal from '../components/ui/Modal';
 import { EmptyState, LoadingSpinner, ConfirmDialog } from '../components/ui/Feedback';
+import { Pagination, TableSummaryStatus } from '../components/ui/Pagination';
 import toast from 'react-hot-toast';
 import type { DateRange, Expense, Partner } from '../types';
 import { EXPENSE_CATEGORIES } from '../types';
@@ -34,6 +35,8 @@ const ExpensesPage: React.FC = () => {
   const { activeAccountId } = useAccountStore();
   const qc = useQueryClient();
   const [dateRange, setDateRange] = useState<DateRange>(dateRangePresets().thisMonth);
+  const [page, setPage] = useState(1);
+  const [pageSize, setPageSize] = useState(10);
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [editingExpense, setEditingExpense] = useState<Expense | null>(null);
   const [deleteId, setDeleteId] = useState<string | null>(null);
@@ -50,6 +53,10 @@ const ExpensesPage: React.FC = () => {
   const expenses: Expense[] = data?.data?.data || [];
   const partners: Partner[] = partnersData?.data?.data || [];
   const totalExpenses = expenses.reduce((s, e) => s + e.amount, 0);
+
+  const paginatedExpenses = React.useMemo(() => {
+    return expenses.slice((page - 1) * pageSize, page * pageSize);
+  }, [expenses, page, pageSize]);
 
   const { register, handleSubmit, watch, reset, formState: { errors } } = useForm<FormData>({
     resolver: zodResolver(schema),
@@ -95,7 +102,17 @@ const ExpensesPage: React.FC = () => {
         </button>
       </div>
 
-      <div className="card p-4"><DateRangePicker value={dateRange} onChange={setDateRange} /></div>
+      <div className="card p-4 space-y-3">
+        <DateRangePicker value={dateRange} onChange={r => { setDateRange(r); setPage(1); }} />
+        {expenses.length > 0 && (
+          <TableSummaryStatus
+            page={page}
+            total={expenses.length}
+            pageSize={pageSize}
+            itemName="expenses"
+          />
+        )}
+      </div>
 
       {/* Category breakdown */}
       {categoryTotals.length > 0 && (
@@ -115,49 +132,61 @@ const ExpensesPage: React.FC = () => {
         </div>
       )}
 
-      <div className="card">
+      <div className="card overflow-hidden">
         {isLoading ? <LoadingSpinner /> : expenses.length === 0 ? (
           <EmptyState title="No expenses" description="Record business expenses to track profitability." icon={<Users className="w-12 h-12" />} />
         ) : (
-          <div className="table-container">
-            <table className="table">
-              <thead>
-                <tr>
-                  <th>Date</th>
-                  <th>Category</th>
-                  <th className="hidden sm:table-cell">Description</th>
-                  <th className="text-right sm:text-left">Amount</th>
-                  <th className="text-center sm:text-left">Paid By</th>
-                  <th className="hidden md:table-cell">Method</th>
-                  <th className="hidden lg:table-cell">Allocation</th>
-                  <th className="text-right pr-2">Actions</th>
-                </tr>
-              </thead>
-              <tbody>
-                {expenses.map(e => (
-                  <tr key={e._id}>
-                    <td className="whitespace-nowrap text-[11px] sm:text-xs">{formatDate(e.expenseDate)}</td>
-                    <td>
-                      <div>
-                        <span className="badge badge-blue text-[9px] sm:text-xs">{e.category}</span>
-                        <div className="sm:hidden text-[10px] text-gray-500 mt-0.5 truncate max-w-[120px]">
-                          {e.description}
-                        </div>
-                      </div>
-                    </td>
-                    <td className="hidden sm:table-cell text-xs">{e.description}</td>
-                    <td className="text-right sm:text-left font-semibold text-xs sm:text-sm">{formatCurrency(e.amount)}</td>
-                    <td className="text-center sm:text-left capitalize text-xs">{e.paidBy}</td>
-                    <td className="hidden md:table-cell text-xs">{e.paymentMethod || '—'}</td>
-                    <td className="hidden lg:table-cell"><span className="badge badge-gray">{e.allocationMethod}</span></td>
-                    <td className="text-right pr-2">
-                      <button onClick={() => setDeleteId(e._id)} className="p-1 sm:p-1.5 rounded hover:bg-red-50 text-gray-400 hover:text-red-600"><Trash2 className="w-3.5 h-3.5" /></button>
-                    </td>
+          <>
+            <div className="table-container">
+              <table className="table">
+                <thead>
+                  <tr>
+                    <th>Date</th>
+                    <th>Category</th>
+                    <th className="hidden sm:table-cell">Description</th>
+                    <th className="text-right sm:text-left">Amount</th>
+                    <th className="text-center sm:text-left">Paid By</th>
+                    <th className="hidden md:table-cell">Method</th>
+                    <th className="hidden lg:table-cell">Allocation</th>
+                    <th className="text-right pr-2">Actions</th>
                   </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
+                </thead>
+                <tbody>
+                  {paginatedExpenses.map(e => (
+                    <tr key={e._id}>
+                      <td className="whitespace-nowrap text-[11px] sm:text-xs">{formatDate(e.expenseDate)}</td>
+                      <td>
+                        <div>
+                          <span className="badge badge-blue text-[9px] sm:text-xs">{e.category}</span>
+                          <div className="sm:hidden text-[10px] text-gray-500 mt-0.5 truncate max-w-[120px]">
+                            {e.description}
+                          </div>
+                        </div>
+                      </td>
+                      <td className="hidden sm:table-cell text-xs">{e.description}</td>
+                      <td className="text-right sm:text-left font-semibold text-xs sm:text-sm">{formatCurrency(e.amount)}</td>
+                      <td className="text-center sm:text-left capitalize text-xs">{e.paidBy}</td>
+                      <td className="hidden md:table-cell text-xs">{e.paymentMethod || '—'}</td>
+                      <td className="hidden lg:table-cell"><span className="badge badge-gray">{e.allocationMethod}</span></td>
+                      <td className="text-right pr-2">
+                        <button onClick={() => setDeleteId(e._id)} className="p-1 sm:p-1.5 rounded hover:bg-red-50 text-gray-400 hover:text-red-600"><Trash2 className="w-3.5 h-3.5" /></button>
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+
+            <Pagination
+              page={page}
+              total={expenses.length}
+              pageSize={pageSize}
+              pageSizeOptions={[10, 25, 50, 100]}
+              itemName="expenses"
+              onPageChange={setPage}
+              onPageSizeChange={setPageSize}
+            />
+          </>
         )}
       </div>
 

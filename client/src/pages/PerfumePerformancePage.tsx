@@ -15,6 +15,7 @@ import { useAccountStore } from '../store/accountStore';
 import { formatCurrency, formatNumber, dateRangePresets, today } from '../lib/utils';
 import DateRangePicker from '../components/ui/DateRangePicker';
 import { LoadingSpinner, EmptyState } from '../components/ui/Feedback';
+import { Pagination, TableSummaryStatus } from '../components/ui/Pagination';
 import type { PerfumePerformance, PerfumePerformanceSummary, Category, DateRange } from '../types';
 
 type SortField = 'soldCount' | 'returnCount' | 'netSoldCount' | 'returnRate' | 'currentStock' | 'name' | 'salesRevenue';
@@ -34,6 +35,8 @@ const PerfumePerformancePage: React.FC = () => {
   const [sortField, setSortField] = useState<SortField>('soldCount');
   const [sortOrder, setSortOrder] = useState<SortOrder>('desc');
   const [selectedPerfume, setSelectedPerfume] = useState<PerfumePerformance | null>(null);
+  const [page, setPage] = useState(1);
+  const [pageSize, setPageSize] = useState(10);
 
   // Active account name
   const currentAccount = accounts.find(a => a._id === activeAccountId);
@@ -87,6 +90,10 @@ const PerfumePerformancePage: React.FC = () => {
       return sortOrder === 'asc' ? (valA as number) - (valB as number) : (valB as number) - (valA as number);
     });
   }, [rawPerfumes, sortField, sortOrder]);
+
+  const paginatedPerfumes = useMemo(() => {
+    return sortedPerfumes.slice((page - 1) * pageSize, page * pageSize);
+  }, [sortedPerfumes, page, pageSize]);
 
   const handleSort = (field: SortField) => {
     if (sortField === field) {
@@ -403,66 +410,77 @@ const PerfumePerformancePage: React.FC = () => {
       )}
 
       {/* Filter and Search Bar */}
-      <div className="card p-3 sm:p-3.5 flex flex-col sm:flex-row items-stretch sm:items-center justify-between gap-2.5 sm:gap-3 shadow-xs">
-        <div className="flex flex-col sm:flex-row items-stretch sm:items-center gap-2 sm:gap-2.5 flex-1">
-          {/* Search */}
-          <div className="relative flex-1">
-            <Search className="w-4 h-4 text-gray-400 absolute left-3 top-1/2 -translate-y-1/2" />
-            <input
-              type="text"
-              className="input pl-9 text-xs py-2 w-full"
-              placeholder="Search perfume name or SKU..."
-              value={search}
-              onChange={e => setSearch(e.target.value)}
-            />
-            {search && (
-              <button
-                onClick={() => setSearch('')}
-                className="absolute right-2.5 top-1/2 -translate-y-1/2 text-gray-400 hover:text-gray-600"
-              >
-                <X className="w-3.5 h-3.5" />
-              </button>
-            )}
+      <div className="card p-3 sm:p-3.5 space-y-3 shadow-xs">
+        <div className="flex flex-col sm:flex-row items-stretch sm:items-center justify-between gap-2.5 sm:gap-3">
+          <div className="flex flex-col sm:flex-row items-stretch sm:items-center gap-2 sm:gap-2.5 flex-1">
+            {/* Search */}
+            <div className="relative flex-1">
+              <Search className="w-4 h-4 text-gray-400 absolute left-3 top-1/2 -translate-y-1/2" />
+              <input
+                type="text"
+                className="input pl-9 text-xs py-2 w-full"
+                placeholder="Search perfume name or SKU..."
+                value={search}
+                onChange={e => { setSearch(e.target.value); setPage(1); }}
+              />
+              {search && (
+                <button
+                  onClick={() => { setSearch(''); setPage(1); }}
+                  className="absolute right-2.5 top-1/2 -translate-y-1/2 text-gray-400 hover:text-gray-600"
+                >
+                  <X className="w-3.5 h-3.5" />
+                </button>
+              )}
+            </div>
+
+            {/* Category Filter */}
+            <select
+              value={selectedCategory}
+              onChange={e => { setSelectedCategory(e.target.value); setPage(1); }}
+              className="select text-xs py-2 w-full sm:max-w-[180px]"
+            >
+              <option value="all">All Categories</option>
+              {categories.map(c => (
+                <option key={c._id} value={c._id}>{c.name}</option>
+              ))}
+            </select>
           </div>
 
-          {/* Category Filter */}
-          <select
-            value={selectedCategory}
-            onChange={e => setSelectedCategory(e.target.value)}
-            className="select text-xs py-2 w-full sm:max-w-[180px]"
-          >
-            <option value="all">All Categories</option>
-            {categories.map(c => (
-              <option key={c._id} value={c._id}>{c.name}</option>
-            ))}
-          </select>
+          {/* Sort Controls */}
+          <div className="flex items-center justify-between sm:justify-end gap-2">
+            <span className="text-xs text-gray-500 font-medium">Sort by:</span>
+            <select
+              value={sortField}
+              onChange={e => { setSortField(e.target.value as SortField); setPage(1); }}
+              className="select text-xs py-1.5 font-medium flex-1 sm:flex-none"
+            >
+              <option value="soldCount">Most Sold</option>
+              <option value="returnCount">Most Returns</option>
+              <option value="netSoldCount">Highest Net Sold</option>
+              <option value="returnRate">Highest Return Rate</option>
+              <option value="currentStock">Current Stock</option>
+              <option value="salesRevenue">Sales Revenue</option>
+              <option value="name">Perfume Name (A-Z)</option>
+            </select>
+
+            <button
+              onClick={() => { setSortOrder(prev => (prev === 'asc' ? 'desc' : 'asc')); setPage(1); }}
+              className="p-1.5 border border-gray-200 rounded-lg hover:bg-gray-50 text-gray-600 transition-colors flex-shrink-0"
+              title={`Toggle order: currently ${sortOrder.toUpperCase()}`}
+            >
+              <ArrowUpDown className="w-4 h-4" />
+            </button>
+          </div>
         </div>
 
-        {/* Sort Controls */}
-        <div className="flex items-center justify-between sm:justify-end gap-2">
-          <span className="text-xs text-gray-500 font-medium">Sort by:</span>
-          <select
-            value={sortField}
-            onChange={e => setSortField(e.target.value as SortField)}
-            className="select text-xs py-1.5 font-medium flex-1 sm:flex-none"
-          >
-            <option value="soldCount">Most Sold</option>
-            <option value="returnCount">Most Returns</option>
-            <option value="netSoldCount">Highest Net Sold</option>
-            <option value="returnRate">Highest Return Rate</option>
-            <option value="currentStock">Current Stock</option>
-            <option value="salesRevenue">Sales Revenue</option>
-            <option value="name">Perfume Name (A-Z)</option>
-          </select>
-
-          <button
-            onClick={() => setSortOrder(prev => (prev === 'asc' ? 'desc' : 'asc'))}
-            className="p-1.5 border border-gray-200 rounded-lg hover:bg-gray-50 text-gray-600 transition-colors flex-shrink-0"
-            title={`Toggle order: currently ${sortOrder.toUpperCase()}`}
-          >
-            <ArrowUpDown className="w-4 h-4" />
-          </button>
-        </div>
+        <TableSummaryStatus
+          start={(page - 1) * pageSize + 1}
+          end={Math.min(page * pageSize, sortedPerfumes.length)}
+          total={sortedPerfumes.length}
+          itemName="perfumes"
+          page={page}
+          totalPages={Math.ceil(sortedPerfumes.length / pageSize) || 1}
+        />
       </div>
 
       {/* Main Perfume Table */}
@@ -529,7 +547,7 @@ const PerfumePerformancePage: React.FC = () => {
                 </tr>
               </thead>
               <tbody className="divide-y divide-gray-100">
-                {sortedPerfumes.map((perfume) => {
+                {paginatedPerfumes.map((perfume) => {
                   const isOutOfStock = perfume.currentStock <= 0;
                   const isLowStock = perfume.currentStock > 0 && perfume.currentStock <= 5;
                   const returnRate = perfume.returnRate;
@@ -684,6 +702,15 @@ const PerfumePerformancePage: React.FC = () => {
             </table>
           </div>
         )}
+
+        <Pagination
+          page={page}
+          total={sortedPerfumes.length}
+          pageSize={pageSize}
+          onPageChange={setPage}
+          onPageSizeChange={(newSize) => { setPageSize(newSize); setPage(1); }}
+          itemName="perfumes"
+        />
       </div>
 
       {/* Perfume Detail Drawer / Modal */}

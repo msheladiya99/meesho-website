@@ -7,6 +7,8 @@ import { z } from 'zod';
 import { vendorsApi } from '../services/inventory.service';
 import Modal from '../components/ui/Modal';
 import { EmptyState, LoadingSpinner, ConfirmDialog } from '../components/ui/Feedback';
+import { Pagination, TableSummaryStatus } from '../components/ui/Pagination';
+import { Search } from 'lucide-react';
 import toast from 'react-hot-toast';
 import type { Vendor } from '../types';
 
@@ -27,9 +29,27 @@ const VendorsPage: React.FC = () => {
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [editingVendor, setEditingVendor] = useState<Vendor | null>(null);
   const [deleteId, setDeleteId] = useState<string | null>(null);
+  const [search, setSearch] = useState('');
+  const [page, setPage] = useState(1);
+  const [pageSize, setPageSize] = useState(10);
 
   const { data, isLoading } = useQuery({ queryKey: ['vendors'], queryFn: () => vendorsApi.list() });
-  const vendors: Vendor[] = data?.data?.data || [];
+  const rawVendors: Vendor[] = data?.data?.data || [];
+
+  const vendors = React.useMemo(() => {
+    if (!search.trim()) return rawVendors;
+    const q = search.toLowerCase().trim();
+    return rawVendors.filter(v =>
+      v.name?.toLowerCase().includes(q) ||
+      v.company?.toLowerCase().includes(q) ||
+      v.phone?.toLowerCase().includes(q) ||
+      v.email?.toLowerCase().includes(q)
+    );
+  }, [rawVendors, search]);
+
+  const paginatedVendors = React.useMemo(() => {
+    return vendors.slice((page - 1) * pageSize, page * pageSize);
+  }, [vendors, page, pageSize]);
 
   const { register, handleSubmit, reset, formState: { errors } } = useForm<FormData>({ resolver: zodResolver(schema) });
 
@@ -66,44 +86,77 @@ const VendorsPage: React.FC = () => {
         <button onClick={() => { setEditingVendor(null); reset(); setIsModalOpen(true); }} className="btn-primary"><Plus className="w-4 h-4" /> Add Vendor</button>
       </div>
 
-      <div className="card">
+      <div className="card p-3 sm:p-4 space-y-3">
+        <div className="relative max-w-sm">
+          <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-400" />
+          <input
+            className="input pl-9 text-xs sm:text-sm"
+            placeholder="Search vendors by name, company, phone..."
+            value={search}
+            onChange={e => { setSearch(e.target.value); setPage(1); }}
+          />
+        </div>
+
+        {vendors.length > 0 && (
+          <TableSummaryStatus
+            page={page}
+            total={vendors.length}
+            pageSize={pageSize}
+            itemName="vendors"
+          />
+        )}
+      </div>
+
+      <div className="card overflow-hidden">
         {isLoading ? <LoadingSpinner /> : vendors.length === 0 ? (
-          <EmptyState title="No vendors" description="Add suppliers you purchase perfume stock from." />
+          <EmptyState title="No vendors found" description={search ? "No vendors match your search." : "Add suppliers you purchase perfume stock from."} />
         ) : (
-          <div className="table-container">
-            <table className="table">
-              <thead>
-                <tr>
-                  <th>Vendor</th>
-                  <th className="hidden sm:table-cell">Company</th>
-                  <th>Phone</th>
-                  <th className="hidden md:table-cell">Email</th>
-                  <th className="hidden lg:table-cell">GSTIN</th>
-                  <th className="text-right pr-2">Actions</th>
-                </tr>
-              </thead>
-              <tbody>
-                {vendors.map(v => (
-                  <tr key={v._id}>
-                    <td className="font-medium">
-                      <div className="text-xs text-gray-900">{v.name}</div>
-                      {v.company && <div className="sm:hidden text-[10px] text-gray-400">{v.company}</div>}
-                    </td>
-                    <td className="hidden sm:table-cell text-xs">{v.company || '—'}</td>
-                    <td className="text-xs text-gray-700">{v.phone || '—'}</td>
-                    <td className="hidden md:table-cell text-xs text-gray-500">{v.email || '—'}</td>
-                    <td className="hidden lg:table-cell font-mono text-xs">{v.gstin || '—'}</td>
-                    <td className="text-right pr-2">
-                      <div className="flex items-center justify-end gap-1">
-                        <button onClick={() => openEdit(v)} className="p-1 sm:p-1.5 rounded hover:bg-gray-100 text-gray-400 hover:text-gray-700"><Edit2 className="w-3.5 h-3.5" /></button>
-                        <button onClick={() => setDeleteId(v._id)} className="p-1 sm:p-1.5 rounded hover:bg-red-50 text-gray-400 hover:text-red-600"><Trash2 className="w-3.5 h-3.5" /></button>
-                      </div>
-                    </td>
+          <>
+            <div className="table-container">
+              <table className="table">
+                <thead>
+                  <tr>
+                    <th>Vendor</th>
+                    <th className="hidden sm:table-cell">Company</th>
+                    <th>Phone</th>
+                    <th className="hidden md:table-cell">Email</th>
+                    <th className="hidden lg:table-cell">GSTIN</th>
+                    <th className="text-right pr-2">Actions</th>
                   </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
+                </thead>
+                <tbody>
+                  {paginatedVendors.map(v => (
+                    <tr key={v._id}>
+                      <td className="font-medium">
+                        <div className="text-xs text-gray-900">{v.name}</div>
+                        {v.company && <div className="sm:hidden text-[10px] text-gray-400">{v.company}</div>}
+                      </td>
+                      <td className="hidden sm:table-cell text-xs">{v.company || '—'}</td>
+                      <td className="text-xs text-gray-700">{v.phone || '—'}</td>
+                      <td className="hidden md:table-cell text-xs text-gray-500">{v.email || '—'}</td>
+                      <td className="hidden lg:table-cell font-mono text-xs">{v.gstin || '—'}</td>
+                      <td className="text-right pr-2">
+                        <div className="flex items-center justify-end gap-1">
+                          <button onClick={() => openEdit(v)} className="p-1 sm:p-1.5 rounded hover:bg-gray-100 text-gray-400 hover:text-gray-700"><Edit2 className="w-3.5 h-3.5" /></button>
+                          <button onClick={() => setDeleteId(v._id)} className="p-1 sm:p-1.5 rounded hover:bg-red-50 text-gray-400 hover:text-red-600"><Trash2 className="w-3.5 h-3.5" /></button>
+                        </div>
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+
+            <Pagination
+              page={page}
+              total={vendors.length}
+              pageSize={pageSize}
+              pageSizeOptions={[10, 25, 50, 100]}
+              itemName="vendors"
+              onPageChange={setPage}
+              onPageSizeChange={setPageSize}
+            />
+          </>
         )}
       </div>
 

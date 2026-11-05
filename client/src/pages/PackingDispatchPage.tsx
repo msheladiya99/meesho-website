@@ -1,4 +1,4 @@
-import React, { useState, useRef, useEffect } from 'react';
+import React, { useState, useRef, useEffect, useMemo } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import {
   QrCode, Camera, CheckCircle2, AlertCircle, PackageCheck, Truck,
@@ -13,6 +13,7 @@ import { formatCurrency, formatDate, paiseToRupees, rupeesToPaise } from '../lib
 import { CameraScannerModal } from '../components/ui/CameraScannerModal';
 import { PrintableQrLabel } from '../components/ui/PrintableQrLabel';
 import { LoadingSpinner, EmptyState } from '../components/ui/Feedback';
+import { Pagination, TableSummaryStatus } from '../components/ui/Pagination';
 import Modal from '../components/ui/Modal';
 import toast from 'react-hot-toast';
 import type { Order, PackingRecord, Product, Category } from '../types';
@@ -59,6 +60,8 @@ export const PackingDispatchPage: React.FC = () => {
   // Table filter state
   const [packingFilter, setPackingFilter] = useState<'pending' | 'partially_packed' | 'packed' | 'dispatched'>('pending');
   const [orderSearch, setOrderSearch] = useState('');
+  const [page, setPage] = useState(1);
+  const [pageSize, setPageSize] = useState(10);
 
   const inputRef = useRef<HTMLInputElement | null>(null);
 
@@ -92,6 +95,10 @@ export const PackingDispatchPage: React.FC = () => {
     }),
   });
   const filteredOrders: Order[] = ordersData?.data?.data || [];
+
+  const paginatedOrders = useMemo(() => {
+    return filteredOrders.slice((page - 1) * pageSize, page * pageSize);
+  }, [filteredOrders, page, pageSize]);
 
   // Fetch products for quick order creation (scoped to selected GST account's available stock)
   const currentTargetAccount = newOrderAccountId && newOrderAccountId !== 'all' ? newOrderAccountId : (activeAccountId !== 'all' ? activeAccountId : undefined);
@@ -753,7 +760,7 @@ export const PackingDispatchPage: React.FC = () => {
             {(['pending', 'partially_packed', 'packed', 'dispatched'] as const).map((tab) => (
               <button
                 key={tab}
-                onClick={() => setPackingFilter(tab)}
+                onClick={() => { setPackingFilter(tab); setPage(1); }}
                 className={`px-3 py-1.5 rounded-lg text-xs font-semibold capitalize transition-all whitespace-nowrap ${
                   packingFilter === tab
                     ? 'bg-primary-600 text-white shadow-sm'
@@ -771,11 +778,20 @@ export const PackingDispatchPage: React.FC = () => {
               type="text"
               placeholder="Search Meesho ID, SKU, label..."
               value={orderSearch}
-              onChange={(e) => setOrderSearch(e.target.value)}
+              onChange={(e) => { setOrderSearch(e.target.value); setPage(1); }}
               className="input pl-8 py-1.5 text-xs w-full"
             />
           </div>
         </div>
+
+        <TableSummaryStatus
+          start={(page - 1) * pageSize + 1}
+          end={Math.min(page * pageSize, filteredOrders.length)}
+          total={filteredOrders.length}
+          itemName="orders"
+          page={page}
+          totalPages={Math.ceil(filteredOrders.length / pageSize) || 1}
+        />
 
         {/* Table Content */}
         {ordersLoading ? (
@@ -803,7 +819,7 @@ export const PackingDispatchPage: React.FC = () => {
                 </tr>
               </thead>
               <tbody>
-                {filteredOrders.map((order) => {
+                {paginatedOrders.map((order) => {
                   const packed = order.packedQuantity || 0;
                   const remaining = Math.max(0, order.quantity - packed);
                   const prod = typeof order.product === 'object' ? order.product : null;
@@ -910,6 +926,15 @@ export const PackingDispatchPage: React.FC = () => {
             </table>
           </div>
         )}
+
+        <Pagination
+          page={page}
+          total={filteredOrders.length}
+          pageSize={pageSize}
+          onPageChange={setPage}
+          onPageSizeChange={(newSize) => { setPageSize(newSize); setPage(1); }}
+          itemName="orders"
+        />
       </div>
 
       {/* Dispatch Modal */}

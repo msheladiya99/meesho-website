@@ -29,6 +29,7 @@ import { formatCurrency, formatDate, formatDateTime, dateRangePresets } from '..
 import DateRangePicker from '../components/ui/DateRangePicker';
 import Modal from '../components/ui/Modal';
 import { LoadingSpinner, EmptyState } from '../components/ui/Feedback';
+import { Pagination, TableSummaryStatus } from '../components/ui/Pagination';
 import type {
   ChargeCalculationType,
   HandlingCalculationType,
@@ -216,7 +217,7 @@ const CustomerReturnChargesPage: React.FC = () => {
   const [recordsStatus, setRecordsStatus] = useState<string>('all');
   const [recordsSearch, setRecordsSearch] = useState<string>('');
   const [recordsPage, setRecordsPage] = useState<number>(1);
-  const recordsLimit = 25;
+  const [recordsLimit, setRecordsLimit] = useState<number>(25);
 
   const recordsParams = {
     accountId: activeAccountId === 'all' ? undefined : activeAccountId,
@@ -953,6 +954,15 @@ const CustomerReturnChargesPage: React.FC = () => {
                 className="input pl-9 text-xs py-1.5 h-9 w-full"
               />
             </div>
+
+            <TableSummaryStatus
+              start={(recordsPage - 1) * recordsLimit + 1}
+              end={Math.min(recordsPage * recordsLimit, recordsTotal)}
+              total={recordsTotal}
+              itemName="records"
+              page={recordsPage}
+              totalPages={recordsTotalPages}
+            />
           </div>
 
           {/* Records Table */}
@@ -1058,33 +1068,17 @@ const CustomerReturnChargesPage: React.FC = () => {
             )}
 
             {/* Pagination Controls */}
-            {recordsTotal > recordsLimit && (
-              <div className="flex items-center justify-between px-4 py-3 border-t border-gray-100 bg-gray-50/50 text-xs text-gray-500">
-                <span>
-                  Showing {(recordsPage - 1) * recordsLimit + 1}–
-                  {Math.min(recordsPage * recordsLimit, recordsTotal)} of {recordsTotal}
-                </span>
-                <div className="flex items-center gap-2">
-                  <button
-                    onClick={() => setRecordsPage((p) => Math.max(1, p - 1))}
-                    disabled={recordsPage === 1}
-                    className="btn btn-secondary py-1 px-2.5 text-xs disabled:opacity-40"
-                  >
-                    Previous
-                  </button>
-                  <span className="font-semibold text-gray-700">
-                    {recordsPage} / {recordsTotalPages}
-                  </span>
-                  <button
-                    onClick={() => setRecordsPage((p) => Math.min(recordsTotalPages, p + 1))}
-                    disabled={recordsPage === recordsTotalPages}
-                    className="btn btn-secondary py-1 px-2.5 text-xs disabled:opacity-40"
-                  >
-                    Next
-                  </button>
-                </div>
-              </div>
-            )}
+            <Pagination
+              page={recordsPage}
+              total={recordsTotal}
+              pageSize={recordsLimit}
+              onPageChange={setRecordsPage}
+              onPageSizeChange={(newSize) => {
+                setRecordsLimit(newSize);
+                setRecordsPage(1);
+              }}
+              itemName="records"
+            />
           </div>
         </div>
       )}

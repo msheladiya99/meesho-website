@@ -1,4 +1,4 @@
-import React, { useState, useRef, useEffect } from 'react';
+import React, { useState, useRef, useEffect, useMemo } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import {
   RotateCcw, QrCode, Camera, CheckCircle2, AlertTriangle, ShieldAlert,
@@ -12,6 +12,7 @@ import { formatCurrency, formatDate, paiseToRupees, rupeesToPaise } from '../lib
 import { CameraScannerModal } from '../components/ui/CameraScannerModal';
 import { MeeshoImportModal } from '../components/ui/MeeshoImportModal';
 import { LoadingSpinner, EmptyState } from '../components/ui/Feedback';
+import { Pagination, TableSummaryStatus } from '../components/ui/Pagination';
 import Modal from '../components/ui/Modal';
 import toast from 'react-hot-toast';
 import type { ReturnOrder, Product, ScanException } from '../types';
@@ -58,6 +59,8 @@ export const ReturnsPage: React.FC = () => {
 
   // Search in tables
   const [searchQuery, setSearchQuery] = useState('');
+  const [page, setPage] = useState(1);
+  const [pageSize, setPageSize] = useState(10);
 
   // Focus scan input
   useEffect(() => {
@@ -238,6 +241,18 @@ export const ReturnsPage: React.FC = () => {
 
   const tableReturns: ReturnOrder[] = registersData?.data?.data || [];
   const tableExceptions: ScanException[] = exceptionsData?.data?.data || [];
+
+  const paginatedReturns = useMemo(() => {
+    return tableReturns.slice((page - 1) * pageSize, page * pageSize);
+  }, [tableReturns, page, pageSize]);
+
+  const paginatedExceptions = useMemo(() => {
+    return tableExceptions.slice((page - 1) * pageSize, page * pageSize);
+  }, [tableExceptions, page, pageSize]);
+
+  const paginatedDamaged = useMemo(() => {
+    return damagedProducts.slice((page - 1) * pageSize, page * pageSize);
+  }, [damagedProducts, page, pageSize]);
 
   return (
     <div className="space-y-6">
@@ -719,7 +734,7 @@ export const ReturnsPage: React.FC = () => {
             ].map((tab) => (
               <button
                 key={tab.id}
-                onClick={() => setActiveTab(tab.id as any)}
+                onClick={() => { setActiveTab(tab.id as any); setPage(1); }}
                 className={`px-3 py-1.5 rounded-lg text-xs font-semibold transition-all whitespace-nowrap ${
                   activeTab === tab.id
                     ? 'bg-rose-600 text-white shadow-sm'
@@ -737,11 +752,47 @@ export const ReturnsPage: React.FC = () => {
               type="text"
               placeholder="Search ID, Meesho Order, SKU..."
               value={searchQuery}
-              onChange={(e) => setSearchQuery(e.target.value)}
+              onChange={(e) => { setSearchQuery(e.target.value); setPage(1); }}
               className="input pl-8 py-1.5 text-xs w-full"
             />
           </div>
         </div>
+
+        <TableSummaryStatus
+          start={(page - 1) * pageSize + 1}
+          end={Math.min(
+            page * pageSize,
+            activeTab === 'damaged_stock'
+              ? damagedProducts.length
+              : activeTab === 'exceptions'
+              ? tableExceptions.length
+              : tableReturns.length
+          )}
+          total={
+            activeTab === 'damaged_stock'
+              ? damagedProducts.length
+              : activeTab === 'exceptions'
+              ? tableExceptions.length
+              : tableReturns.length
+          }
+          itemName={
+            activeTab === 'damaged_stock'
+              ? 'damaged products'
+              : activeTab === 'exceptions'
+              ? 'exceptions'
+              : 'returns'
+          }
+          page={page}
+          totalPages={
+            Math.ceil(
+              (activeTab === 'damaged_stock'
+                ? damagedProducts.length
+                : activeTab === 'exceptions'
+                ? tableExceptions.length
+                : tableReturns.length) / pageSize
+            ) || 1
+          }
+        />
 
         {/* Tab 1: Damaged Stock Management */}
         {activeTab === 'damaged_stock' ? (
@@ -769,7 +820,7 @@ export const ReturnsPage: React.FC = () => {
                     </tr>
                   </thead>
                   <tbody>
-                    {damagedProducts.map((p) => (
+                    {paginatedDamaged.map((p) => (
                       <tr key={p._id}>
                         <td className="font-medium text-gray-900">{p.name}</td>
                         <td className="font-mono text-xs">{p.sku}</td>
@@ -793,6 +844,14 @@ export const ReturnsPage: React.FC = () => {
                 </table>
               </div>
             )}
+            <Pagination
+              page={page}
+              total={damagedProducts.length}
+              pageSize={pageSize}
+              onPageChange={setPage}
+              onPageSizeChange={(newSize) => { setPageSize(newSize); setPage(1); }}
+              itemName="damaged products"
+            />
           </div>
         ) : activeTab === 'exceptions' ? (
           /* Tab: Scan Exception Log */
@@ -801,39 +860,49 @@ export const ReturnsPage: React.FC = () => {
           ) : tableExceptions.length === 0 ? (
             <EmptyState title="No exceptions logged" description="Scan exceptions and warnings will appear here." icon={<ShieldAlert className="w-10 h-10 text-emerald-500" />} />
           ) : (
-            <div className="table-container">
-              <table className="table">
-                <thead>
-                  <tr>
-                    <th>Timestamp</th>
-                    <th>Module</th>
-                    <th>Exception Type</th>
-                    <th>Scanned Identifier</th>
-                    <th>Reason / Details</th>
-                    <th>Operator</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {tableExceptions.map((exc) => (
-                    <tr key={exc._id}>
-                      <td className="whitespace-nowrap">{formatDate(exc.createdAt)}</td>
-                      <td>
-                        <span className="badge badge-gray font-mono uppercase text-[10px]">
-                          {exc.module}
-                        </span>
-                      </td>
-                      <td>
-                        <span className="badge badge-red font-semibold">
-                          {exc.exceptionType.replace('_', ' ')}
-                        </span>
-                      </td>
-                      <td className="font-mono text-xs font-semibold text-gray-800">{exc.scannedCode}</td>
-                      <td className="text-gray-600 text-xs">{exc.reason || exc.details || exc.attemptedAction}</td>
-                      <td className="text-gray-500 text-xs">{exc.operatorName || (typeof exc.operator === 'object' ? (exc.operator as any)?.name : exc.operator) || 'System'}</td>
+            <div className="space-y-4">
+              <div className="table-container">
+                <table className="table">
+                  <thead>
+                    <tr>
+                      <th>Timestamp</th>
+                      <th>Module</th>
+                      <th>Exception Type</th>
+                      <th>Scanned Identifier</th>
+                      <th>Reason / Details</th>
+                      <th>Operator</th>
                     </tr>
-                  ))}
-                </tbody>
-              </table>
+                  </thead>
+                  <tbody>
+                    {paginatedExceptions.map((exc) => (
+                      <tr key={exc._id}>
+                        <td className="whitespace-nowrap">{formatDate(exc.createdAt)}</td>
+                        <td>
+                          <span className="badge badge-gray font-mono uppercase text-[10px]">
+                            {exc.module}
+                          </span>
+                        </td>
+                        <td>
+                          <span className="badge badge-red font-semibold">
+                            {exc.exceptionType.replace('_', ' ')}
+                          </span>
+                        </td>
+                        <td className="font-mono text-xs font-semibold text-gray-800">{exc.scannedCode}</td>
+                        <td className="text-gray-600 text-xs">{exc.reason || exc.details || exc.attemptedAction}</td>
+                        <td className="text-gray-500 text-xs">{exc.operatorName || (typeof exc.operator === 'object' ? (exc.operator as any)?.name : exc.operator) || 'System'}</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+              <Pagination
+                page={page}
+                total={tableExceptions.length}
+                pageSize={pageSize}
+                onPageChange={setPage}
+                onPageSizeChange={(newSize) => { setPageSize(newSize); setPage(1); }}
+                itemName="exceptions"
+              />
             </div>
           )
         ) : (
@@ -843,81 +912,91 @@ export const ReturnsPage: React.FC = () => {
           ) : tableReturns.length === 0 ? (
             <EmptyState title="No records found" description="Matching transactions will appear here." icon={<RotateCcw className="w-10 h-10 text-gray-300" />} />
           ) : (
-            <div className="table-container">
-              <table className="table">
-                <thead>
-                  <tr>
-                    <th>Date</th>
-                    <th className="hidden lg:table-cell">Transaction ID</th>
-                    <th className="hidden sm:table-cell">Type</th>
-                    <th className="hidden md:table-cell">Meesho ID</th>
-                    <th>Product</th>
-                    <th className="text-center sm:text-left">Qty</th>
-                    <th className="hidden sm:table-cell text-emerald-700">Good</th>
-                    <th className="hidden md:table-cell text-red-600">Damaged</th>
-                    <th className="hidden sm:table-cell text-amber-700">Pending</th>
-                    <th className="text-center sm:text-left">Status</th>
-                    <th className="text-right pr-2">Actions</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {tableReturns.map((ret: any) => {
-                    const prod = typeof ret.product === 'object' ? ret.product : null;
-                    return (
-                      <tr key={ret._id}>
-                        <td className="whitespace-nowrap text-[11px] sm:text-xs">{formatDate(ret.returnDate || ret.createdAt)}</td>
-                        <td className="hidden lg:table-cell font-mono text-xs font-semibold text-gray-800">{ret.returnTransactionId || ret.transactionId || '—'}</td>
-                        <td className="hidden sm:table-cell">
-                          <span className={`badge ${ret.returnType === 'rto_return' ? 'badge-yellow' : 'badge-purple'}`}>
-                            {ret.returnType === 'rto_return' ? 'RTO' : 'Customer'}
-                          </span>
-                        </td>
-                        <td className="hidden md:table-cell font-mono text-xs font-bold">{ret.meeshoOrderId || '—'}</td>
-                        <td>
-                          <div>
-                            <div className="font-medium text-xs text-gray-900 truncate max-w-[130px] sm:max-w-none">{(prod as any)?.name || '—'}</div>
-                            <div className="sm:hidden flex items-center gap-1 mt-0.5 text-[10px] text-gray-400 font-mono">
-                              <span className={`badge ${ret.returnType === 'rto_return' ? 'badge-yellow' : 'badge-purple'} text-[9px] px-1 py-0`}>
-                                {ret.returnType === 'rto_return' ? 'RTO' : 'Cust'}
-                              </span>
-                              {ret.meeshoOrderId && <span className="truncate max-w-[80px]">{ret.meeshoOrderId}</span>}
+            <div className="space-y-4">
+              <div className="table-container">
+                <table className="table">
+                  <thead>
+                    <tr>
+                      <th>Date</th>
+                      <th className="hidden lg:table-cell">Transaction ID</th>
+                      <th className="hidden sm:table-cell">Type</th>
+                      <th className="hidden md:table-cell">Meesho ID</th>
+                      <th>Product</th>
+                      <th className="text-center sm:text-left">Qty</th>
+                      <th className="hidden sm:table-cell text-emerald-700">Good</th>
+                      <th className="hidden md:table-cell text-red-600">Damaged</th>
+                      <th className="hidden sm:table-cell text-amber-700">Pending</th>
+                      <th className="text-center sm:text-left">Status</th>
+                      <th className="text-right pr-2">Actions</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {paginatedReturns.map((ret: any) => {
+                      const prod = typeof ret.product === 'object' ? ret.product : null;
+                      return (
+                        <tr key={ret._id}>
+                          <td className="whitespace-nowrap text-[11px] sm:text-xs">{formatDate(ret.returnDate || ret.createdAt)}</td>
+                          <td className="hidden lg:table-cell font-mono text-xs font-semibold text-gray-800">{ret.returnTransactionId || ret.transactionId || '—'}</td>
+                          <td className="hidden sm:table-cell">
+                            <span className={`badge ${ret.returnType === 'rto_return' ? 'badge-yellow' : 'badge-purple'}`}>
+                              {ret.returnType === 'rto_return' ? 'RTO' : 'Customer'}
+                            </span>
+                          </td>
+                          <td className="hidden md:table-cell font-mono text-xs font-bold">{ret.meeshoOrderId || '—'}</td>
+                          <td>
+                            <div>
+                              <div className="font-medium text-xs text-gray-900 truncate max-w-[130px] sm:max-w-none">{(prod as any)?.name || '—'}</div>
+                              <div className="sm:hidden flex items-center gap-1 mt-0.5 text-[10px] text-gray-400 font-mono">
+                                <span className={`badge ${ret.returnType === 'rto_return' ? 'badge-yellow' : 'badge-purple'} text-[9px] px-1 py-0`}>
+                                  {ret.returnType === 'rto_return' ? 'RTO' : 'Cust'}
+                                </span>
+                                {ret.meeshoOrderId && <span className="truncate max-w-[80px]">{ret.meeshoOrderId}</span>}
+                              </div>
                             </div>
-                          </div>
-                        </td>
-                        <td className="text-center sm:text-left font-bold text-xs">{ret.returnedQuantity}</td>
-                        <td className="hidden sm:table-cell text-emerald-700 font-semibold">{ret.goodQuantity || 0}</td>
-                        <td className="hidden md:table-cell text-red-600 font-semibold">{ret.damagedQuantity || 0}</td>
-                        <td className="hidden sm:table-cell text-amber-700 font-semibold">{ret.pendingInspectionQuantity || 0}</td>
-                        <td className="text-center sm:text-left">
-                          <span className={`badge ${
-                            ret.status === 'stock_updated' ? 'badge-green' :
-                            ret.status === 'inspection_pending' ? 'badge-yellow' :
-                            'badge-gray'
-                          }`}>
-                            {(ret.status || 'processed').replace('_', ' ')}
-                          </span>
-                        </td>
-                        <td>
-                          <div className="flex items-center gap-1">
-                            {ret.pendingInspectionQuantity > 0 && (
-                              <button
-                                onClick={() => {
-                                  setInspectModalReturn(ret);
-                                  setInspectGoodQty(ret.pendingInspectionQuantity);
-                                  setInspectDmgQty(0);
-                                }}
-                                className="px-2 py-1 rounded bg-amber-50 text-amber-800 hover:bg-amber-100 text-xs font-medium"
-                              >
-                                Inspect
-                              </button>
-                            )}
-                          </div>
-                        </td>
-                      </tr>
-                    );
-                  })}
-                </tbody>
-              </table>
+                          </td>
+                          <td className="text-center sm:text-left font-bold text-xs">{ret.returnedQuantity}</td>
+                          <td className="hidden sm:table-cell text-emerald-700 font-semibold">{ret.goodQuantity || 0}</td>
+                          <td className="hidden md:table-cell text-red-600 font-semibold">{ret.damagedQuantity || 0}</td>
+                          <td className="hidden sm:table-cell text-amber-700 font-semibold">{ret.pendingInspectionQuantity || 0}</td>
+                          <td className="text-center sm:text-left">
+                            <span className={`badge ${
+                              ret.status === 'stock_updated' ? 'badge-green' :
+                              ret.status === 'inspection_pending' ? 'badge-yellow' :
+                              'badge-gray'
+                            }`}>
+                              {(ret.status || 'processed').replace('_', ' ')}
+                            </span>
+                          </td>
+                          <td>
+                            <div className="flex items-center gap-1">
+                              {ret.pendingInspectionQuantity > 0 && (
+                                <button
+                                  onClick={() => {
+                                    setInspectModalReturn(ret);
+                                    setInspectGoodQty(ret.pendingInspectionQuantity);
+                                    setInspectDmgQty(0);
+                                  }}
+                                  className="px-2 py-1 rounded bg-amber-50 text-amber-800 hover:bg-amber-100 text-xs font-medium"
+                                >
+                                  Inspect
+                                </button>
+                              )}
+                            </div>
+                          </td>
+                        </tr>
+                      );
+                    })}
+                  </tbody>
+                </table>
+              </div>
+              <Pagination
+                page={page}
+                total={tableReturns.length}
+                pageSize={pageSize}
+                onPageChange={setPage}
+                onPageSizeChange={(newSize) => { setPageSize(newSize); setPage(1); }}
+                itemName="returns"
+              />
             </div>
           )
         )}

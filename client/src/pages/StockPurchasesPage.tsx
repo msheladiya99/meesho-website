@@ -11,6 +11,7 @@ import { formatCurrency, formatDate, rupeesToPaise, paiseToRupees, dateRangePres
 import DateRangePicker from '../components/ui/DateRangePicker';
 import Modal from '../components/ui/Modal';
 import { EmptyState, LoadingSpinner, ConfirmDialog } from '../components/ui/Feedback';
+import { Pagination, TableSummaryStatus } from '../components/ui/Pagination';
 import toast from 'react-hot-toast';
 import type { DateRange, StockPurchase, Vendor } from '../types';
 
@@ -33,6 +34,8 @@ const StockPurchasesPage: React.FC = () => {
   const [dateRange, setDateRange] = useState<DateRange>(dateRangePresets().thisMonth);
   const [search, setSearch] = useState('');
   const [paymentFilter, setPaymentFilter] = useState<string>('all');
+  const [page, setPage] = useState(1);
+  const [pageSize, setPageSize] = useState(10);
   const [viewingPurchase, setViewingPurchase] = useState<StockPurchase | null>(null);
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [editingPurchase, setEditingPurchase] = useState<StockPurchase | null>(null);
@@ -82,6 +85,10 @@ const StockPurchasesPage: React.FC = () => {
       return matchesSearch && matchesPayment;
     });
   }, [rawPurchases, search, paymentFilter, vendors]);
+
+  const paginatedPurchases = useMemo(() => {
+    return purchases.slice((page - 1) * pageSize, page * pageSize);
+  }, [purchases, page, pageSize]);
 
   // Overall Statistics
   const totalSpend = useMemo(() => rawPurchases.reduce((s, p) => s + (p.totalAmount || 0), 0), [rawPurchases]);
@@ -325,34 +332,46 @@ const StockPurchasesPage: React.FC = () => {
       </div>
 
       {/* Filter and Date Bar */}
-      <div className="card p-4 flex flex-col md:flex-row gap-3 items-stretch md:items-center justify-between">
-        <div className="flex flex-1 flex-col sm:flex-row gap-3 max-w-xl">
-          <div className="relative flex-1">
-            <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-400" />
-            <input
-              type="text"
-              placeholder="Search by vendor, invoice #..."
-              value={search}
-              onChange={e => setSearch(e.target.value)}
-              className="input pl-9"
-            />
+      <div className="card p-4 space-y-3">
+        <div className="flex flex-col md:flex-row gap-3 items-stretch md:items-center justify-between">
+          <div className="flex flex-1 flex-col sm:flex-row gap-3 max-w-xl">
+            <div className="relative flex-1">
+              <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-400" />
+              <input
+                type="text"
+                placeholder="Search by vendor, invoice #..."
+                value={search}
+                onChange={e => { setSearch(e.target.value); setPage(1); }}
+                className="input pl-9"
+              />
+            </div>
+
+            <select
+              value={paymentFilter}
+              onChange={e => { setPaymentFilter(e.target.value); setPage(1); }}
+              className="select sm:w-40"
+            >
+              <option value="all">All Payments</option>
+              <option value="paid">Paid</option>
+              <option value="partial">Partial</option>
+              <option value="unpaid">Unpaid</option>
+            </select>
           </div>
 
-          <select
-            value={paymentFilter}
-            onChange={e => setPaymentFilter(e.target.value)}
-            className="select sm:w-40"
-          >
-            <option value="all">All Payments</option>
-            <option value="paid">Paid</option>
-            <option value="partial">Partial</option>
-            <option value="unpaid">Unpaid</option>
-          </select>
+          <div className="shrink-0">
+            <DateRangePicker value={dateRange} onChange={r => { setDateRange(r); setPage(1); }} />
+          </div>
         </div>
 
-        <div className="shrink-0">
-          <DateRangePicker value={dateRange} onChange={setDateRange} />
-        </div>
+        {/* Filter Summary Status */}
+        {purchases.length > 0 && (
+          <TableSummaryStatus
+            page={page}
+            total={purchases.length}
+            pageSize={pageSize}
+            itemName="purchases"
+          />
+        )}
       </div>
 
       {/* Main Table */}
@@ -371,7 +390,8 @@ const StockPurchasesPage: React.FC = () => {
             }
           />
         ) : (
-          <div className="table-container">
+          <>
+            <div className="table-container">
             <table className="table">
               <thead>
                 <tr>
@@ -386,7 +406,7 @@ const StockPurchasesPage: React.FC = () => {
                 </tr>
               </thead>
               <tbody>
-                {purchases.map(p => {
+                {paginatedPurchases.map(p => {
                   const vend = typeof p.vendor === 'object' ? p.vendor : vendors.find(v => v._id === p.vendor);
                   const rowQty = p.totalQuantity || (Array.isArray(p.items) ? p.items.reduce((acc: number, it: any) => acc + (it.quantityPurchased || 0), 0) : 0);
                   const rowUnitPrice = p.purchasePricePerUnit !== undefined && p.purchasePricePerUnit > 0
@@ -480,6 +500,17 @@ const StockPurchasesPage: React.FC = () => {
               </tbody>
             </table>
           </div>
+
+          <Pagination
+            page={page}
+            total={purchases.length}
+            pageSize={pageSize}
+            pageSizeOptions={[10, 25, 50, 100]}
+            itemName="purchases"
+            onPageChange={setPage}
+            onPageSizeChange={setPageSize}
+          />
+        </>
         )}
       </div>
 

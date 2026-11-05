@@ -13,6 +13,7 @@ import Modal from '../components/ui/Modal';
 import { EmptyState, LoadingSpinner, ConfirmDialog } from '../components/ui/Feedback';
 import { PrintableQrLabel } from '../components/ui/PrintableQrLabel';
 import { MeeshoImportModal } from '../components/ui/MeeshoImportModal';
+import { Pagination, TableSummaryStatus } from '../components/ui/Pagination';
 import toast from 'react-hot-toast';
 import type { DateRange, Order, Product, Category } from '../types';
 
@@ -38,6 +39,8 @@ const OrdersPage: React.FC = () => {
   const qc = useQueryClient();
   const [dateRange, setDateRange] = useState<DateRange>(dateRangePresets().thisMonth);
   const [search, setSearch] = useState('');
+  const [page, setPage] = useState(1);
+  const [pageSize, setPageSize] = useState(10);
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [editingOrder, setEditingOrder] = useState<Order | null>(null);
   const [deleteId, setDeleteId] = useState<string | null>(null);
@@ -73,6 +76,10 @@ const OrdersPage: React.FC = () => {
   const products = productsData?.data?.data || [];
   const categories: Category[] = categoriesData?.data?.data || [];
   const totalSales = orders.reduce((sum: number, o: Order) => sum + o.grossAmount, 0);
+
+  const paginatedOrders = React.useMemo(() => {
+    return orders.slice((page - 1) * pageSize, page * pageSize);
+  }, [orders, page, pageSize]);
 
   const filteredProducts = React.useMemo(() => {
     if (!orderCategory) return products;
@@ -262,21 +269,32 @@ const OrdersPage: React.FC = () => {
       </div>
 
       {/* Filters */}
-      <div className="card p-4 flex flex-col sm:flex-row gap-3">
-        <div className="relative flex-1 max-w-xs">
-          <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-400" />
-          <input
-            className="input pl-9"
-            placeholder="Search order ID or product..."
-            value={search}
-            onChange={(e) => setSearch(e.target.value)}
-          />
+      <div className="card p-4 space-y-3">
+        <div className="flex flex-col sm:flex-row gap-3">
+          <div className="relative flex-1 max-w-xs">
+            <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-400" />
+            <input
+              className="input pl-9"
+              placeholder="Search order ID or product..."
+              value={search}
+              onChange={(e) => { setSearch(e.target.value); setPage(1); }}
+            />
+          </div>
+          <DateRangePicker value={dateRange} onChange={(r) => { setDateRange(r); setPage(1); }} />
         </div>
-        <DateRangePicker value={dateRange} onChange={setDateRange} />
+
+        {orders.length > 0 && (
+          <TableSummaryStatus
+            page={page}
+            total={orders.length}
+            pageSize={pageSize}
+            itemName="orders"
+          />
+        )}
       </div>
 
       {/* Table */}
-      <div className="card">
+      <div className="card overflow-hidden">
         {isLoading ? (
           <LoadingSpinner />
         ) : orders.length === 0 ? (
@@ -287,23 +305,24 @@ const OrdersPage: React.FC = () => {
             action={<button onClick={openAdd} className="btn-primary">Add Order</button>}
           />
         ) : (
-          <div className="table-container">
-            <table className="table">
-              <thead>
-                <tr>
-                  <th>Date</th>
-                  <th className="hidden md:table-cell">Meesho ID</th>
-                  <th className="max-w-[220px]">Product</th>
-                  <th className="hidden sm:table-cell">SKU</th>
-                  <th className="hidden md:table-cell">Price</th>
-                  <th className="text-center sm:text-left">Qty</th>
-                  <th className="text-right sm:text-left">Amount</th>
-                  <th className="text-center sm:text-left">Status</th>
-                  <th className="text-right pr-2">Actions</th>
-                </tr>
-              </thead>
-              <tbody>
-                {orders.map((order: Order) => {
+          <>
+            <div className="table-container">
+              <table className="table">
+                <thead>
+                  <tr>
+                    <th>Date</th>
+                    <th className="hidden md:table-cell">Meesho ID</th>
+                    <th className="max-w-[220px]">Product</th>
+                    <th className="hidden sm:table-cell">SKU</th>
+                    <th className="hidden md:table-cell">Price</th>
+                    <th className="text-center sm:text-left">Qty</th>
+                    <th className="text-right sm:text-left">Amount</th>
+                    <th className="text-center sm:text-left">Status</th>
+                    <th className="text-right pr-2">Actions</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {paginatedOrders.map((order: Order) => {
                   const prod = typeof order.product === 'object' ? order.product : null;
                   return (
                     <tr key={order._id}>
@@ -379,6 +398,17 @@ const OrdersPage: React.FC = () => {
               </tbody>
             </table>
           </div>
+
+          <Pagination
+            page={page}
+            total={orders.length}
+            pageSize={pageSize}
+            pageSizeOptions={[10, 25, 50, 100]}
+            itemName="orders"
+            onPageChange={setPage}
+            onPageSizeChange={setPageSize}
+          />
+        </>
         )}
       </div>
 

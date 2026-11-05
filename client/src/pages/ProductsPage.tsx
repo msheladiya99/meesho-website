@@ -12,6 +12,7 @@ import { useAccountStore } from '../store/accountStore';
 import { formatCurrency, paiseToRupees, rupeesToPaise } from '../lib/utils';
 import Modal from '../components/ui/Modal';
 import { EmptyState, LoadingSpinner, ConfirmDialog } from '../components/ui/Feedback';
+import { Pagination, TableSummaryStatus } from '../components/ui/Pagination';
 import toast from 'react-hot-toast';
 import type { Product, Category } from '../types';
 
@@ -81,6 +82,10 @@ const ProductsPage: React.FC = () => {
   const [productSearch, setProductSearch] = useState('');
   const [selectedCategoryFilter, setSelectedCategoryFilter] = useState<string>('all');
   const [stockFilter, setStockFilter] = useState<'all' | 'low' | 'out'>('all');
+  const [productPage, setProductPage] = useState(1);
+  const [productPageSize, setProductPageSize] = useState(10);
+  const [packPage, setPackPage] = useState(1);
+  const [packPageSize, setPackPageSize] = useState(10);
 
   const filteredProducts = products.filter((p) => {
     if (selectedCategoryFilter !== 'all') {
@@ -103,6 +108,10 @@ const ProductsPage: React.FC = () => {
     }
     return true;
   });
+
+  const paginatedProducts = React.useMemo(() => {
+    return filteredProducts.slice((productPage - 1) * productPageSize, productPage * productPageSize);
+  }, [filteredProducts, productPage, productPageSize]);
 
   // Product form
   const pForm = useForm<ProductForm>({
@@ -409,13 +418,13 @@ const ProductsPage: React.FC = () => {
                 <input
                   type="text"
                   value={productSearch}
-                  onChange={(e) => setProductSearch(e.target.value)}
+                  onChange={(e) => { setProductSearch(e.target.value); setProductPage(1); }}
                   placeholder="Search perfumes by name, SKU, brand..."
                   className="input pl-9 pr-8 text-xs sm:text-sm h-9 w-full bg-white shadow-2xs"
                 />
                 {productSearch && (
                   <button
-                    onClick={() => setProductSearch('')}
+                    onClick={() => { setProductSearch(''); setProductPage(1); }}
                     className="absolute right-2.5 top-1/2 -translate-y-1/2 text-gray-400 hover:text-gray-600 p-0.5 rounded-full hover:bg-gray-100"
                     title="Clear search"
                   >
@@ -428,7 +437,7 @@ const ProductsPage: React.FC = () => {
               <div className="flex items-center gap-1.5">
                 <select
                   value={selectedCategoryFilter}
-                  onChange={(e) => setSelectedCategoryFilter(e.target.value)}
+                  onChange={(e) => { setSelectedCategoryFilter(e.target.value); setProductPage(1); }}
                   className="select text-xs h-9 py-1 bg-white shadow-2xs w-auto min-w-[130px]"
                 >
                   <option value="all">All Categories</option>
@@ -444,7 +453,7 @@ const ProductsPage: React.FC = () => {
               <div className="flex items-center gap-1.5">
                 <select
                   value={stockFilter}
-                  onChange={(e) => setStockFilter(e.target.value as any)}
+                  onChange={(e) => { setStockFilter(e.target.value as any); setProductPage(1); }}
                   className="select text-xs h-9 py-1 bg-white shadow-2xs w-auto"
                 >
                   <option value="all">All Stock Status</option>
@@ -459,6 +468,7 @@ const ProductsPage: React.FC = () => {
                     setProductSearch('');
                     setSelectedCategoryFilter('all');
                     setStockFilter('all');
+                    setProductPage(1);
                   }}
                   className="text-xs text-primary-600 hover:text-primary-800 font-semibold underline px-1"
                 >
@@ -467,9 +477,9 @@ const ProductsPage: React.FC = () => {
               )}
             </div>
 
-            {/* Results Count */}
+            {/* Results Count & Summary */}
             <div className="text-xs text-gray-500 whitespace-nowrap self-end md:self-auto font-medium">
-              Showing <span className="font-bold text-gray-800">{filteredProducts.length}</span> of {products.length} perfumes
+              Showing <span className="font-bold text-gray-800">{filteredProducts.length === 0 ? 0 : (productPage - 1) * productPageSize + 1}</span> to <span className="font-bold text-gray-800">{Math.min(productPage * productPageSize, filteredProducts.length)}</span> of <span className="font-bold text-gray-800">{filteredProducts.length}</span> perfumes
             </div>
           </div>
 
@@ -569,7 +579,7 @@ const ProductsPage: React.FC = () => {
                     </tr>
                   </thead>
                   <tbody>
-                    {filteredProducts.map(p => {
+                    {paginatedProducts.map(p => {
                       const cat = typeof p.category === 'object' ? p.category : categories.find(c => c._id === p.category);
                       const lowStock = p.currentStock <= p.reorderThreshold;
                       const isSelected = selectedProductIds.has(p._id);
@@ -635,6 +645,16 @@ const ProductsPage: React.FC = () => {
                   </tbody>
                 </table>
               </div>
+
+              <Pagination
+                page={productPage}
+                total={filteredProducts.length}
+                pageSize={productPageSize}
+                pageSizeOptions={[10, 25, 50, 100]}
+                itemName="perfumes"
+                onPageChange={setProductPage}
+                onPageSizeChange={setProductPageSize}
+              />
             </>
           )}
         </div>
@@ -732,53 +752,73 @@ const ProductsPage: React.FC = () => {
           {/* Packaging Management Table Card */}
           <div className="card">
             {/* Filter and Bulk Bar */}
-            <div className="p-3 sm:p-4 border-b border-gray-100 flex flex-col sm:flex-row sm:items-center justify-between gap-3">
-              <div className="flex flex-wrap items-center gap-2">
-                <div className="relative">
-                  <Search className="w-3.5 h-3.5 absolute left-3 top-1/2 -translate-y-1/2 text-gray-400" />
-                  <input
-                    type="text"
-                    value={packagingSearch}
-                    onChange={(e) => setPackagingSearch(e.target.value)}
-                    placeholder="Search perfumes..."
-                    className="input text-xs pl-8 h-8 w-44"
-                  />
+            <div className="p-3 sm:p-4 border-b border-gray-100 space-y-3">
+              <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+                <div className="flex flex-wrap items-center gap-2">
+                  <div className="relative">
+                    <Search className="w-3.5 h-3.5 absolute left-3 top-1/2 -translate-y-1/2 text-gray-400" />
+                    <input
+                      type="text"
+                      value={packagingSearch}
+                      onChange={(e) => { setPackagingSearch(e.target.value); setPackPage(1); }}
+                      placeholder="Search perfumes..."
+                      className="input text-xs pl-8 h-8 w-44"
+                    />
+                  </div>
+                  <select
+                    value={packagingFilter}
+                    onChange={(e) => { setPackagingFilter(e.target.value as any); setPackPage(1); }}
+                    className="select text-xs h-8 py-1"
+                  >
+                    <option value="all">All Packaging Types</option>
+                    <option value="standard">Standard Pack (₹5) Only</option>
+                    <option value="special">Special Pack (₹8) Only</option>
+                    <option value="custom">Custom Pack Only</option>
+                  </select>
                 </div>
-                <select
-                  value={packagingFilter}
-                  onChange={(e) => setPackagingFilter(e.target.value as any)}
-                  className="select text-xs h-8 py-1"
-                >
-                  <option value="all">All Packaging Types</option>
-                  <option value="standard">Standard Pack (₹5) Only</option>
-                  <option value="special">Special Pack (₹8) Only</option>
-                  <option value="custom">Custom Pack Only</option>
-                </select>
+
+                {selectedProductIds.size > 0 ? (
+                  <div className="flex items-center gap-1.5 flex-wrap">
+                    <span className="text-xs font-bold text-primary-800">
+                      {selectedProductIds.size} selected:
+                    </span>
+                    <button
+                      onClick={() => handleQuickBulkApply('standard', 'selected')}
+                      className="px-2.5 py-1 text-xs font-bold rounded-lg bg-blue-50 border border-blue-200 text-blue-700 hover:bg-blue-100"
+                    >
+                      Set Standard (₹5)
+                    </button>
+                    <button
+                      onClick={() => handleQuickBulkApply('special', 'selected')}
+                      className="px-2.5 py-1 text-xs font-bold rounded-lg bg-amber-50 border border-amber-300 text-amber-800 hover:bg-amber-100 flex items-center gap-1"
+                    >
+                      <Sparkles className="w-3 h-3 text-amber-600" />
+                      ★ Set Special (₹8)
+                    </button>
+                  </div>
+                ) : (
+                  <div className="text-xs text-gray-500">
+                    Select perfumes with checkboxes to change packaging in bulk
+                  </div>
+                )}
               </div>
 
-              {selectedProductIds.size > 0 ? (
-                <div className="flex items-center gap-1.5 flex-wrap">
-                  <span className="text-xs font-bold text-primary-800">
-                    {selectedProductIds.size} selected:
-                  </span>
-                  <button
-                    onClick={() => handleQuickBulkApply('standard', 'selected')}
-                    className="px-2.5 py-1 text-xs font-bold rounded-lg bg-blue-50 border border-blue-200 text-blue-700 hover:bg-blue-100"
-                  >
-                    Set Standard (₹5)
-                  </button>
-                  <button
-                    onClick={() => handleQuickBulkApply('special', 'selected')}
-                    className="px-2.5 py-1 text-xs font-bold rounded-lg bg-amber-50 border border-amber-300 text-amber-800 hover:bg-amber-100 flex items-center gap-1"
-                  >
-                    <Sparkles className="w-3 h-3 text-amber-600" />
-                    ★ Set Special (₹8)
-                  </button>
-                </div>
-              ) : (
-                <div className="text-xs text-gray-500">
-                  Select perfumes with checkboxes to change packaging in bulk
-                </div>
+              {products.length > 0 && (
+                <TableSummaryStatus
+                  page={packPage}
+                  total={
+                    products.filter((p) => {
+                      if (packagingFilter !== 'all' && getPresetInfo(p).id !== packagingFilter) return false;
+                      if (packagingSearch) {
+                        const q = packagingSearch.toLowerCase();
+                        return p.name.toLowerCase().includes(q) || p.sku.toLowerCase().includes(q);
+                      }
+                      return true;
+                    }).length
+                  }
+                  pageSize={packPageSize}
+                  itemName="perfumes"
+                />
               )}
             </div>
 
@@ -817,6 +857,7 @@ const ProductsPage: React.FC = () => {
                       }
                       return true;
                     })
+                    .slice((packPage - 1) * packPageSize, packPage * packPageSize)
                     .map((p) => {
                       const isSelected = selectedProductIds.has(p._id);
                       const info = getPresetInfo(p);
@@ -893,6 +934,25 @@ const ProductsPage: React.FC = () => {
                 </tbody>
               </table>
             </div>
+
+            <Pagination
+              page={packPage}
+              total={
+                products.filter((p) => {
+                  if (packagingFilter !== 'all' && getPresetInfo(p).id !== packagingFilter) return false;
+                  if (packagingSearch) {
+                    const q = packagingSearch.toLowerCase();
+                    return p.name.toLowerCase().includes(q) || p.sku.toLowerCase().includes(q);
+                  }
+                  return true;
+                }).length
+              }
+              pageSize={packPageSize}
+              pageSizeOptions={[10, 25, 50, 100]}
+              itemName="perfumes"
+              onPageChange={setPackPage}
+              onPageSizeChange={setPackPageSize}
+            />
           </div>
         </div>
       )}
