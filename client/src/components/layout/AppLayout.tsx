@@ -40,7 +40,10 @@ const AppLayout: React.FC = () => {
       <Header />
 
       {/* Main Content Area */}
-      <main className="flex-1 pt-[var(--header-height)] pl-0 lg:pl-64 pb-20 lg:pb-6 transition-all duration-300">
+      <main
+        className="flex-1 pt-16 pl-0 lg:pl-64 pb-20 lg:pb-6 transition-all duration-300"
+        style={{ paddingTop: '64px' }}
+      >
         <div className="p-3 sm:p-5 lg:p-6 page-enter max-w-7xl mx-auto">
           <Outlet />
         </div>

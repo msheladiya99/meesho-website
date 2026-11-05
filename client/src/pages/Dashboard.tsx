@@ -141,12 +141,23 @@ const Dashboard: React.FC = () => {
           {topProducts.length === 0 ? (
             <div className="h-48 flex items-center justify-center text-sm text-gray-400">No data</div>
           ) : (
-            <ResponsiveContainer width="100%" height={200}>
-              <BarChart data={topProducts.slice(0, 8)} layout="vertical" margin={{ left: 60, right: 20 }}>
-                <XAxis type="number" tick={{ fontSize: 11 }} />
-                <YAxis dataKey="name" type="category" tick={{ fontSize: 11 }} width={60} />
-                <Tooltip contentStyle={{ borderRadius: 8, fontSize: 12 }} />
-                <Bar dataKey="qty" name="Units" fill="#2563eb" radius={[0, 4, 4, 0]} />
+            <ResponsiveContainer width="100%" height={260}>
+              <BarChart data={topProducts.slice(0, 6)} layout="vertical" margin={{ left: 10, right: 30, top: 5, bottom: 5 }}>
+                <CartesianGrid strokeDasharray="3 3" horizontal={false} stroke="#f0f0f0" />
+                <XAxis type="number" tick={{ fontSize: 11 }} allowDecimals={false} />
+                <YAxis
+                  dataKey="name"
+                  type="category"
+                  tick={{ fontSize: 11, fill: '#4b5563' }}
+                  width={130}
+                  tickFormatter={(name: string) => (name?.length > 16 ? name.slice(0, 15) + '…' : (name || ''))}
+                />
+                <Tooltip
+                  formatter={(val: any) => [`${val} units`, 'Quantity']}
+                  labelFormatter={(label) => label}
+                  contentStyle={{ borderRadius: 8, fontSize: 12, boxShadow: '0 4px 6px -1px rgb(0 0 0 / 0.1)' }}
+                />
+                <Bar dataKey="qty" name="Units" fill="#2563eb" radius={[0, 4, 4, 0]} barSize={16} />
               </BarChart>
             </ResponsiveContainer>
           )}

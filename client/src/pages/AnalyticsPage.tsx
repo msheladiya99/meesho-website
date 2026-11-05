@@ -52,46 +52,78 @@ const AnalyticsPage: React.FC = () => {
 
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
         {chartCard('Best-Selling Products (Qty)', topProducts.length === 0 ? <div className="h-56 flex items-center justify-center text-sm text-gray-400">No data</div> : (
-          <ResponsiveContainer width="100%" height={220}>
-            <BarChart data={topProducts.slice(0, 8)} layout="vertical" margin={{ left: 50, right: 20 }}>
-              <XAxis type="number" tick={{ fontSize: 11 }} />
-              <YAxis dataKey="name" type="category" tick={{ fontSize: 11 }} width={50} />
-              <Tooltip contentStyle={{ borderRadius: 8, fontSize: 12 }} />
-              <Bar dataKey="qty" name="Units" fill="#2563eb" radius={[0, 4, 4, 0]} />
+          <ResponsiveContainer width="100%" height={260}>
+            <BarChart data={topProducts.slice(0, 7)} layout="vertical" margin={{ left: 10, right: 30, top: 5, bottom: 5 }}>
+              <CartesianGrid strokeDasharray="3 3" horizontal={false} stroke="#f0f0f0" />
+              <XAxis type="number" tick={{ fontSize: 11 }} allowDecimals={false} />
+              <YAxis
+                dataKey="name"
+                type="category"
+                tick={{ fontSize: 11, fill: '#4b5563' }}
+                width={130}
+                tickFormatter={(name: string) => (name?.length > 16 ? name.slice(0, 15) + '…' : (name || ''))}
+              />
+              <Tooltip
+                formatter={(val: any) => [`${val} units`, 'Quantity Sold']}
+                labelFormatter={(label) => label}
+                contentStyle={{ borderRadius: 8, fontSize: 12, boxShadow: '0 4px 6px -1px rgb(0 0 0 / 0.1)' }}
+              />
+              <Bar dataKey="qty" name="Units" fill="#2563eb" radius={[0, 4, 4, 0]} barSize={16} />
             </BarChart>
           </ResponsiveContainer>
         ))}
 
         {chartCard('Best-Selling Products (Revenue)', topProducts.length === 0 ? <div className="h-56 flex items-center justify-center text-sm text-gray-400">No data</div> : (
-          <ResponsiveContainer width="100%" height={220}>
-            <BarChart data={topProducts.slice(0, 8)} layout="vertical" margin={{ left: 50, right: 20 }}>
+          <ResponsiveContainer width="100%" height={260}>
+            <BarChart data={topProducts.slice(0, 7)} layout="vertical" margin={{ left: 10, right: 30, top: 5, bottom: 5 }}>
+              <CartesianGrid strokeDasharray="3 3" horizontal={false} stroke="#f0f0f0" />
               <XAxis type="number" tick={{ fontSize: 11 }} tickFormatter={v => `₹${(v/100).toFixed(0)}`} />
-              <YAxis dataKey="name" type="category" tick={{ fontSize: 11 }} width={50} />
-              <Tooltip formatter={(v: any) => [formatCurrency(Number(v) || 0)]} contentStyle={{ borderRadius: 8, fontSize: 12 }} />
-              <Bar dataKey="sales" name="Sales" fill="#7c3aed" radius={[0, 4, 4, 0]} />
+              <YAxis
+                dataKey="name"
+                type="category"
+                tick={{ fontSize: 11, fill: '#4b5563' }}
+                width={130}
+                tickFormatter={(name: string) => (name?.length > 16 ? name.slice(0, 15) + '…' : (name || ''))}
+              />
+              <Tooltip
+                formatter={(val: any) => [formatCurrency(Number(val) || 0), 'Revenue']}
+                labelFormatter={(label) => label}
+                contentStyle={{ borderRadius: 8, fontSize: 12, boxShadow: '0 4px 6px -1px rgb(0 0 0 / 0.1)' }}
+              />
+              <Bar dataKey="sales" name="Sales" fill="#7c3aed" radius={[0, 4, 4, 0]} barSize={16} />
             </BarChart>
           </ResponsiveContainer>
         ))}
 
         {chartCard('Returns by Category', returnsByCategory.length === 0 ? <div className="h-56 flex items-center justify-center text-sm text-gray-400">No returns data</div> : (
-          <ResponsiveContainer width="100%" height={220}>
+          <ResponsiveContainer width="100%" height={260}>
             <PieChart>
-              <Pie data={returnsByCategory} dataKey="qty" nameKey="category" cx="50%" cy="50%" outerRadius={80} label={({ name, percent }: any) => `${name} ${((percent || 0) * 100).toFixed(0)}%`}>
+              <Pie
+                data={returnsByCategory}
+                dataKey="qty"
+                nameKey="category"
+                cx="50%"
+                cy="45%"
+                outerRadius={75}
+                innerRadius={35}
+                paddingAngle={3}
+              >
                 {returnsByCategory.map((_: unknown, i: number) => <Cell key={i} fill={COLORS[i % COLORS.length]} />)}
               </Pie>
-              <Tooltip />
+              <Tooltip formatter={(v: any) => [`${v} units`, 'Returned']} />
+              <Legend verticalAlign="bottom" height={36} iconType="circle" wrapperStyle={{ fontSize: 11, paddingTop: 10 }} />
             </PieChart>
           </ResponsiveContainer>
         ))}
 
         {chartCard('Daily Sales Trend', trend.length === 0 ? <div className="h-56 flex items-center justify-center text-sm text-gray-400">No data</div> : (
-          <ResponsiveContainer width="100%" height={220}>
-            <LineChart data={trend} margin={{ left: -20 }}>
+          <ResponsiveContainer width="100%" height={260}>
+            <LineChart data={trend} margin={{ left: -15, right: 15, top: 10, bottom: 5 }}>
               <CartesianGrid strokeDasharray="3 3" stroke="#f0f0f0" />
               <XAxis dataKey="date" tick={{ fontSize: 10 }} />
               <YAxis tick={{ fontSize: 11 }} tickFormatter={v => `₹${(v/100).toFixed(0)}`} />
               <Tooltip formatter={(v: any) => [formatCurrency(Number(v) || 0)]} contentStyle={{ borderRadius: 8, fontSize: 12 }} />
-              <Legend wrapperStyle={{ fontSize: 12 }} />
+              <Legend wrapperStyle={{ fontSize: 12, paddingTop: 8 }} />
               <Line dataKey="sales" name="Sales" stroke="#2563eb" strokeWidth={2} dot={false} />
               <Line dataKey="returns" name="Returns" stroke="#ef4444" strokeWidth={2} dot={false} strokeDasharray="4 4" />
             </LineChart>
@@ -99,13 +131,13 @@ const AnalyticsPage: React.FC = () => {
         ))}
 
         {chartCard('Monthly Revenue vs Returns', monthly.length === 0 ? <div className="h-56 flex items-center justify-center text-sm text-gray-400">No data</div> : (
-          <ResponsiveContainer width="100%" height={220}>
-            <BarChart data={monthly} margin={{ left: -10 }}>
+          <ResponsiveContainer width="100%" height={260}>
+            <BarChart data={monthly} margin={{ left: -10, right: 15, top: 10, bottom: 5 }}>
               <CartesianGrid strokeDasharray="3 3" stroke="#f0f0f0" />
               <XAxis dataKey="month" tick={{ fontSize: 11 }} />
               <YAxis tick={{ fontSize: 11 }} tickFormatter={v => `₹${(v/100).toFixed(0)}`} />
               <Tooltip formatter={(v: any) => [formatCurrency(Number(v) || 0)]} contentStyle={{ borderRadius: 8, fontSize: 12 }} />
-              <Legend wrapperStyle={{ fontSize: 12 }} />
+              <Legend wrapperStyle={{ fontSize: 12, paddingTop: 8 }} />
               <Bar dataKey="sales" name="Sales" fill="#2563eb" radius={[4, 4, 0, 0]} />
               <Bar dataKey="returns" name="Returns" fill="#ef4444" radius={[4, 4, 0, 0]} />
             </BarChart>
@@ -113,12 +145,13 @@ const AnalyticsPage: React.FC = () => {
         ))}
 
         {chartCard('Partner-wise Expenses', partnerExpenses.length === 0 ? <div className="h-56 flex items-center justify-center text-sm text-gray-400">No data</div> : (
-          <ResponsiveContainer width="100%" height={220}>
-            <BarChart data={partnerExpenses} margin={{ left: -10 }}>
+          <ResponsiveContainer width="100%" height={260}>
+            <BarChart data={partnerExpenses} margin={{ left: -10, right: 15, top: 10, bottom: 5 }}>
               <CartesianGrid strokeDasharray="3 3" stroke="#f0f0f0" />
               <XAxis dataKey="partner" tick={{ fontSize: 11 }} />
               <YAxis tick={{ fontSize: 11 }} tickFormatter={v => `₹${(v/100).toFixed(0)}`} />
               <Tooltip formatter={(v: any) => [formatCurrency(Number(v) || 0)]} contentStyle={{ borderRadius: 8, fontSize: 12 }} />
+              <Legend wrapperStyle={{ fontSize: 12, paddingTop: 8 }} />
               <Bar dataKey="paid" name="Paid" fill="#059669" radius={[4, 4, 0, 0]} />
               <Bar dataKey="allocated" name="Allocated" fill="#d97706" radius={[4, 4, 0, 0]} />
             </BarChart>

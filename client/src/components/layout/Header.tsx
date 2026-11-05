@@ -40,8 +40,8 @@ const Header: React.FC = () => {
 
   return (
     <header
-      className="fixed top-0 left-0 lg:left-64 right-0 bg-white border-b border-gray-100 flex items-center justify-between px-3 sm:px-6 z-20"
-      style={{ height: 'var(--header-height)' }}
+      className="fixed top-0 left-0 lg:left-64 right-0 h-16 bg-white border-b border-gray-100 flex items-center justify-between px-3 sm:px-6 z-20"
+      style={{ height: '64px' }}
     >
       {/* Left: Mobile hamburger & GSTIN Switcher */}
       <div className="flex items-center gap-1.5 sm:gap-3">
