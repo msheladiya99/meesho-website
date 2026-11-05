@@ -76,3 +76,55 @@ export const dateRangePresets = () => {
     },
   };
 };
+
+export const calculateNextInvoiceNumber = (invoices: (string | undefined | null)[]): string => {
+  const cleanList = invoices
+    .map(inv => (typeof inv === 'string' ? inv.trim() : ''))
+    .filter(inv => inv.length > 0);
+
+  if (cleanList.length === 0) {
+    return '1';
+  }
+
+  // 1. Check for pure numbers (with or without leading '#')
+  const pureNumericValues: number[] = [];
+  for (const inv of cleanList) {
+    const stripped = inv.replace(/^#\s*/, '');
+    if (/^\d+$/.test(stripped)) {
+      pureNumericValues.push(parseInt(stripped, 10));
+    }
+  }
+
+  if (pureNumericValues.length > 0) {
+    const maxVal = Math.max(...pureNumericValues);
+    return String(maxVal + 1);
+  }
+
+  // 2. Check for alphanumeric patterns ending in digits: e.g. "INV-001", "BILL-197"
+  let maxTrailingNum = -1;
+  let bestPrefix = '';
+  let bestPadLength = 0;
+
+  for (const inv of cleanList) {
+    const match = inv.match(/^(.*?)(\d+)$/);
+    if (match) {
+      const prefix = match[1];
+      const digits = match[2];
+      const val = parseInt(digits, 10);
+      if (val > maxTrailingNum) {
+        maxTrailingNum = val;
+        bestPrefix = prefix;
+        bestPadLength = digits.length;
+      }
+    }
+  }
+
+  if (maxTrailingNum >= 0) {
+    const nextVal = maxTrailingNum + 1;
+    const padded = String(nextVal).padStart(bestPadLength, '0');
+    return `${bestPrefix}${padded}`;
+  }
+
+  // 3. Fallback to count + 1
+  return String(cleanList.length + 1);
+};

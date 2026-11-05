@@ -16,6 +16,58 @@ const recentPurchaseCreations = new Map<string, number>();
 const accountFilter = (accountId?: string): Record<string, unknown> =>
   accountId && accountId !== 'all' ? { businessAccount: new mongoose.Types.ObjectId(accountId) } : {};
 
+export function calculateNextInvoiceNumber(invoices: (string | undefined | null)[]): string {
+  const cleanList = invoices
+    .map(inv => (typeof inv === 'string' ? inv.trim() : ''))
+    .filter(inv => inv.length > 0);
+
+  if (cleanList.length === 0) {
+    return '1';
+  }
+
+  // 1. Check for pure numbers (with or without leading '#')
+  const pureNumericValues: number[] = [];
+  for (const inv of cleanList) {
+    const stripped = inv.replace(/^#\s*/, '');
+    if (/^\d+$/.test(stripped)) {
+      pureNumericValues.push(parseInt(stripped, 10));
+    }
+  }
+
+  if (pureNumericValues.length > 0) {
+    const maxVal = Math.max(...pureNumericValues);
+    return String(maxVal + 1);
+  }
+
+  // 2. Check for alphanumeric patterns ending in digits: e.g. "INV-001", "BILL-197"
+  let maxTrailingNum = -1;
+  let bestPrefix = '';
+  let bestPadLength = 0;
+
+  for (const inv of cleanList) {
+    const match = inv.match(/^(.*?)(\d+)$/);
+    if (match) {
+      const prefix = match[1];
+      const digits = match[2];
+      const val = parseInt(digits, 10);
+      if (val > maxTrailingNum) {
+        maxTrailingNum = val;
+        bestPrefix = prefix;
+        bestPadLength = digits.length;
+      }
+    }
+  }
+
+  if (maxTrailingNum >= 0) {
+    const nextVal = maxTrailingNum + 1;
+    const padded = String(nextVal).padStart(bestPadLength, '0');
+    return `${bestPrefix}${padded}`;
+  }
+
+  // 3. Fallback to count + 1
+  return String(cleanList.length + 1);
+}
+
 // GET /api/stock-purchases
 router.get('/', enforceAccountAccess, async (req: AuthRequest, res: Response): Promise<void> => {
   try {
@@ -41,6 +93,34 @@ router.get('/', enforceAccountAccess, async (req: AuthRequest, res: Response): P
       StockPurchase.countDocuments(filter),
     ]);
     res.json({ success: true, data: purchases, total });
+  } catch (err) {
+    res.status(500).json({ success: false, message: (err as Error).message });
+  }
+});
+
+// GET /api/stock-purchases/next-invoice-number
+router.get('/next-invoice-number', enforceAccountAccess, async (req: AuthRequest, res: Response): Promise<void> => {
+  try {
+    const { accountId } = req.query as Record<string, string>;
+    const filter: Record<string, unknown> = {
+      isDeleted: false,
+      ...accountFilter(accountId),
+    };
+
+    const purchases = await StockPurchase.find(filter)
+      .select('vendorInvoiceNumber')
+      .lean();
+
+    const invoices = purchases.map(p => p.vendorInvoiceNumber).filter(Boolean) as string[];
+    const nextInvoiceNumber = calculateNextInvoiceNumber(invoices);
+
+    res.json({
+      success: true,
+      data: {
+        nextInvoiceNumber,
+        totalPurchases: purchases.length,
+      },
+    });
   } catch (err) {
     res.status(500).json({ success: false, message: (err as Error).message });
   }
@@ -95,8 +175,20 @@ router.post('/', requireManagerOrAdmin, enforceAccountAccess, async (req: AuthRe
       ? Number(purchasePricePerUnit)
       : (parsedQty > 0 ? Math.round((Number(totalAmount) || 0) / parsedQty) : 0);
 
+    let assignedInvoiceNumber = req.body.vendorInvoiceNumber?.toString().trim();
+    if (!assignedInvoiceNumber) {
+      const filter: Record<string, unknown> = {
+        isDeleted: false,
+        ...accountFilter(businessAccount),
+      };
+      const allPurchases = await StockPurchase.find(filter).select('vendorInvoiceNumber').lean();
+      const existingInvoices = allPurchases.map(p => p.vendorInvoiceNumber).filter(Boolean) as string[];
+      assignedInvoiceNumber = calculateNextInvoiceNumber(existingInvoices);
+    }
+
     const purchase = await StockPurchase.create({
       ...req.body,
+      vendorInvoiceNumber: assignedInvoiceNumber,
       totalQuantity: parsedQty,
       purchasePricePerUnit: calculatedUnitPrice,
       items: Array.isArray(items) ? items : [],

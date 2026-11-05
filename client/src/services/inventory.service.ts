@@ -35,6 +35,8 @@ export const vendorsApi = {
 export const stockPurchasesApi = {
   list: (params?: PaginationParams) =>
     api.get<ApiResponse<StockPurchase[]>>('/stock-purchases', { params }),
+  getNextInvoiceNumber: (params?: { accountId?: string }) =>
+    api.get<ApiResponse<{ nextInvoiceNumber: string; totalPurchases: number }>>('/stock-purchases/next-invoice-number', { params }),
   get: (id: string) => api.get<ApiResponse<StockPurchase>>(`/stock-purchases/${id}`),
   create: (data: Partial<StockPurchase>) => api.post<ApiResponse<StockPurchase>>('/stock-purchases', data),
   update: (id: string, data: Partial<StockPurchase>) => api.put<ApiResponse<StockPurchase>>(`/stock-purchases/${id}`, data),

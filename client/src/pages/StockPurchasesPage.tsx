@@ -7,7 +7,7 @@ import {
 import { useForm } from 'react-hook-form';
 import { stockPurchasesApi, vendorsApi } from '../services/inventory.service';
 import { useAccountStore } from '../store/accountStore';
-import { formatCurrency, formatDate, rupeesToPaise, paiseToRupees, dateRangePresets } from '../lib/utils';
+import { formatCurrency, formatDate, rupeesToPaise, paiseToRupees, dateRangePresets, calculateNextInvoiceNumber } from '../lib/utils';
 import DateRangePicker from '../components/ui/DateRangePicker';
 import Modal from '../components/ui/Modal';
 import { EmptyState, LoadingSpinner, ConfirmDialog } from '../components/ui/Feedback';
@@ -51,8 +51,22 @@ const StockPurchasesPage: React.FC = () => {
 
   const { data: vendorsData } = useQuery({ queryKey: ['vendors'], queryFn: () => vendorsApi.list() });
 
+  const { data: nextInvoiceRes } = useQuery({
+    queryKey: ['next-invoice-number', activeAccountId],
+    queryFn: () => stockPurchasesApi.getNextInvoiceNumber({ accountId: activeAccountId === 'all' ? undefined : activeAccountId }),
+  });
+
   const rawPurchases: StockPurchase[] = data?.data?.data || [];
   const vendors: Vendor[] = vendorsData?.data?.data || [];
+
+  // Determine next sequential bill/invoice number
+  const nextSequenceNumber = useMemo(() => {
+    if (nextInvoiceRes?.data?.data?.nextInvoiceNumber) {
+      return nextInvoiceRes.data.data.nextInvoiceNumber;
+    }
+    const invoices = rawPurchases.map(p => p.vendorInvoiceNumber).filter(Boolean) as string[];
+    return calculateNextInvoiceNumber(invoices);
+  }, [nextInvoiceRes, rawPurchases]);
 
   // Filter purchases by search and payment status
   const purchases = useMemo(() => {
@@ -81,7 +95,7 @@ const StockPurchasesPage: React.FC = () => {
   const unpaidCount = useMemo(() => rawPurchases.filter(p => p.paymentStatus === 'unpaid').length, [rawPurchases]);
   const paidCount = useMemo(() => rawPurchases.filter(p => p.paymentStatus === 'paid').length, [rawPurchases]);
 
-  const { register, handleSubmit, watch, reset, formState: { errors } } = useForm<FormData>({
+  const { register, handleSubmit, watch, reset, setValue, formState: { errors } } = useForm<FormData>({
     defaultValues: {
       purchaseDate: new Date().toISOString().split('T')[0],
       paymentStatus: 'paid',
@@ -105,6 +119,7 @@ const StockPurchasesPage: React.FC = () => {
 
   const invalidateAll = () => {
     qc.invalidateQueries({ queryKey: ['stock-purchases'] });
+    qc.invalidateQueries({ queryKey: ['next-invoice-number'] });
     qc.invalidateQueries({ queryKey: ['inventory'] });
     qc.invalidateQueries({ queryKey: ['products'] });
     qc.invalidateQueries({ queryKey: ['dashboard'] });
@@ -207,8 +222,20 @@ const StockPurchasesPage: React.FC = () => {
     setIsModalOpen(true);
   };
 
-  const openAdd = () => {
+  const openAdd = async () => {
     setEditingPurchase(null);
+    let autoInvoice = nextSequenceNumber;
+    try {
+      const res = await stockPurchasesApi.getNextInvoiceNumber({
+        accountId: activeAccountId === 'all' ? undefined : activeAccountId,
+      });
+      if (res?.data?.data?.nextInvoiceNumber) {
+        autoInvoice = res.data.data.nextInvoiceNumber;
+      }
+    } catch {
+      // keep fallback
+    }
+
     reset({
       purchaseDate: new Date().toISOString().split('T')[0],
       paymentStatus: 'paid',
@@ -218,7 +245,7 @@ const StockPurchasesPage: React.FC = () => {
       additionalCosts: 0,
       taxAmount: 0,
       notes: '',
-      vendorInvoiceNumber: '',
+      vendorInvoiceNumber: autoInvoice,
     });
     setIsModalOpen(true);
   };
@@ -244,6 +271,11 @@ const StockPurchasesPage: React.FC = () => {
           className="btn-primary shrink-0 inline-flex items-center gap-2 px-4 py-2 text-sm shadow-sm hover:shadow"
         >
           <Plus className="w-4 h-4" /> Add Stock Purchase
+          {nextSequenceNumber && (
+            <span className="hidden sm:inline-flex items-center px-2 py-0.5 text-xs font-mono font-bold bg-white/20 rounded">
+              #{nextSequenceNumber}
+            </span>
+          )}
         </button>
       </div>
 
@@ -508,8 +540,30 @@ const StockPurchasesPage: React.FC = () => {
 
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
             <div>
-              <label className="label">Invoice Number</label>
-              <input {...register('vendorInvoiceNumber')} className="input font-mono" placeholder="e.g. INV-2026-001" />
+              <div className="flex items-center justify-between mb-1.5">
+                <label className="text-xs font-bold text-gray-700">Invoice / Bill Number</label>
+                <div className="flex items-center gap-1.5">
+                  <span className="inline-flex items-center px-1.5 py-0.5 rounded text-[10px] font-bold bg-emerald-50 text-emerald-700 border border-emerald-200">
+                    ⚡ Auto Seq #{nextSequenceNumber}
+                  </span>
+                  <button
+                    type="button"
+                    onClick={() => setValue('vendorInvoiceNumber', nextSequenceNumber)}
+                    className="text-[11px] text-primary-600 hover:text-primary-800 font-medium hover:underline"
+                    title="Reset to next sequential number"
+                  >
+                    Reset
+                  </button>
+                </div>
+              </div>
+              <input
+                {...register('vendorInvoiceNumber')}
+                className="input font-mono font-semibold text-gray-900"
+                placeholder={`e.g. ${nextSequenceNumber}`}
+              />
+              <p className="text-[11px] text-gray-500 mt-1">
+                Auto-sequenced from latest bill. You can edit or keep this number.
+              </p>
             </div>
             <div>
               <label className="label">Payment Status</label>
