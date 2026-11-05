@@ -2,7 +2,7 @@ import React, { useState } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import {
   Plus, Edit2, Trash2, Package, Tag, CheckSquare2, Square,
-  Sparkles, SlidersHorizontal, Check, Search, Filter, RefreshCw, ArrowRight
+  Sparkles, SlidersHorizontal, Check, Search, Filter, RefreshCw, ArrowRight, X
 } from 'lucide-react';
 import { useForm } from 'react-hook-form';
 import { zodResolver } from '@hookform/resolvers/zod';
@@ -76,6 +76,33 @@ const ProductsPage: React.FC = () => {
 
   const products: Product[] = productsData?.data?.data || [];
   const categories: Category[] = categoriesData?.data?.data || [];
+
+  // Search and filter state for Products tab
+  const [productSearch, setProductSearch] = useState('');
+  const [selectedCategoryFilter, setSelectedCategoryFilter] = useState<string>('all');
+  const [stockFilter, setStockFilter] = useState<'all' | 'low' | 'out'>('all');
+
+  const filteredProducts = products.filter((p) => {
+    if (selectedCategoryFilter !== 'all') {
+      const catId = typeof p.category === 'object' ? (p.category as Category)?._id : p.category;
+      if (catId !== selectedCategoryFilter) return false;
+    }
+    if (stockFilter === 'low') {
+      if (p.currentStock > p.reorderThreshold) return false;
+    } else if (stockFilter === 'out') {
+      if (p.currentStock > 0) return false;
+    }
+    if (productSearch.trim()) {
+      const q = productSearch.toLowerCase().trim();
+      const nameMatch = p.name?.toLowerCase().includes(q);
+      const skuMatch = p.sku?.toLowerCase().includes(q);
+      const brandMatch = p.brand?.toLowerCase().includes(q);
+      const catName = typeof p.category === 'object' ? (p.category as Category)?.name : '';
+      const catMatch = catName?.toLowerCase().includes(q);
+      if (!nameMatch && !skuMatch && !brandMatch && !catMatch) return false;
+    }
+    return true;
+  });
 
   // Product form
   const pForm = useForm<ProductForm>({
@@ -247,10 +274,10 @@ const ProductsPage: React.FC = () => {
   });
 
   const toggleSelectAll = () => {
-    if (selectedProductIds.size === products.length) {
+    if (selectedProductIds.size === filteredProducts.length && filteredProducts.length > 0) {
       setSelectedProductIds(new Set());
     } else {
-      setSelectedProductIds(new Set(products.map(p => p._id)));
+      setSelectedProductIds(new Set(filteredProducts.map(p => p._id)));
     }
   };
 
@@ -372,13 +399,114 @@ const ProductsPage: React.FC = () => {
 
       {/* Products Table */}
       {tab === 'products' && (
-        <div className="card">
-          {prodLoading ? <LoadingSpinner /> : products.length === 0 ? (
+        <div className="card shadow-xs overflow-hidden">
+          {/* Search & Filter Toolbar */}
+          <div className="p-3 sm:p-4 border-b border-gray-100 flex flex-col md:flex-row md:items-center justify-between gap-3 bg-gray-50/60">
+            <div className="flex flex-wrap items-center gap-2.5 flex-1">
+              {/* Search Bar */}
+              <div className="relative flex-1 min-w-[220px] max-w-md">
+                <Search className="w-4 h-4 absolute left-3 top-1/2 -translate-y-1/2 text-gray-400" />
+                <input
+                  type="text"
+                  value={productSearch}
+                  onChange={(e) => setProductSearch(e.target.value)}
+                  placeholder="Search perfumes by name, SKU, brand..."
+                  className="input pl-9 pr-8 text-xs sm:text-sm h-9 w-full bg-white shadow-2xs"
+                />
+                {productSearch && (
+                  <button
+                    onClick={() => setProductSearch('')}
+                    className="absolute right-2.5 top-1/2 -translate-y-1/2 text-gray-400 hover:text-gray-600 p-0.5 rounded-full hover:bg-gray-100"
+                    title="Clear search"
+                  >
+                    <X className="w-3.5 h-3.5" />
+                  </button>
+                )}
+              </div>
+
+              {/* Category Filter */}
+              <div className="flex items-center gap-1.5">
+                <select
+                  value={selectedCategoryFilter}
+                  onChange={(e) => setSelectedCategoryFilter(e.target.value)}
+                  className="select text-xs h-9 py-1 bg-white shadow-2xs w-auto min-w-[130px]"
+                >
+                  <option value="all">All Categories</option>
+                  {categories.map((c) => (
+                    <option key={c._id} value={c._id}>
+                      {c.name}
+                    </option>
+                  ))}
+                </select>
+              </div>
+
+              {/* Stock Filter */}
+              <div className="flex items-center gap-1.5">
+                <select
+                  value={stockFilter}
+                  onChange={(e) => setStockFilter(e.target.value as any)}
+                  className="select text-xs h-9 py-1 bg-white shadow-2xs w-auto"
+                >
+                  <option value="all">All Stock Status</option>
+                  <option value="low">⚠ Low Stock (≤ Reorder)</option>
+                  <option value="out">⛔ Out of Stock (0)</option>
+                </select>
+              </div>
+
+              {(productSearch || selectedCategoryFilter !== 'all' || stockFilter !== 'all') && (
+                <button
+                  onClick={() => {
+                    setProductSearch('');
+                    setSelectedCategoryFilter('all');
+                    setStockFilter('all');
+                  }}
+                  className="text-xs text-primary-600 hover:text-primary-800 font-semibold underline px-1"
+                >
+                  Reset filters
+                </button>
+              )}
+            </div>
+
+            {/* Results Count */}
+            <div className="text-xs text-gray-500 whitespace-nowrap self-end md:self-auto font-medium">
+              Showing <span className="font-bold text-gray-800">{filteredProducts.length}</span> of {products.length} perfumes
+            </div>
+          </div>
+
+          {prodLoading ? (
+            <div className="py-12">
+              <LoadingSpinner />
+            </div>
+          ) : products.length === 0 ? (
             <EmptyState title="No products" description="Add your first perfume product." icon={<Package className="w-12 h-12" />} />
+          ) : filteredProducts.length === 0 ? (
+            <div className="py-12">
+              <EmptyState
+                title="No matching perfumes"
+                description={
+                  productSearch
+                    ? `No perfumes found matching "${productSearch}". Try another keyword or reset filters.`
+                    : 'No products in this category or filter.'
+                }
+                icon={<Search className="w-10 h-10 text-gray-300" />}
+                action={
+                  <button
+                    onClick={() => {
+                      setProductSearch('');
+                      setSelectedCategoryFilter('all');
+                      setStockFilter('all');
+                    }}
+                    className="btn-secondary text-xs mt-2"
+                  >
+                    Clear Search & Filters
+                  </button>
+                }
+              />
+            </div>
           ) : (
             <>
               {selectedProductIds.size > 0 && (
-                <div className="flex flex-wrap items-center justify-between p-2.5 sm:p-3 bg-primary-50 border border-primary-200 mb-4 rounded-xl gap-2">
+                <div className="flex flex-wrap items-center justify-between p-2.5 sm:p-3 bg-primary-50 border-b border-primary-200 gap-2">
                   <div className="flex flex-wrap items-center gap-1.5 sm:gap-2">
                     <span className="text-xs sm:text-sm font-bold text-primary-900">
                       {selectedProductIds.size} selected:
@@ -421,7 +549,7 @@ const ProductsPage: React.FC = () => {
                     <tr>
                       <th className="w-8 sm:w-10">
                         <button onClick={toggleSelectAll} className="p-1 hover:bg-gray-100 rounded">
-                          {selectedProductIds.size === products.length && products.length > 0 ? (
+                          {selectedProductIds.size === filteredProducts.length && filteredProducts.length > 0 ? (
                             <CheckSquare2 className="w-4 h-4 text-primary-600" />
                           ) : (
                             <Square className="w-4 h-4 text-gray-400" />
@@ -441,7 +569,7 @@ const ProductsPage: React.FC = () => {
                     </tr>
                   </thead>
                   <tbody>
-                    {products.map(p => {
+                    {filteredProducts.map(p => {
                       const cat = typeof p.category === 'object' ? p.category : categories.find(c => c._id === p.category);
                       const lowStock = p.currentStock <= p.reorderThreshold;
                       const isSelected = selectedProductIds.has(p._id);
