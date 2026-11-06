@@ -146,17 +146,26 @@ router.get('/partner-expenses', enforceAccountAccess, async (req: AuthRequest, r
     const { accountId, startDate, endDate } = req.query as Record<string, string>;
     const filter: Record<string, unknown> = { isDeleted: false, ...af(accountId), ...df(startDate, endDate, 'expenseDate') };
     const [partners, expenses] = await Promise.all([
-      Partner.find({ isActive: true }),
+      Partner.find({ isActive: true }).sort({ createdAt: 1 }),
       Expense.find(filter),
     ]);
 
-    const data = partners.map(p => {
+    const data = partners.map((p, pIdx) => {
       const pid = p._id.toString();
       let paid = 0; let allocated = 0;
       for (const e of expenses) {
-        if (e.paidByPartner?.toString() === pid) paid += e.amount;
+        let paidPid = e.paidByPartner?.toString();
+        if (!paidPid && e.paidBy) {
+          if (e.paidBy === `partner${pIdx + 1}`) paidPid = pid;
+          else if (e.paidBy.toLowerCase() === p.name.toLowerCase()) paidPid = pid;
+        }
+        if (paidPid === pid) paid += e.amount;
+
         const alloc = e.allocations.find(a => a.partner?.toString() === pid);
         if (alloc) allocated += alloc.amount;
+        else if (e.allocationMethod === 'equal' && (!e.allocations || e.allocations.length === 0)) {
+          allocated += Math.round(e.amount / partners.length);
+        }
       }
       return { partner: p.name, paid, allocated };
     });

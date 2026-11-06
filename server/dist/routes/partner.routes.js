@@ -49,6 +49,22 @@ router.put('/:id', auth_1.requireManagerOrAdmin, async (req, res) => {
         res.status(400).json({ success: false, message: err.message });
     }
 });
+// DELETE /api/partners/:id — soft-delete or remove partner
+router.delete('/:id', auth_1.requireManagerOrAdmin, async (req, res) => {
+    try {
+        const id = req.params.id;
+        const p = await Partner_1.Partner.findByIdAndUpdate(id, { isActive: false }, { new: true });
+        if (!p) {
+            res.status(404).json({ success: false, message: 'Partner not found' });
+            return;
+        }
+        await (0, audit_service_1.createAuditLog)({ action: 'DELETE', resource: 'Partner', resourceId: id, userId: req.user?._id });
+        res.json({ success: true, message: 'Partner removed successfully' });
+    }
+    catch (err) {
+        res.status(400).json({ success: false, message: err.message });
+    }
+});
 // GET /api/partners/balance — partner expense balance summary
 router.get('/balance', auth_1.authenticate, async (req, res) => {
     try {
@@ -64,24 +80,60 @@ router.get('/balance', auth_1.authenticate, async (req, res) => {
                 filter.expenseDate['$lte'] = new Date(endDate + 'T23:59:59.999Z');
         }
         const [partners, expenses] = await Promise.all([
-            Partner_1.Partner.find({ isActive: true }),
-            Expense_1.Expense.find(filter).populate('allocations.partner'),
+            Partner_1.Partner.find({ isActive: true }).sort({ createdAt: 1 }),
+            Expense_1.Expense.find(filter).populate('paidByPartner', 'name').populate('allocations.partner', 'name').sort({ expenseDate: -1 }),
         ]);
         const balances = {};
         for (const partner of partners) {
             const pid = partner._id.toString();
-            balances[pid] = { expensesPaid: 0, expensesAllocated: 0, balance: 0 };
+            balances[pid] = {
+                expensesPaid: 0,
+                expensesAllocated: 0,
+                balance: 0,
+                paidExpenses: [],
+            };
         }
         for (const expense of expenses) {
-            if (expense.paidByPartner) {
-                const pid = expense.paidByPartner.toString();
-                if (balances[pid])
-                    balances[pid].expensesPaid += expense.amount;
+            // Resolve which partner paid this expense
+            let paidPartnerId = expense.paidByPartner?._id ? expense.paidByPartner._id.toString() : expense.paidByPartner?.toString();
+            if (!paidPartnerId && expense.paidBy) {
+                if (expense.paidBy === 'partner1' && partners[0])
+                    paidPartnerId = partners[0]._id.toString();
+                else if (expense.paidBy === 'partner2' && partners[1])
+                    paidPartnerId = partners[1]._id.toString();
+                else if (expense.paidBy === 'partner3' && partners[2])
+                    paidPartnerId = partners[2]._id.toString();
+                else {
+                    const matched = partners.find(p => p.name.toLowerCase() === expense.paidBy.toLowerCase());
+                    if (matched)
+                        paidPartnerId = matched._id.toString();
+                }
             }
-            for (const alloc of expense.allocations) {
-                const pid = alloc.partner?.toString();
-                if (pid && balances[pid])
-                    balances[pid].expensesAllocated += alloc.amount;
+            if (paidPartnerId && balances[paidPartnerId]) {
+                balances[paidPartnerId].expensesPaid += expense.amount;
+                balances[paidPartnerId].paidExpenses.push({
+                    _id: expense._id.toString(),
+                    description: expense.description,
+                    amount: expense.amount,
+                    expenseDate: expense.expenseDate,
+                    category: expense.category,
+                });
+            }
+            // Resolve allocations
+            if (expense.allocations && expense.allocations.length > 0) {
+                for (const alloc of expense.allocations) {
+                    const pid = alloc.partner?._id ? alloc.partner._id.toString() : alloc.partner?.toString();
+                    if (pid && balances[pid])
+                        balances[pid].expensesAllocated += alloc.amount;
+                }
+            }
+            else if (expense.allocationMethod === 'equal' && partners.length > 0) {
+                const share = Math.round(expense.amount / partners.length);
+                for (const p of partners) {
+                    const pid = p._id.toString();
+                    if (balances[pid])
+                        balances[pid].expensesAllocated += share;
+                }
             }
         }
         for (const pid of Object.keys(balances)) {

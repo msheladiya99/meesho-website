@@ -41,9 +41,9 @@ const expenseSchema = new mongoose_1.Schema({
     category: { type: String, required: true },
     description: { type: String, required: true, trim: true },
     amount: { type: Number, required: true }, // paise
-    paidBy: { type: String, enum: ['partner1', 'partner2', 'partner3', 'business'], required: true },
+    paidBy: { type: String, required: true, default: 'business' },
     paidByPartner: { type: mongoose_1.Schema.Types.ObjectId, ref: 'Partner' },
-    allocationMethod: { type: String, enum: ['equal', 'custom'], default: 'equal' },
+    allocationMethod: { type: String, default: 'equal' },
     allocations: [{
             partner: { type: mongoose_1.Schema.Types.ObjectId, ref: 'Partner' },
             amount: { type: Number }, // paise

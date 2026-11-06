@@ -264,9 +264,9 @@ export interface Expense {
   category: string;
   description: string;
   amount: number; // paise
-  paidBy: 'partner1' | 'partner2' | 'partner3' | 'business';
+  paidBy: string;
   paidByPartner?: Partner | string;
-  allocationMethod: 'equal' | 'custom';
+  allocationMethod: string;
   allocations: ExpenseAllocation[];
   vendor?: string;
   paymentMethod?: string;

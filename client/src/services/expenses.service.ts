@@ -17,5 +17,6 @@ export const partnersApi = {
   get: (id: string) => api.get<ApiResponse<Partner>>(`/partners/${id}`),
   create: (data: Partial<Partner>) => api.post('/partners', data),
   update: (id: string, data: Partial<Partner>) => api.put(`/partners/${id}`, data),
+  delete: (id: string) => api.delete(`/partners/${id}`),
   balance: (params?: PaginationParams) => api.get('/partners/balance', { params }),
 };

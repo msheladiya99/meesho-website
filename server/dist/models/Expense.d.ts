@@ -10,9 +10,9 @@ export interface IExpense extends Document {
     category: string;
     description: string;
     amount: number;
-    paidBy: 'partner1' | 'partner2' | 'partner3' | 'business';
+    paidBy: string;
     paidByPartner?: mongoose.Types.ObjectId;
-    allocationMethod: 'equal' | 'custom';
+    allocationMethod: string;
     allocations: IExpenseAllocation[];
     vendor?: string;
     paymentMethod?: string;

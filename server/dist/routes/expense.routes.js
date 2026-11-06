@@ -25,11 +25,38 @@ router.get('/', auth_1.enforceAccountAccess, async (req, res) => {
                 filter.expenseDate['$lte'] = new Date(endDate + 'T23:59:59.999Z');
         }
         const skip = (parseInt(page) - 1) * parseInt(limit);
-        const [expenses, total] = await Promise.all([
-            Expense_1.Expense.find(filter).populate('paidByPartner', 'name').populate('allocations.partner', 'name').populate('businessAccount', 'name gstin').sort({ expenseDate: -1 }).skip(skip).limit(parseInt(limit)),
-            Expense_1.Expense.countDocuments(filter),
+        const [partners, [expenses, total]] = await Promise.all([
+            Partner_1.Partner.find({ isActive: true }).sort({ createdAt: 1 }),
+            Promise.all([
+                Expense_1.Expense.find(filter)
+                    .populate('paidByPartner', 'name')
+                    .populate('allocations.partner', 'name')
+                    .populate('businessAccount', 'name gstin')
+                    .sort({ expenseDate: -1 })
+                    .skip(skip)
+                    .limit(parseInt(limit)),
+                Expense_1.Expense.countDocuments(filter),
+            ]),
         ]);
-        res.json({ success: true, data: expenses, total });
+        // Attach resolved paidByPartner for legacy records
+        const resolvedExpenses = expenses.map((e) => {
+            const obj = e.toObject();
+            if (!obj.paidByPartner && obj.paidBy && obj.paidBy !== 'business') {
+                if (obj.paidBy === 'partner1' && partners[0])
+                    obj.paidByPartner = { _id: partners[0]._id, name: partners[0].name };
+                else if (obj.paidBy === 'partner2' && partners[1])
+                    obj.paidByPartner = { _id: partners[1]._id, name: partners[1].name };
+                else if (obj.paidBy === 'partner3' && partners[2])
+                    obj.paidByPartner = { _id: partners[2]._id, name: partners[2].name };
+                else {
+                    const matched = partners.find(p => p.name.toLowerCase() === obj.paidBy.toLowerCase());
+                    if (matched)
+                        obj.paidByPartner = { _id: matched._id, name: matched.name };
+                }
+            }
+            return obj;
+        });
+        res.json({ success: true, data: resolvedExpenses, total });
     }
     catch (err) {
         res.status(500).json({ success: false, message: err.message });
@@ -43,10 +70,25 @@ router.post('/', auth_1.requireManagerOrAdmin, auth_1.enforceAccountAccess, asyn
             res.status(400).json({ success: false, message: 'businessAccount is required' });
             return;
         }
-        // Auto-generate equal allocations if method is equal
+        const partners = await Partner_1.Partner.find({ isActive: true }).sort({ createdAt: 1 });
+        // Determine actual paidByPartner
+        let resolvedPartnerId = paidByPartner;
+        if (!resolvedPartnerId && paidBy && paidBy !== 'business') {
+            if (paidBy === 'partner1' && partners[0])
+                resolvedPartnerId = partners[0]._id;
+            else if (paidBy === 'partner2' && partners[1])
+                resolvedPartnerId = partners[1]._id;
+            else if (paidBy === 'partner3' && partners[2])
+                resolvedPartnerId = partners[2]._id;
+            else {
+                const matched = partners.find(p => p._id.toString() === paidBy || p.name.toLowerCase() === paidBy.toLowerCase());
+                if (matched)
+                    resolvedPartnerId = matched._id;
+            }
+        }
+        // Auto-generate equal allocations if method is equal and not provided
         let { allocations } = req.body;
-        if (allocationMethod === 'equal' && (!allocations || allocations.length === 0)) {
-            const partners = await Partner_1.Partner.find({ isActive: true });
+        if ((allocationMethod === 'equal' || !allocationMethod) && (!allocations || allocations.length === 0)) {
             if (partners.length > 0) {
                 const perPartner = Math.round(amount / partners.length);
                 const rem = amount - perPartner * partners.length;
@@ -60,15 +102,16 @@ router.post('/', auth_1.requireManagerOrAdmin, auth_1.enforceAccountAccess, asyn
         // Validate allocation total
         if (allocations && allocations.length > 0) {
             const allocTotal = allocations.reduce((s, a) => s + a.amount, 0);
-            if (Math.abs(allocTotal - amount) > 5) { // allow 5 paise rounding tolerance
-                res.status(400).json({ success: false, message: `Allocation total (${allocTotal}) does not match expense amount (${amount})` });
+            if (Math.abs(allocTotal - amount) > 20) { // allow 20 paise rounding tolerance
+                res.status(400).json({ success: false, message: `Allocation total (₹${(allocTotal / 100).toFixed(2)}) does not match expense amount (₹${(amount / 100).toFixed(2)})` });
                 return;
             }
         }
         const expense = await Expense_1.Expense.create({
             ...req.body,
             allocations,
-            paidByPartner: paidByPartner || undefined,
+            paidBy: paidBy || 'business',
+            paidByPartner: resolvedPartnerId || undefined,
             createdBy: req.user?._id,
         });
         await (0, audit_service_1.createAuditLog)({ action: 'CREATE', resource: 'Expense', resourceId: expense._id.toString(), userId: req.user?._id, details: `${req.body.category}: ₹${(amount / 100).toFixed(2)}` });
@@ -83,7 +126,23 @@ router.post('/', auth_1.requireManagerOrAdmin, auth_1.enforceAccountAccess, asyn
 router.put('/:id', auth_1.requireManagerOrAdmin, auth_1.enforceAccountAccess, async (req, res) => {
     try {
         const id = req.params.id;
-        const updated = await Expense_1.Expense.findByIdAndUpdate(id, req.body, { new: true }).populate('paidByPartner', 'name').populate('businessAccount', 'name gstin');
+        const { paidBy, paidByPartner } = req.body;
+        let resolvedPartnerId = paidByPartner;
+        if (!resolvedPartnerId && paidBy && paidBy !== 'business') {
+            const partners = await Partner_1.Partner.find({ isActive: true }).sort({ createdAt: 1 });
+            if (paidBy === 'partner1' && partners[0])
+                resolvedPartnerId = partners[0]._id;
+            else if (paidBy === 'partner2' && partners[1])
+                resolvedPartnerId = partners[1]._id;
+            else if (paidBy === 'partner3' && partners[2])
+                resolvedPartnerId = partners[2]._id;
+            else {
+                const matched = partners.find(p => p._id.toString() === paidBy || p.name.toLowerCase() === paidBy.toLowerCase());
+                if (matched)
+                    resolvedPartnerId = matched._id;
+            }
+        }
+        const updated = await Expense_1.Expense.findByIdAndUpdate(id, { ...req.body, paidByPartner: resolvedPartnerId || (paidBy === 'business' ? null : undefined) }, { new: true }).populate('paidByPartner', 'name').populate('allocations.partner', 'name').populate('businessAccount', 'name gstin');
         if (!updated) {
             res.status(404).json({ success: false, message: 'Expense not found' });
             return;
@@ -120,19 +179,29 @@ router.get('/summary/partner', auth_1.enforceAccountAccess, async (req, res) => 
                 filter.expenseDate['$lte'] = new Date(endDate + 'T23:59:59.999Z');
         }
         const [partners, expenses] = await Promise.all([
-            Partner_1.Partner.find({ isActive: true }),
+            Partner_1.Partner.find({ isActive: true }).sort({ createdAt: 1 }),
             Expense_1.Expense.find(filter),
         ]);
-        const summary = partners.map(p => {
+        const summary = partners.map((p, pIdx) => {
             const pid = p._id.toString();
             let paid = 0;
             let allocated = 0;
             for (const e of expenses) {
-                if (e.paidByPartner?.toString() === pid)
+                let paidPid = e.paidByPartner?.toString();
+                if (!paidPid && e.paidBy) {
+                    if (e.paidBy === `partner${pIdx + 1}`)
+                        paidPid = pid;
+                    else if (e.paidBy.toLowerCase() === p.name.toLowerCase())
+                        paidPid = pid;
+                }
+                if (paidPid === pid)
                     paid += e.amount;
                 const alloc = e.allocations.find(a => a.partner?.toString() === pid);
                 if (alloc)
                     allocated += alloc.amount;
+                else if (e.allocationMethod === 'equal' && (!e.allocations || e.allocations.length === 0)) {
+                    allocated += Math.round(e.amount / partners.length);
+                }
             }
             return { partner: p.name, partnerId: pid, paid, allocated, balance: paid - allocated };
         });
