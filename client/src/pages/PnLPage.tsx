@@ -1,18 +1,31 @@
 import React, { useState } from 'react';
-import { useQuery } from '@tanstack/react-query';
+import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { reportsApi } from '../services/reports.service';
+import { expensesApi } from '../services/expenses.service';
 import { useAccountStore } from '../store/accountStore';
 import { formatCurrency, formatPercent, dateRangePresets, formatDate } from '../lib/utils';
 import DateRangePicker from '../components/ui/DateRangePicker';
-import { LoadingSpinner } from '../components/ui/Feedback';
+import { LoadingSpinner, ConfirmDialog } from '../components/ui/Feedback';
+import AdSpendModal from '../components/ui/AdSpendModal';
 import type { DateRange } from '../types';
-import { AlertTriangle, TrendingUp, TrendingDown, Layers } from 'lucide-react';
+import {
+  AlertTriangle, TrendingUp, TrendingDown, Layers, Megaphone,
+  ChevronDown, ChevronUp, Plus, Edit2, Trash2, Tag
+} from 'lucide-react';
 import axios from '../lib/axios';
+import toast from 'react-hot-toast';
 
 const PnLPage: React.FC = () => {
+  const qc = useQueryClient();
   const { activeAccountId } = useAccountStore();
   const [dateRange, setDateRange] = useState<DateRange>(dateRangePresets().thisMonth);
   const [selectedCategory, setSelectedCategory] = useState<string>('all');
+
+  // Ad Spend Modal State
+  const [isAdModalOpen, setIsAdModalOpen] = useState(false);
+  const [editingAd, setEditingAd] = useState<any | null>(null);
+  const [deleteAdId, setDeleteAdId] = useState<string | null>(null);
+  const [isAdExpanded, setIsAdExpanded] = useState<boolean>(true);
 
   // Categories list query for filter
   const { data: categoriesData } = useQuery({
@@ -37,6 +50,22 @@ const PnLPage: React.FC = () => {
   });
 
   const pnl = data?.data?.data;
+
+  // Delete Ad Spend Mutation
+  const deleteAdMutation = useMutation({
+    mutationFn: (id: string) => expensesApi.delete(id),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ['pnl'] });
+      qc.invalidateQueries({ queryKey: ['expenses'] });
+      qc.invalidateQueries({ queryKey: ['dashboard'] });
+      qc.invalidateQueries({ queryKey: ['partner-balance'] });
+      toast.success('Ad spend entry removed successfully');
+      setDeleteAdId(null);
+    },
+    onError: (err: any) => {
+      toast.error(err?.response?.data?.message || 'Failed to delete ad spend entry');
+    },
+  });
 
   const Row = ({
     label,
@@ -101,6 +130,18 @@ const PnLPage: React.FC = () => {
         </div>
 
         <div className="flex flex-wrap items-center gap-2">
+          {/* Add Ad Spend button */}
+          <button
+            onClick={() => {
+              setEditingAd(null);
+              setIsAdModalOpen(true);
+            }}
+            className="flex items-center gap-1.5 px-3 py-1.5 bg-gradient-to-r from-purple-600 to-indigo-600 hover:from-purple-700 hover:to-indigo-700 text-white rounded-lg text-xs font-semibold shadow-xs transition-all cursor-pointer whitespace-nowrap"
+          >
+            <Megaphone className="w-3.5 h-3.5" />
+            + Add Ad Spend
+          </button>
+
           {/* Category Filter */}
           <div className="flex items-center gap-1.5">
             <Layers className="w-3.5 h-3.5 text-gray-400" />
@@ -126,7 +167,7 @@ const PnLPage: React.FC = () => {
 
       <div className="flex items-center gap-2 px-3 sm:px-4 py-2 sm:py-2.5 bg-amber-50 border border-amber-100 rounded-lg text-xs text-amber-700">
         <AlertTriangle className="w-3.5 h-3.5 flex-shrink-0" />
-        These are <strong className="mx-1">estimated</strong> figures based on recorded sales, returns, and operating expenses. Customer return fees are charged as separate operating expenses.
+        These are <strong className="mx-1">estimated</strong> figures based on recorded sales, returns, and operating expenses. Ad spend & customer return fees are directly counted in Profit & Loss.
       </div>
 
       {isLoading ? (
@@ -140,7 +181,7 @@ const PnLPage: React.FC = () => {
             <h2 className="text-sm font-bold text-gray-700 mb-4 uppercase tracking-wider flex items-center justify-between">
               <span>Income Statement</span>
               <span className="text-[11px] font-normal text-gray-500 lowercase bg-gray-100 px-2 py-0.5 rounded">
-                purchase + packing + customer returns
+                purchase + packing + ads + customer returns
               </span>
             </h2>
             <div className="space-y-0.5">
@@ -234,7 +275,124 @@ const PnLPage: React.FC = () => {
 
               <Row label="Meesho Marketplace Fees" value={-pnl.meeshoFees} indent />
               <Row label="Shipping Costs" value={-pnl.shippingCosts} indent />
-              <Row label="Advertising & Marketing" value={-pnl.advertising} indent />
+
+              {/* Enhanced Advertising & Marketing Section with Breakdown */}
+              <div className="bg-purple-50/60 rounded-lg p-2.5 my-1.5 border border-purple-100 space-y-1.5">
+                <div className="flex items-center justify-between text-xs font-semibold text-purple-900">
+                  <div className="flex items-center gap-1.5">
+                    <Megaphone className="w-3.5 h-3.5 text-purple-600" />
+                    <span>Advertising & Marketing (Ad Spend)</span>
+                    <span className="text-[10px] bg-purple-100 text-purple-700 px-1.5 py-0.2 rounded font-medium">
+                      {pnl.adSpendList?.length || 0} {pnl.adSpendList?.length === 1 ? 'entry' : 'entries'}
+                    </span>
+                  </div>
+                  <div className="flex items-center gap-2">
+                    <span className={`font-mono text-xs font-bold ${pnl.advertising > 0 ? 'text-purple-700' : 'text-gray-500'}`}>
+                      {formatCurrency(-pnl.advertising)}
+                    </span>
+                    <button
+                      type="button"
+                      onClick={() => setIsAdExpanded(!isAdExpanded)}
+                      className="p-1 rounded text-purple-600 hover:bg-purple-100 transition-colors cursor-pointer"
+                      title={isAdExpanded ? 'Collapse entries' : 'Expand entries'}
+                    >
+                      {isAdExpanded ? <ChevronUp className="w-3.5 h-3.5" /> : <ChevronDown className="w-3.5 h-3.5" />}
+                    </button>
+                  </div>
+                </div>
+
+                {/* Expandable Entries List */}
+                {isAdExpanded && (
+                  <div className="pt-1.5 border-t border-purple-100 space-y-1.5">
+                    {(!pnl.adSpendList || pnl.adSpendList.length === 0) ? (
+                      <div className="flex items-center justify-between py-1.5 px-2 bg-white rounded border border-purple-100 text-[11px] text-gray-500">
+                        <span>No advertisement spend recorded for this period.</span>
+                        <button
+                          type="button"
+                          onClick={() => {
+                            setEditingAd(null);
+                            setIsAdModalOpen(true);
+                          }}
+                          className="text-purple-700 font-semibold hover:underline flex items-center gap-1 text-[11px] cursor-pointer"
+                        >
+                          <Plus className="w-3 h-3" /> Add Spend
+                        </button>
+                      </div>
+                    ) : (
+                      pnl.adSpendList.map((ad: any) => {
+                        const paidByName =
+                          ad.paidByPartner && typeof ad.paidByPartner === 'object'
+                            ? ad.paidByPartner.name
+                            : ad.paidBy === 'business'
+                            ? 'Business Account'
+                            : ad.paidBy || 'Business';
+
+                        return (
+                          <div
+                            key={ad._id}
+                            className="flex flex-col sm:flex-row sm:items-center justify-between p-2 bg-white rounded-lg border border-purple-100 gap-1.5 text-xs shadow-2xs hover:border-purple-200 transition-all"
+                          >
+                            <div className="flex items-center gap-1.5 sm:gap-2 flex-wrap">
+                              <span className="px-1.5 py-0.5 rounded text-[10px] font-bold bg-pink-100 text-pink-700 flex items-center gap-1">
+                                <Tag className="w-2.5 h-2.5" />
+                                {ad.vendor || 'Meesho Ads'}
+                              </span>
+                              <span className="font-medium text-gray-900 truncate max-w-[180px] sm:max-w-xs" title={ad.description}>
+                                {ad.description || 'Ad Spend'}
+                              </span>
+                              <span className="text-[10px] text-gray-400 font-mono">
+                                {formatDate(ad.expenseDate)}
+                              </span>
+                              <span className="text-[10px] text-gray-500 bg-gray-100 px-1.5 py-0.2 rounded hidden sm:inline">
+                                {paidByName}
+                              </span>
+                            </div>
+                            <div className="flex items-center justify-between sm:justify-end gap-2.5">
+                              <span className="font-mono font-bold text-red-600 text-xs">
+                                -{formatCurrency(ad.amount)}
+                              </span>
+                              <div className="flex items-center gap-1">
+                                <button
+                                  type="button"
+                                  onClick={() => {
+                                    setEditingAd(ad);
+                                    setIsAdModalOpen(true);
+                                  }}
+                                  className="p-1 rounded text-gray-400 hover:text-purple-700 hover:bg-purple-50 transition-colors cursor-pointer"
+                                  title="Edit ad spend"
+                                >
+                                  <Edit2 className="w-3 h-3" />
+                                </button>
+                                <button
+                                  type="button"
+                                  onClick={() => setDeleteAdId(ad._id)}
+                                  className="p-1 rounded text-gray-400 hover:text-red-600 hover:bg-red-50 transition-colors cursor-pointer"
+                                  title="Delete ad spend"
+                                >
+                                  <Trash2 className="w-3 h-3" />
+                                </button>
+                              </div>
+                            </div>
+                          </div>
+                        );
+                      })
+                    )}
+                    <div className="flex justify-end pt-0.5">
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setEditingAd(null);
+                          setIsAdModalOpen(true);
+                        }}
+                        className="text-[11px] font-semibold text-purple-700 hover:text-purple-800 flex items-center gap-1 cursor-pointer"
+                      >
+                        <Plus className="w-3 h-3" /> Record another ad spend
+                      </button>
+                    </div>
+                  </div>
+                )}
+              </div>
+
               <Row label="Other Operating Expenses" value={-pnl.otherExpenses} indent />
               <Row
                 label="Total Deductions (Returns + Expenses)"
@@ -278,7 +436,7 @@ const PnLPage: React.FC = () => {
                     {formatCurrency(pnl.operatingProfit)}
                   </p>
                   <p className="text-[11px] text-gray-500 mt-0.5">
-                    Net Sales − Purchase Price − Packing Charges − Customer Returns − Expenses
+                    Net Sales − Purchase Price − Packing Charges − Customer Returns − Ad Spend − Other Expenses
                   </p>
                 </div>
               </div>
@@ -309,6 +467,18 @@ const PnLPage: React.FC = () => {
                   value: '₹0.00 (Excluded)',
                 },
                 {
+                  label: 'Total Ad Spend',
+                  value: formatCurrency(pnl.advertising || 0),
+                  highlight: pnl.advertising > 0 ? 'bg-purple-50 border border-purple-200' : undefined,
+                  subtext: pnl.advertising > 0 && pnl.netSales > 0 ? `${((pnl.advertising / pnl.netSales) * 100).toFixed(1)}% of Net Sales` : undefined,
+                },
+                {
+                  label: 'ROAS (Ad Return)',
+                  value: pnl.advertising > 0 ? `${(pnl.netSales / pnl.advertising).toFixed(1)}x` : 'N/A',
+                  highlight: pnl.advertising > 0 ? ((pnl.netSales / pnl.advertising >= 3) ? 'bg-emerald-50 border border-emerald-200' : 'bg-amber-50 border border-amber-200') : undefined,
+                  subtext: pnl.advertising > 0 ? ((pnl.netSales / pnl.advertising >= 3) ? 'Profitable Returns' : 'Moderate Return') : undefined,
+                },
+                {
                   label: 'Operating Expenses',
                   value: formatCurrency((pnl.totalOperatingExpenses || 0) - (pnl.totalCustomerReturnExpenses || 0)),
                 },
@@ -317,9 +487,13 @@ const PnLPage: React.FC = () => {
                   value: formatCurrency(pnl.totalOperatingExpenses || 0),
                 },
               ].map((item) => (
-                <div key={item.label} className="text-center p-2.5 sm:p-3 bg-gray-50 rounded-lg">
+                <div
+                  key={item.label}
+                  className={`text-center p-2.5 sm:p-3 rounded-lg ${item.highlight || 'bg-gray-50'}`}
+                >
                   <p className="text-[11px] text-gray-500 mb-0.5">{item.label}</p>
                   <p className="text-xs sm:text-sm font-bold text-gray-900">{item.value}</p>
+                  {item.subtext && <p className="text-[10px] text-gray-500 mt-0.5 font-medium">{item.subtext}</p>}
                 </div>
               ))}
             </div>
@@ -327,7 +501,7 @@ const PnLPage: React.FC = () => {
             {/* Packaging & Unit Economics Guide */}
             <div className="card p-5 space-y-2.5">
               <h3 className="text-xs font-semibold text-gray-700 uppercase tracking-wider flex items-center justify-between">
-                <span>Unit Cost & Packaging Structure</span>
+                <span>Unit Cost, Packaging & Ad Spend Structure</span>
                 <span className="text-[10px] text-primary-600 bg-primary-50 px-2 py-0.5 rounded font-bold">Standard Model</span>
               </h3>
               <div className="text-xs text-gray-600 space-y-1.5 bg-gray-50 p-3 rounded-lg border border-gray-100">
@@ -361,6 +535,7 @@ const PnLPage: React.FC = () => {
                 </div>
               </div>
               <div className="text-[11px] text-gray-500 space-y-1">
+                <p>• <strong>Advertisement Spend:</strong> Counted under operating expenses and deducted from gross profit to compute Net Profit. ROAS shows revenue returned per ₹1 spent.</p>
                 <p>• <strong>Less Customer Return:</strong> Customer returns incur return base + handling fees which are deducted from profit.</p>
                 <p>• <strong>RTO Return:</strong> Courier undelivered returns (RTO) do NOT incur return fees on Meesho and are strictly zero-charged.</p>
               </div>
@@ -368,6 +543,30 @@ const PnLPage: React.FC = () => {
           </div>
         </div>
       )}
+
+      {/* Ad Spend Modal */}
+      <AdSpendModal
+        isOpen={isAdModalOpen}
+        onClose={() => {
+          setIsAdModalOpen(false);
+          setEditingAd(null);
+        }}
+        editingAd={editingAd}
+        defaultAccountId={activeAccountId}
+      />
+
+      {/* Delete Ad Spend Confirmation Dialog */}
+      <ConfirmDialog
+        isOpen={!!deleteAdId}
+        title="Delete Advertisement Spend"
+        message="Are you sure you want to delete this advertisement spend entry? It will be removed from your expenses and added back to your Profit & Loss."
+        confirmText="Delete"
+        onConfirm={() => {
+          if (deleteAdId) deleteAdMutation.mutate(deleteAdId);
+        }}
+        onCancel={() => setDeleteAdId(null)}
+        isDangerous
+      />
     </div>
   );
 };

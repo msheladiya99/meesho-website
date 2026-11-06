@@ -1,11 +1,12 @@
 import React, { useState, useEffect } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
-import { Plus, Edit2, Trash2, Users, Building2, Check, Percent, DollarSign, Wallet, Divide } from 'lucide-react';
+import { Plus, Edit2, Trash2, Users, Building2, Check, Percent, DollarSign, Wallet, Divide, Megaphone } from 'lucide-react';
 import { expensesApi, partnersApi } from '../services/expenses.service';
 import { useAccountStore } from '../store/accountStore';
 import { formatCurrency, formatDate, rupeesToPaise, paiseToRupees, dateRangePresets } from '../lib/utils';
 import DateRangePicker from '../components/ui/DateRangePicker';
 import Modal from '../components/ui/Modal';
+import AdSpendModal from '../components/ui/AdSpendModal';
 import { EmptyState, LoadingSpinner, ConfirmDialog } from '../components/ui/Feedback';
 import { Pagination, TableSummaryStatus } from '../components/ui/Pagination';
 import toast from 'react-hot-toast';
@@ -21,6 +22,7 @@ const ExpensesPage: React.FC = () => {
   const [page, setPage] = useState(1);
   const [pageSize, setPageSize] = useState(10);
   const [isModalOpen, setIsModalOpen] = useState(false);
+  const [isAdModalOpen, setIsAdModalOpen] = useState(false);
   const [editingExpense, setEditingExpense] = useState<Expense | null>(null);
   const [deleteId, setDeleteId] = useState<string | null>(null);
 
@@ -354,9 +356,17 @@ const ExpensesPage: React.FC = () => {
             Total: <strong>{formatCurrency(totalExpenses)}</strong> · {expenses.length} records
           </p>
         </div>
-        <button onClick={openAddModal} className="btn-primary py-2 px-3.5 text-xs flex items-center gap-1.5 font-semibold shadow-xs">
-          <Plus className="w-4 h-4" /> Add Expense
-        </button>
+        <div className="flex items-center gap-2">
+          <button
+            onClick={() => setIsAdModalOpen(true)}
+            className="py-2 px-3.5 text-xs flex items-center gap-1.5 font-semibold text-white bg-gradient-to-r from-purple-600 to-indigo-600 hover:from-purple-700 hover:to-indigo-700 rounded-lg shadow-xs transition-all cursor-pointer"
+          >
+            <Megaphone className="w-4 h-4" /> Add Ad Spend
+          </button>
+          <button onClick={openAddModal} className="btn-primary py-2 px-3.5 text-xs flex items-center gap-1.5 font-semibold shadow-xs">
+            <Plus className="w-4 h-4" /> Add Expense
+          </button>
+        </div>
       </div>
 
       <div className="card p-4 space-y-3 shadow-xs">
@@ -904,6 +914,13 @@ const ExpensesPage: React.FC = () => {
         onCancel={() => setDeleteId(null)}
         confirmText="Delete"
         isDangerous
+      />
+
+      {/* Ad Spend Modal */}
+      <AdSpendModal
+        isOpen={isAdModalOpen}
+        onClose={() => setIsAdModalOpen(false)}
+        defaultAccountId={activeAccountId}
       />
     </div>
   );

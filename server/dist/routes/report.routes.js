@@ -195,12 +195,7 @@ router.get('/pnl', auth_1.enforceAccountAccess, async (req, res) => {
             prodFilter = { product: { $in: catProdIds } };
             catChargeFilter = { $or: [{ category: catObjId }, { product: { $in: catProdIds } }] };
         }
-        const EXPENSE_CATEGORIES = {
-            meeshoFees: 'Meesho Fees',
-            shipping: 'Shipping',
-            advertising: 'Advertising',
-        };
-        const [orderAgg, cancelAgg, returnAgg, purchaseAgg, expenseAgg, catExpenses, products, returnChargeAgg, eligibleOrders] = await Promise.all([
+        const [orderAgg, cancelAgg, returnAgg, purchaseAgg, expenseAgg, catExpenses, products, returnChargeAgg, eligibleOrders, adSpendList] = await Promise.all([
             Order_1.Order.aggregate([{ $match: { isDeleted: false, ...af, ...df, ...prodFilter } }, { $group: { _id: null, gross: { $sum: '$grossAmount' }, qty: { $sum: '$quantity' } } }]),
             Order_1.Order.aggregate([{ $match: { isDeleted: false, status: 'cancelled', ...af, ...df, ...prodFilter } }, { $group: { _id: null, total: { $sum: '$grossAmount' } } }]),
             ReturnOrder_1.ReturnOrder.aggregate([{ $match: { isDeleted: false, ...af, ...rdf, ...prodFilter } }, { $group: { _id: null, total: { $sum: '$returnAmount' } } }]),
@@ -230,6 +225,19 @@ router.get('/pnl', auth_1.enforceAccountAccess, async (req, res) => {
                 ...df,
                 ...prodFilter,
             }).select('quantity grossAmount sellingPrice product isCombo items').lean(),
+            Expense_1.Expense.find({
+                isDeleted: false,
+                ...af,
+                ...edf,
+                $or: [
+                    { category: { $regex: /adverti|ad spend|meesho ad|meta ad|facebook ad|google ad|^ads?$|marketing/i } },
+                    { description: { $regex: /adverti|ad spend|meesho ad/i } },
+                ],
+            })
+                .populate('paidByPartner', 'name')
+                .populate('businessAccount', 'name gstin')
+                .sort({ expenseDate: -1 })
+                .lean(),
         ]);
         const grossOrderValue = orderAgg[0]?.gross || 0;
         const salesCancellations = cancelAgg[0]?.total || 0;
@@ -287,13 +295,24 @@ router.get('/pnl', auth_1.enforceAccountAccess, async (req, res) => {
         const totalPurchaseAndPackingCost = totalPurchaseCost + totalPackingCharges;
         const costOfGoodsSold = totalPurchaseCost;
         const grossProfit = netSales - totalPurchaseAndPackingCost;
-        const getCatTotal = (cat) => {
-            const found = catExpenses.find((c) => c._id === cat);
-            return found ? found.total : 0;
-        };
-        const meeshoFees = getCatTotal(EXPENSE_CATEGORIES.meeshoFees);
-        const shippingCosts = getCatTotal(EXPENSE_CATEGORIES.shipping) + getCatTotal('Return Shipping');
-        const advertising = getCatTotal(EXPENSE_CATEGORIES.advertising) + getCatTotal('Marketing');
+        const isAdCategory = (cat) => /adverti|ad spend|meesho ad|meta ad|facebook ad|google ad|^ads?$|marketing/i.test(cat || '');
+        const isMeeshoFeeCategory = (cat) => /meesho fee|platform fee|marketplace fee/i.test(cat || '');
+        const isShippingCategory = (cat) => /shipping|courier|transport/i.test(cat || '');
+        let advertising = 0;
+        let meeshoFees = 0;
+        let shippingCosts = 0;
+        catExpenses.forEach((c) => {
+            const name = c._id || '';
+            if (isAdCategory(name)) {
+                advertising += c.total;
+            }
+            else if (isMeeshoFeeCategory(name)) {
+                meeshoFees += c.total;
+            }
+            else if (isShippingCategory(name)) {
+                shippingCosts += c.total;
+            }
+        });
         // RTO Returns strictly receive 0 charges (no penalty on Meesho)
         const totalRtoCharges = 0;
         // Customer returns charges (LESS customer returns, strictly excluding RTO)
@@ -336,6 +355,7 @@ router.get('/pnl', auth_1.enforceAccountAccess, async (req, res) => {
                 operatingProfit,
                 netProfit: operatingProfit,
                 profitMargin: netSales > 0 ? (operatingProfit / netSales) * 100 : 0,
+                adSpendList,
             },
         });
     }

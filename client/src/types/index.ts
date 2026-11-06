@@ -337,6 +337,7 @@ export const EXPENSE_CATEGORIES = [
   'Meesho Fees',
   'Return Shipping',
   'Advertising',
+  'Meesho Ads',
   'Marketing',
   'Website & Software',
   'Travel',
@@ -479,5 +480,18 @@ export interface PnLData {
   operatingProfit: number;
   netProfit: number;
   profitMargin: number;
+  adSpendList?: Array<{
+    _id: string;
+    expenseDate: string;
+    category: string;
+    description: string;
+    amount: number;
+    paidBy: string;
+    paidByPartner?: { _id: string; name: string } | string;
+    vendor?: string;
+    paymentMethod?: string;
+    notes?: string;
+    businessAccount?: { _id: string; name: string; gstin: string } | string;
+  }>;
 }
 
