@@ -1,10 +1,12 @@
 import React, { useState } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
-import { Edit2, Users, Plus, Trash2, ArrowUpRight, ArrowDownLeft, CheckCircle2, AlertCircle, Receipt, DollarSign, Wallet } from 'lucide-react';
+import { Link } from 'react-router-dom';
+import { Edit2, Users, Plus, Trash2, ArrowUpRight, ArrowDownLeft, CheckCircle2, AlertCircle, Receipt, DollarSign, Wallet, TrendingUp, TrendingDown, ArrowRight } from 'lucide-react';
 import { useForm } from 'react-hook-form';
 import { zodResolver } from '@hookform/resolvers/zod';
 import { z } from 'zod';
 import { partnersApi } from '../services/expenses.service';
+import { reportsApi } from '../services/reports.service';
 import { useAccountStore } from '../store/accountStore';
 import { formatCurrency, formatDate, dateRangePresets } from '../lib/utils';
 import DateRangePicker from '../components/ui/DateRangePicker';
@@ -68,8 +70,19 @@ const PartnersPage: React.FC = () => {
     }),
   });
 
+  const { data: pnlData } = useQuery({
+    queryKey: ['pnl', { accountId: activeAccountId === 'all' ? undefined : activeAccountId, ...dateRange }],
+    queryFn: () => reportsApi.pnl({
+      accountId: activeAccountId === 'all' ? undefined : activeAccountId,
+      startDate: dateRange.startDate,
+      endDate: dateRange.endDate,
+    }),
+  });
+
   const partners: Partner[] = data?.data?.data || [];
   const balances: Record<string, PartnerBalanceItem> = balanceData?.data?.data || {};
+  const partnerPnLList = pnlData?.data?.data?.partnerPnL || [];
+  const periodNetProfit = pnlData?.data?.data?.operatingProfit || 0;
   const totalProfitShare = Number(partners.reduce((s, p) => s + (p.profitSharePercent || 0), 0).toFixed(2));
   const totalCapital = partners.reduce((s, p) => s + (p.capitalContributed || 0), 0);
   const totalExpensesPaid = Object.values(balances).reduce((s, b) => s + (b.expensesPaid || 0), 0);
@@ -213,7 +226,7 @@ const PartnersPage: React.FC = () => {
       </div>
 
       {/* Overall Summary Stats */}
-      <div className="grid grid-cols-2 lg:grid-cols-4 gap-3 sm:gap-4">
+      <div className="grid grid-cols-2 lg:grid-cols-5 gap-3 sm:gap-4">
         <div className="card p-3 sm:p-4 border-l-4 border-l-primary-500">
           <p className="text-[11px] font-semibold text-gray-500 uppercase tracking-wider">Active Partners</p>
           <p className="text-xl sm:text-2xl font-bold text-gray-900 mt-1">{partners.length}</p>
@@ -224,6 +237,16 @@ const PartnersPage: React.FC = () => {
           <p className="text-[11px] font-semibold text-gray-500 uppercase tracking-wider">Total Capital</p>
           <p className="text-xl sm:text-2xl font-bold text-blue-700 mt-1">{formatCurrency(totalCapital)}</p>
           <p className="text-[10px] text-gray-400 mt-0.5">Contributed by partners</p>
+        </div>
+
+        <div className="card p-3 sm:p-4 border-l-4 border-l-emerald-600">
+          <p className="text-[11px] font-semibold text-gray-500 uppercase tracking-wider">Period Net Profit</p>
+          <p className={`text-xl sm:text-2xl font-bold mt-1 ${periodNetProfit >= 0 ? 'text-emerald-700' : 'text-rose-700'}`}>
+            {formatCurrency(periodNetProfit)}
+          </p>
+          <Link to="/pnl" className="text-[10px] text-primary-600 hover:underline flex items-center gap-0.5 mt-0.5 font-medium">
+            View Full P&L <ArrowRight className="w-2.5 h-2.5" />
+          </Link>
         </div>
 
         <div className="card p-3 sm:p-4 border-l-4 border-l-emerald-500">
@@ -258,6 +281,7 @@ const PartnersPage: React.FC = () => {
         <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-5">
           {partners.map((p, i) => {
             const bal = balances[p._id] || { expensesPaid: 0, expensesAllocated: 0, balance: 0, paidExpenses: [] };
+            const pnlStats = partnerPnLList.find((pp: any) => pp._id === p._id);
             const isOwed = bal.balance > 0;
             const owesBusiness = bal.balance < 0;
             const colorClass = AVATAR_COLORS[i % AVATAR_COLORS.length];
@@ -299,6 +323,34 @@ const PartnersPage: React.FC = () => {
                   </div>
                 </div>
 
+                {/* Period Net Profit Box */}
+                {pnlStats && (
+                  <div
+                    className={`p-3 rounded-xl border text-xs ${
+                      pnlStats.netProfitShare >= 0
+                        ? 'bg-emerald-50/75 border-emerald-200 text-emerald-950'
+                        : 'bg-rose-50/75 border-rose-200 text-rose-950'
+                    }`}
+                  >
+                    <div className="flex justify-between items-center">
+                      <span className="font-semibold text-gray-700">Net Profit Share ({p.profitSharePercent}%):</span>
+                      <span className={`font-black text-sm ${pnlStats.netProfitShare >= 0 ? 'text-emerald-700' : 'text-rose-700'}`}>
+                        {formatCurrency(pnlStats.netProfitShare)}
+                      </span>
+                    </div>
+                    <div className="flex justify-between items-center text-[10px] text-gray-500 mt-1.5 pt-1.5 border-t border-gray-200/60">
+                      <span>Gross Profit Share:</span>
+                      <span className="font-medium text-gray-800">{formatCurrency(pnlStats.grossProfitShare)}</span>
+                    </div>
+                    <div className="flex justify-between items-center text-[10px] text-gray-500 mt-0.5">
+                      <span className="font-bold text-gray-700">Total Take-Home (Profit + Reimbursement):</span>
+                      <span className={`font-black text-xs ${pnlStats.netReceivable >= 0 ? 'text-primary-700' : 'text-rose-600'}`}>
+                        {formatCurrency(pnlStats.netReceivable)}
+                      </span>
+                    </div>
+                  </div>
+                )}
+
                 {/* Financial Summary Breakdown */}
                 <div className="bg-gray-50/70 p-3 rounded-xl space-y-2 border border-gray-100 text-xs">
                   <div className="flex justify-between items-center text-gray-600">
@@ -324,7 +376,7 @@ const PartnersPage: React.FC = () => {
 
                   {/* Net Balance Pill */}
                   <div className="flex justify-between items-center pt-2 border-t border-gray-200">
-                    <span className="font-semibold text-gray-700">Net Balance:</span>
+                    <span className="font-semibold text-gray-700">Reimbursement Balance:</span>
                     <span
                       className={`font-bold px-2 py-0.5 rounded-full text-xs flex items-center gap-1 ${
                         isOwed

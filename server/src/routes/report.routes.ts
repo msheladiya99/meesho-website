@@ -10,6 +10,7 @@ import { ScanException } from '../models/ScanException';
 import { BusinessAccount } from '../models/BusinessAccount';
 import { StockMovement } from '../models/StockMovement';
 import { CustomerReturnCharge } from '../models/CustomerReturnCharge';
+import { Partner } from '../models/Partner';
 import { authenticate, enforceAccountAccess, AuthRequest } from '../middleware/auth';
 import { resolveStockAccountIds } from '../services/inventory.service';
 
@@ -220,7 +221,20 @@ router.get('/pnl', enforceAccountAccess, async (req: AuthRequest, res: Response)
       catChargeFilter = { $or: [{ category: catObjId }, { product: { $in: catProdIds } }] };
     }
 
-    const [orderAgg, cancelAgg, returnAgg, purchaseAgg, expenseAgg, catExpenses, products, returnChargeAgg, eligibleOrders, adSpendList] = await Promise.all([
+    const [
+      orderAgg,
+      cancelAgg,
+      returnAgg,
+      purchaseAgg,
+      expenseAgg,
+      catExpenses,
+      products,
+      returnChargeAgg,
+      eligibleOrders,
+      adSpendList,
+      activePartners,
+      periodExpenses,
+    ] = await Promise.all([
       Order.aggregate([{ $match: { isDeleted: false, ...af, ...df, ...prodFilter } }, { $group: { _id: null, gross: { $sum: '$grossAmount' }, qty: { $sum: '$quantity' } } }]),
       Order.aggregate([{ $match: { isDeleted: false, status: 'cancelled', ...af, ...df, ...prodFilter } }, { $group: { _id: null, total: { $sum: '$grossAmount' } } }]),
       ReturnOrder.aggregate([{ $match: { isDeleted: false, ...af, ...rdf, ...prodFilter } }, { $group: { _id: null, total: { $sum: '$returnAmount' } } }]),
@@ -262,6 +276,11 @@ router.get('/pnl', enforceAccountAccess, async (req: AuthRequest, res: Response)
         .populate('paidByPartner', 'name')
         .populate('businessAccount', 'name gstin')
         .sort({ expenseDate: -1 })
+        .lean(),
+      Partner.find({ isActive: true }).sort({ createdAt: 1 }).lean(),
+      Expense.find({ isDeleted: false, ...af, ...edf })
+        .populate('paidByPartner', 'name')
+        .populate('allocations.partner', 'name')
         .lean(),
     ]);
 
@@ -361,6 +380,91 @@ router.get('/pnl', enforceAccountAccess, async (req: AuthRequest, res: Response)
     const totalOperatingExpenses = meeshoFees + shippingCosts + advertising + totalCustomerReturnExpenses + otherExpenses;
     const operatingProfit = grossProfit - totalOperatingExpenses;
 
+    // Calculate Partner-Wise Profit & Loss Distribution
+    const partnerExpenseStats: Record<string, { paid: number; allocated: number }> = {};
+    for (const p of activePartners) {
+      partnerExpenseStats[p._id.toString()] = { paid: 0, allocated: 0 };
+    }
+
+    for (const exp of periodExpenses) {
+      // Determine who paid
+      let paidPartnerId = (exp.paidByPartner as any)?._id
+        ? (exp.paidByPartner as any)._id.toString()
+        : exp.paidByPartner?.toString();
+
+      if (!paidPartnerId && exp.paidBy && exp.paidBy !== 'business') {
+        if (exp.paidBy === 'partner1' && activePartners[0]) paidPartnerId = activePartners[0]._id.toString();
+        else if (exp.paidBy === 'partner2' && activePartners[1]) paidPartnerId = activePartners[1]._id.toString();
+        else {
+          const matched = activePartners.find(p => p.name.toLowerCase() === exp.paidBy.toLowerCase());
+          if (matched) paidPartnerId = matched._id.toString();
+        }
+      }
+
+      if (paidPartnerId && partnerExpenseStats[paidPartnerId]) {
+        partnerExpenseStats[paidPartnerId].paid += exp.amount || 0;
+      }
+
+      // Allocations
+      if (exp.allocations && exp.allocations.length > 0) {
+        for (const alloc of exp.allocations) {
+          const aId = (alloc.partner as any)?._id
+            ? (alloc.partner as any)._id.toString()
+            : alloc.partner?.toString();
+          if (aId && partnerExpenseStats[aId]) {
+            partnerExpenseStats[aId].allocated += alloc.amount || 0;
+          }
+        }
+      } else if (activePartners.length > 0) {
+        const perP = Math.round((exp.amount || 0) / activePartners.length);
+        for (const p of activePartners) {
+          const pid = p._id.toString();
+          if (partnerExpenseStats[pid]) partnerExpenseStats[pid].allocated += perP;
+        }
+      }
+    }
+
+    const partnerPnL = activePartners.map((p) => {
+      const pid = p._id.toString();
+      const sharePct = typeof p.profitSharePercent === 'number' && p.profitSharePercent > 0
+        ? p.profitSharePercent
+        : (activePartners.length > 0 ? Number((100 / activePartners.length).toFixed(2)) : 0);
+      const ratio = sharePct / 100;
+
+      const pNetSales = Math.round(netSales * ratio);
+      const pPurchasePacking = Math.round(totalPurchaseAndPackingCost * ratio);
+      const pGrossProfit = Math.round(grossProfit * ratio);
+      const pAdSpend = Math.round(advertising * ratio);
+      const pCustomerReturns = Math.round(totalCustomerReturnExpenses * ratio);
+      const pOperatingExpenses = Math.round(totalOperatingExpenses * ratio);
+      const pNetProfit = Math.round(operatingProfit * ratio);
+
+      const pPaid = partnerExpenseStats[pid]?.paid || 0;
+      const pAllocated = partnerExpenseStats[pid]?.allocated || 0;
+      const expenseReimbursementBalance = pPaid - pAllocated;
+      const netPayableOrReceivable = pNetProfit + expenseReimbursementBalance;
+
+      return {
+        _id: pid,
+        name: p.name,
+        email: p.email,
+        phone: p.phone,
+        profitSharePercent: sharePct,
+        capitalContributed: p.capitalContributed || 0,
+        netSalesShare: pNetSales,
+        purchaseAndPackingShare: pPurchasePacking,
+        grossProfitShare: pGrossProfit,
+        adSpendShare: pAdSpend,
+        customerReturnsShare: pCustomerReturns,
+        operatingExpensesShare: pOperatingExpenses,
+        netProfitShare: pNetProfit,
+        expensesPaid: pPaid,
+        expensesAllocated: pAllocated,
+        expenseBalance: expenseReimbursementBalance,
+        netReceivable: netPayableOrReceivable,
+      };
+    });
+
     res.json({
       success: true,
       data: {
@@ -395,6 +499,7 @@ router.get('/pnl', enforceAccountAccess, async (req: AuthRequest, res: Response)
         netProfit: operatingProfit,
         profitMargin: netSales > 0 ? (operatingProfit / netSales) * 100 : 0,
         adSpendList,
+        partnerPnL,
       },
     });
   } catch (err) {

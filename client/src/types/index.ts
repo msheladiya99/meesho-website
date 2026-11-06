@@ -493,5 +493,24 @@ export interface PnLData {
     notes?: string;
     businessAccount?: { _id: string; name: string; gstin: string } | string;
   }>;
+  partnerPnL?: Array<{
+    _id: string;
+    name: string;
+    email?: string;
+    phone?: string;
+    profitSharePercent: number;
+    capitalContributed?: number;
+    netSalesShare: number;
+    purchaseAndPackingShare: number;
+    grossProfitShare: number;
+    adSpendShare: number;
+    customerReturnsShare: number;
+    operatingExpensesShare: number;
+    netProfitShare: number;
+    expensesPaid: number;
+    expensesAllocated: number;
+    expenseBalance: number;
+    netReceivable: number;
+  }>;
 }
 
