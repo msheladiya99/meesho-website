@@ -5,6 +5,7 @@ import { Toaster } from 'react-hot-toast';
 
 import { useAuthStore } from './store/authStore';
 import AppLayout from './components/layout/AppLayout';
+import ErrorBoundary from './components/ui/ErrorBoundary';
 import { healthPingService } from './services/healthPing.service';
 
 // Pages
@@ -58,36 +59,38 @@ function App() {
 
   return (
     <QueryClientProvider client={queryClient}>
-      <BrowserRouter>
-        <Routes>
-          <Route path="/login" element={<PublicRoute><LoginPage /></PublicRoute>} />
-          
-          <Route path="/" element={<PrivateRoute><AppLayout /></PrivateRoute>}>
-            <Route index element={<Dashboard />} />
-            <Route path="orders" element={<OrdersPage />} />
-            <Route path="packing" element={<PackingDispatchPage />} />
-            <Route path="returns" element={<ReturnsPage />} />
-            <Route path="perfume-sales" element={<PerfumePerformancePage />} />
-            <Route path="perfume-analytics" element={<PerfumePerformancePage />} />
-            <Route path="products" element={<ProductsPage />} />
-            <Route path="inventory" element={<InventoryPage />} />
-            <Route path="stock-purchases" element={<StockPurchasesPage />} />
-            <Route path="vendors" element={<VendorsPage />} />
-            <Route path="expenses" element={<ExpensesPage />} />
-            <Route path="partners" element={<PartnersPage />} />
-            <Route path="pnl" element={<PnLPage />} />
-            <Route path="analytics" element={<AnalyticsPage />} />
-            <Route path="reports" element={<ReportsPage />} />
-            <Route path="settings" element={<SettingsPage />} />
-            <Route path="return-charges" element={<CustomerReturnChargesPage />} />
-            <Route path="users" element={<UsersPage />} />
-            <Route path="audit" element={<AuditLogsPage />} />
-          </Route>
+      <ErrorBoundary>
+        <BrowserRouter>
+          <Routes>
+            <Route path="/login" element={<PublicRoute><LoginPage /></PublicRoute>} />
+            
+            <Route path="/" element={<PrivateRoute><AppLayout /></PrivateRoute>}>
+              <Route index element={<Dashboard />} />
+              <Route path="orders" element={<OrdersPage />} />
+              <Route path="packing" element={<PackingDispatchPage />} />
+              <Route path="returns" element={<ReturnsPage />} />
+              <Route path="perfume-sales" element={<PerfumePerformancePage />} />
+              <Route path="perfume-analytics" element={<PerfumePerformancePage />} />
+              <Route path="products" element={<ProductsPage />} />
+              <Route path="inventory" element={<InventoryPage />} />
+              <Route path="stock-purchases" element={<StockPurchasesPage />} />
+              <Route path="vendors" element={<VendorsPage />} />
+              <Route path="expenses" element={<ExpensesPage />} />
+              <Route path="partners" element={<PartnersPage />} />
+              <Route path="pnl" element={<PnLPage />} />
+              <Route path="analytics" element={<AnalyticsPage />} />
+              <Route path="reports" element={<ReportsPage />} />
+              <Route path="settings" element={<SettingsPage />} />
+              <Route path="return-charges" element={<CustomerReturnChargesPage />} />
+              <Route path="users" element={<UsersPage />} />
+              <Route path="audit" element={<AuditLogsPage />} />
+            </Route>
 
-          {/* Catch all */}
-          <Route path="*" element={<Navigate to="/" replace />} />
-        </Routes>
-      </BrowserRouter>
+            {/* Catch all */}
+            <Route path="*" element={<Navigate to="/" replace />} />
+          </Routes>
+        </BrowserRouter>
+      </ErrorBoundary>
 
       <Toaster
         position="top-right"

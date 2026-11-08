@@ -3,12 +3,13 @@ import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { Link } from 'react-router-dom';
 import { reportsApi } from '../services/reports.service';
 import { expensesApi } from '../services/expenses.service';
+import { categoriesApi } from '../services/inventory.service';
 import { useAccountStore } from '../store/accountStore';
 import { formatCurrency, formatPercent, dateRangePresets, formatDate } from '../lib/utils';
 import DateRangePicker from '../components/ui/DateRangePicker';
 import { LoadingSpinner, ConfirmDialog } from '../components/ui/Feedback';
 import AdSpendModal from '../components/ui/AdSpendModal';
-import type { DateRange } from '../types';
+import type { DateRange, Category } from '../types';
 import {
   AlertTriangle, TrendingUp, TrendingDown, Layers, Megaphone,
   ChevronDown, ChevronUp, Plus, Edit2, Trash2, Tag, Users,
@@ -41,15 +42,18 @@ const PnLPage: React.FC = () => {
   // Partner view mode: cards or comparison table
   const [partnerViewMode, setPartnerViewMode] = useState<'cards' | 'table'>('cards');
 
-  // Categories list query for filter
+  // Categories list query for filter — safe handling whether cached as AxiosResponse or array
   const { data: categoriesData } = useQuery({
     queryKey: ['categories'],
-    queryFn: async () => {
-      const res = await axios.get('/categories');
-      return res.data?.data || [];
-    },
+    queryFn: () => categoriesApi.list(),
   });
-  const categories: Array<{ _id: string; name: string }> = categoriesData || [];
+  const categories: Category[] = Array.isArray(categoriesData)
+    ? categoriesData
+    : Array.isArray(categoriesData?.data?.data)
+    ? categoriesData.data.data
+    : Array.isArray(categoriesData?.data)
+    ? categoriesData.data
+    : [];
 
   const params = {
     accountId: activeAccountId === 'all' ? undefined : activeAccountId,
@@ -64,6 +68,8 @@ const PnLPage: React.FC = () => {
   });
 
   const pnl = data?.data?.data;
+  const adSpendList: any[] = Array.isArray(pnl?.adSpendList) ? pnl.adSpendList : [];
+  const partnerList: any[] = Array.isArray(pnl?.partnerPnL) ? pnl.partnerPnL : [];
 
   // Delete Ad Spend Mutation
   const deleteAdMutation = useMutation({
@@ -91,14 +97,14 @@ const PnLPage: React.FC = () => {
     badge,
   }: {
     label: string;
-    value: number | undefined;
+    value: number | undefined | null;
     indent?: boolean;
     bold?: boolean;
     positive?: boolean;
     subtotal?: boolean;
     badge?: string;
   }) => {
-    if (value === undefined) return null;
+    if (value === undefined || value === null || isNaN(value)) return null;
     const isNeg = value < 0;
     return (
       <div
@@ -299,7 +305,7 @@ const PnLPage: React.FC = () => {
                       <Megaphone className="w-3.5 h-3.5 text-purple-600" />
                       <span>Advertising & Marketing (Ad Spend)</span>
                       <span className="text-[10px] bg-purple-100 text-purple-700 px-1.5 py-0.2 rounded font-medium">
-                        {pnl.adSpendList?.length || 0} {pnl.adSpendList?.length === 1 ? 'entry' : 'entries'}
+                        {adSpendList.length} {adSpendList.length === 1 ? 'entry' : 'entries'}
                       </span>
                     </div>
                     <div className="flex items-center gap-2">
@@ -320,7 +326,7 @@ const PnLPage: React.FC = () => {
                   {/* Expandable Entries List */}
                   {isAdExpanded && (
                     <div className="pt-1.5 border-t border-purple-100 space-y-1.5">
-                      {(!pnl.adSpendList || pnl.adSpendList.length === 0) ? (
+                      {adSpendList.length === 0 ? (
                         <div className="flex items-center justify-between py-1.5 px-2 bg-white rounded border border-purple-100 text-[11px] text-gray-500">
                           <span>No advertisement spend recorded for this period.</span>
                           <button
@@ -335,7 +341,7 @@ const PnLPage: React.FC = () => {
                           </button>
                         </div>
                       ) : (
-                        pnl.adSpendList.map((ad: any) => {
+                        adSpendList.map((ad: any) => {
                           const paidByName =
                             ad.paidByPartner && typeof ad.paidByPartner === 'object'
                               ? ad.paidByPartner.name
@@ -562,7 +568,7 @@ const PnLPage: React.FC = () => {
           {/* ══════════════════════════════════════════════════════════════════════ */}
           {/* PARTNER-WISE PROFIT & LOSS DISTRIBUTION */}
           {/* ══════════════════════════════════════════════════════════════════════ */}
-          {pnl.partnerPnL && pnl.partnerPnL.length > 0 && (
+          {partnerList.length > 0 && (
             <div className="card p-4 sm:p-6 space-y-4 border-t-4 border-t-primary-500 shadow-xs">
               {/* Partner Section Header */}
               <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 border-b border-gray-100 pb-3">
@@ -574,7 +580,7 @@ const PnLPage: React.FC = () => {
                     <h2 className="text-base font-bold text-gray-900 flex items-center gap-2">
                       <span>Partner-Wise Profit & Loss Distribution</span>
                       <span className="text-xs font-semibold px-2 py-0.5 rounded-full bg-primary-100 text-primary-800">
-                        {pnl.partnerPnL.length} Partners
+                        {partnerList.length} Partners
                       </span>
                     </h2>
                     <p className="text-xs text-gray-500">
@@ -624,23 +630,23 @@ const PnLPage: React.FC = () => {
               {/* View 1: Cards View */}
               {partnerViewMode === 'cards' ? (
                 <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
-                  {pnl.partnerPnL.map((partner: any, idx: number) => {
-                    const isProfit = partner.netProfitShare >= 0;
+                  {partnerList.map((partner: any, idx: number) => {
+                    const isProfit = (partner.netProfitShare || 0) >= 0;
                     const colorClass = PARTNER_COLORS[idx % PARTNER_COLORS.length];
 
                     return (
                       <div
-                        key={partner._id}
+                        key={partner._id || idx}
                         className="rounded-xl border border-gray-200 bg-white p-4 space-y-3.5 shadow-2xs hover:shadow-md transition-all relative overflow-hidden"
                       >
                         {/* Partner Card Header */}
                         <div className="flex items-center justify-between">
                           <div className="flex items-center gap-2.5">
                             <div className={`w-10 h-10 rounded-xl border flex items-center justify-center font-bold text-sm ${colorClass}`}>
-                              {partner.name.charAt(0).toUpperCase()}
+                              {(partner.name || 'P').charAt(0).toUpperCase()}
                             </div>
                             <div>
-                              <h3 className="font-bold text-gray-900 text-sm leading-tight">{partner.name}</h3>
+                              <h3 className="font-bold text-gray-900 text-sm leading-tight">{partner.name || 'Partner'}</h3>
                               <p className="text-[11px] text-gray-500 font-mono mt-0.5">{partner.phone || 'Partner'}</p>
                             </div>
                           </div>
@@ -750,7 +756,7 @@ const PnLPage: React.FC = () => {
                       <tr>
                         <th className="py-2.5 px-3">Statement Line Item</th>
                         <th className="py-2.5 px-3 text-right bg-gray-100/70 font-bold">Total Business (100%)</th>
-                        {pnl.partnerPnL.map((p: any) => (
+                        {partnerList.map((p: any) => (
                           <th key={p._id} className="py-2.5 px-3 text-right font-bold">
                             {p.name} ({p.profitSharePercent}%)
                           </th>
@@ -761,7 +767,7 @@ const PnLPage: React.FC = () => {
                       <tr>
                         <td className="py-2 px-3 text-gray-700">Gross Sales / Order Value</td>
                         <td className="py-2 px-3 text-right font-mono bg-gray-50/50">{formatCurrency(pnl.grossOrderValue)}</td>
-                        {pnl.partnerPnL.map((p: any) => (
+                        {partnerList.map((p: any) => (
                           <td key={p._id} className="py-2 px-3 text-right font-mono">
                             {formatCurrency(Math.round(pnl.grossOrderValue * (p.profitSharePercent / 100)))}
                           </td>
@@ -772,7 +778,7 @@ const PnLPage: React.FC = () => {
                         <td className="py-2 px-3 text-right font-mono text-red-600 bg-gray-50/50">
                           -{formatCurrency(pnl.salesCancellations + pnl.returnsRefunds)}
                         </td>
-                        {pnl.partnerPnL.map((p: any) => (
+                        {partnerList.map((p: any) => (
                           <td key={p._id} className="py-2 px-3 text-right font-mono text-red-600">
                             -{formatCurrency(Math.round((pnl.salesCancellations + pnl.returnsRefunds) * (p.profitSharePercent / 100)))}
                           </td>
@@ -781,7 +787,7 @@ const PnLPage: React.FC = () => {
                       <tr className="bg-gray-50/80 font-bold text-gray-900 border-t border-gray-200">
                         <td className="py-2 px-3">Net Sales</td>
                         <td className="py-2 px-3 text-right font-mono bg-gray-100/70">{formatCurrency(pnl.netSales)}</td>
-                        {pnl.partnerPnL.map((p: any) => (
+                        {partnerList.map((p: any) => (
                           <td key={p._id} className="py-2 px-3 text-right font-mono text-gray-900">
                             {formatCurrency(p.netSalesShare)}
                           </td>
@@ -792,7 +798,7 @@ const PnLPage: React.FC = () => {
                         <td className="py-2 px-3 text-right font-mono text-red-600 bg-gray-50/50">
                           -{formatCurrency(pnl.totalPurchaseCost ?? pnl.purchaseCost ?? pnl.costOfGoodsSold)}
                         </td>
-                        {pnl.partnerPnL.map((p: any) => (
+                        {partnerList.map((p: any) => (
                           <td key={p._id} className="py-2 px-3 text-right font-mono text-red-600">
                             -{formatCurrency(Math.round((pnl.totalPurchaseCost ?? pnl.purchaseCost ?? pnl.costOfGoodsSold) * (p.profitSharePercent / 100)))}
                           </td>
@@ -803,7 +809,7 @@ const PnLPage: React.FC = () => {
                         <td className="py-2 px-3 text-right font-mono text-red-600 bg-gray-50/50">
                           -{formatCurrency(pnl.totalPackingCharges || 0)}
                         </td>
-                        {pnl.partnerPnL.map((p: any) => (
+                        {partnerList.map((p: any) => (
                           <td key={p._id} className="py-2 px-3 text-right font-mono text-red-600">
                             -{formatCurrency(Math.round((pnl.totalPackingCharges || 0) * (p.profitSharePercent / 100)))}
                           </td>
@@ -814,7 +820,7 @@ const PnLPage: React.FC = () => {
                         <td className="py-2 px-3 text-right font-mono bg-primary-100/40 text-primary-900">
                           {formatCurrency(pnl.grossProfit)}
                         </td>
-                        {pnl.partnerPnL.map((p: any) => (
+                        {partnerList.map((p: any) => (
                           <td key={p._id} className="py-2 px-3 text-right font-mono text-primary-900">
                             {formatCurrency(p.grossProfitShare)}
                           </td>
@@ -825,7 +831,7 @@ const PnLPage: React.FC = () => {
                         <td className="py-2 px-3 text-right font-mono text-red-600 bg-gray-50/50">
                           -{formatCurrency(pnl.totalCustomerReturnExpenses || 0)}
                         </td>
-                        {pnl.partnerPnL.map((p: any) => (
+                        {partnerList.map((p: any) => (
                           <td key={p._id} className="py-2 px-3 text-right font-mono text-red-600">
                             -{formatCurrency(p.customerReturnsShare)}
                           </td>
@@ -836,7 +842,7 @@ const PnLPage: React.FC = () => {
                         <td className="py-2 px-3 text-right font-mono text-purple-700 font-bold bg-gray-50/50">
                           -{formatCurrency(pnl.advertising || 0)}
                         </td>
-                        {pnl.partnerPnL.map((p: any) => (
+                        {partnerList.map((p: any) => (
                           <td key={p._id} className="py-2 px-3 text-right font-mono text-purple-700 font-semibold">
                             -{formatCurrency(p.adSpendShare)}
                           </td>
@@ -847,7 +853,7 @@ const PnLPage: React.FC = () => {
                         <td className="py-2 px-3 text-right font-mono text-red-600 bg-gray-50/50">
                           -{formatCurrency((pnl.meeshoFees || 0) + (pnl.shippingCosts || 0) + (pnl.otherExpenses || 0))}
                         </td>
-                        {pnl.partnerPnL.map((p: any) => (
+                        {partnerList.map((p: any) => (
                           <td key={p._id} className="py-2 px-3 text-right font-mono text-red-600">
                             -{formatCurrency(Math.round(((pnl.meeshoFees || 0) + (pnl.shippingCosts || 0) + (pnl.otherExpenses || 0)) * (p.profitSharePercent / 100)))}
                           </td>
@@ -858,7 +864,7 @@ const PnLPage: React.FC = () => {
                         <td className="py-2 px-3 text-right font-mono text-red-700 bg-gray-200/50">
                           -{formatCurrency(pnl.totalOperatingExpenses || 0)}
                         </td>
-                        {pnl.partnerPnL.map((p: any) => (
+                        {partnerList.map((p: any) => (
                           <td key={p._id} className="py-2 px-3 text-right font-mono text-red-700">
                             -{formatCurrency(p.operatingExpensesShare)}
                           </td>
@@ -869,7 +875,7 @@ const PnLPage: React.FC = () => {
                         <td className={`py-2.5 px-3 text-right font-mono ${pnl.operatingProfit >= 0 ? 'text-emerald-800' : 'text-rose-700'}`}>
                           {formatCurrency(pnl.operatingProfit)}
                         </td>
-                        {pnl.partnerPnL.map((p: any) => (
+                        {partnerList.map((p: any) => (
                           <td
                             key={p._id}
                             className={`py-2.5 px-3 text-right font-mono ${p.netProfitShare >= 0 ? 'text-emerald-800' : 'text-rose-700'}`}
@@ -881,9 +887,9 @@ const PnLPage: React.FC = () => {
                       <tr>
                         <td className="py-2 px-3 text-gray-600 pl-6">Out-of-Pocket Expenses Paid</td>
                         <td className="py-2 px-3 text-right font-mono bg-gray-50/50">
-                          {formatCurrency(pnl.partnerPnL.reduce((s: number, p: any) => s + (p.expensesPaid || 0), 0))}
+                          {formatCurrency(partnerList.reduce((s: number, p: any) => s + (p.expensesPaid || 0), 0))}
                         </td>
-                        {pnl.partnerPnL.map((p: any) => (
+                        {partnerList.map((p: any) => (
                           <td key={p._id} className="py-2 px-3 text-right font-mono font-semibold text-gray-900">
                             {formatCurrency(p.expensesPaid || 0)}
                           </td>
@@ -892,7 +898,7 @@ const PnLPage: React.FC = () => {
                       <tr>
                         <td className="py-2 px-3 text-gray-600 pl-6">Expense Settlement Balance</td>
                         <td className="py-2 px-3 text-right font-mono bg-gray-50/50">—</td>
-                        {pnl.partnerPnL.map((p: any) => (
+                        {partnerList.map((p: any) => (
                           <td
                             key={p._id}
                             className={`py-2 px-3 text-right font-mono font-semibold ${p.expenseBalance >= 0 ? 'text-emerald-700' : 'text-amber-700'}`}
@@ -906,7 +912,7 @@ const PnLPage: React.FC = () => {
                         <td className="py-2.5 px-3 text-right font-mono text-primary-900">
                           {formatCurrency(pnl.operatingProfit)}
                         </td>
-                        {pnl.partnerPnL.map((p: any) => (
+                        {partnerList.map((p: any) => (
                           <td key={p._id} className="py-2.5 px-3 text-right font-mono text-primary-900">
                             {formatCurrency(p.netReceivable)}
                           </td>

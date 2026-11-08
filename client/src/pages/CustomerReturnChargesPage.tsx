@@ -23,6 +23,7 @@ import {
   Calendar,
 } from 'lucide-react';
 import { customerReturnChargeApi } from '../services/customerReturnCharge.service';
+import { categoriesApi } from '../services/inventory.service';
 import { useAccountStore } from '../store/accountStore';
 import { useAuthStore } from '../store/authStore';
 import { formatCurrency, formatDate, formatDateTime, dateRangePresets } from '../lib/utils';
@@ -34,6 +35,7 @@ import type {
   ChargeCalculationType,
   HandlingCalculationType,
   DateRange,
+  Category,
 } from '../types';
 import axios from '../lib/axios';
 

@@ -34,11 +34,17 @@ export const now = () => dayjs().tz(TZ);
 
 export const today = () => dayjs().tz(TZ).format('YYYY-MM-DD');
 
-export const formatDate = (date: string | Date) =>
-  dayjs(date).tz(TZ).format('DD MMM YYYY');
+export const formatDate = (date: string | Date | undefined | null) => {
+  if (!date) return '—';
+  const d = dayjs(date);
+  return d.isValid() ? d.tz(TZ).format('DD MMM YYYY') : '—';
+};
 
-export const formatDateTime = (date: string | Date) =>
-  dayjs(date).tz(TZ).format('DD MMM YYYY, hh:mm A');
+export const formatDateTime = (date: string | Date | undefined | null) => {
+  if (!date) return '—';
+  const d = dayjs(date);
+  return d.isValid() ? d.tz(TZ).format('DD MMM YYYY, hh:mm A') : '—';
+};
 
 export const startOfDay = (date: string) =>
   dayjs.tz(date, TZ).startOf('day').toISOString();

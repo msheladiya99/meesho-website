@@ -6,6 +6,7 @@ import {
 } from 'lucide-react';
 import Sidebar from './Sidebar';
 import Header from './Header';
+import ErrorBoundary from '../ui/ErrorBoundary';
 import { accountsApi } from '../../services/accounts.service';
 import { useAccountStore } from '../../store/accountStore';
 import { useUIStore } from '../../store/uiStore';
@@ -45,7 +46,9 @@ const AppLayout: React.FC = () => {
         style={{ paddingTop: '64px' }}
       >
         <div className="p-3 sm:p-5 lg:p-6 page-enter max-w-7xl mx-auto">
-          <Outlet />
+          <ErrorBoundary>
+            <Outlet />
+          </ErrorBoundary>
         </div>
       </main>
 
