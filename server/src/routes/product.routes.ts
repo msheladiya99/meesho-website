@@ -1,6 +1,7 @@
 import { Router, Response } from 'express';
 import mongoose from 'mongoose';
 import { Product } from '../models/Product';
+import { StockPurchase } from '../models/StockPurchase';
 import { BusinessAccount } from '../models/BusinessAccount';
 import { StockMovement } from '../models/StockMovement';
 import { authenticate, requireManagerOrAdmin, AuthRequest } from '../middleware/auth';
@@ -185,6 +186,92 @@ router.post('/bulk-update-packing', requireManagerOrAdmin, async (req: AuthReque
     res.json({
       success: true,
       message: `Updated packaging charges for ${result.modifiedCount} product(s)`,
+      modifiedCount: result.modifiedCount,
+    });
+  } catch (err) {
+    res.status(400).json({ success: false, message: (err as Error).message });
+  }
+});
+
+// POST /api/products/sync-stock-cost
+router.post('/sync-stock-cost', requireManagerOrAdmin, async (req: AuthRequest, res: Response): Promise<void> => {
+  try {
+    const { unitCost } = req.body;
+    let targetPrice = Number(unitCost);
+
+    if (!targetPrice || targetPrice <= 0) {
+      const latestPurchase = await StockPurchase.findOne({
+        isDeleted: false,
+        purchasePricePerUnit: { $gt: 0 },
+      }).sort({ purchaseDate: -1, createdAt: -1 }).select('purchasePricePerUnit').lean();
+
+      targetPrice = latestPurchase?.purchasePricePerUnit || 5500;
+    }
+
+    const activeProducts = await Product.find({ isActive: true });
+    let count = 0;
+    for (const prod of activeProducts) {
+      const multiplier = (prod.sizeml && prod.sizeml > 50) ? Math.round(prod.sizeml / 50) : 1;
+      const syncedCost = targetPrice * multiplier;
+      await Product.findByIdAndUpdate(prod._id, {
+        defaultPurchaseCost: syncedCost,
+        weightedAvgCost: syncedCost,
+      });
+      count++;
+    }
+
+    await createAuditLog({
+      action: 'UPDATE',
+      resource: 'Product',
+      userId: req.user?._id,
+      details: `Synchronized purchase cost to ₹${(targetPrice / 100).toFixed(2)} for ${count} products`,
+    });
+
+    res.json({
+      success: true,
+      message: `Synchronized purchase cost to ₹${(targetPrice / 100).toFixed(2)} for ${count} product(s)`,
+      targetPrice,
+      modifiedCount: count,
+    });
+  } catch (err) {
+    res.status(400).json({ success: false, message: (err as Error).message });
+  }
+});
+
+// POST /api/products/bulk-update-cost
+router.post('/bulk-update-cost', requireManagerOrAdmin, async (req: AuthRequest, res: Response): Promise<void> => {
+  try {
+    const { productIds, purchaseCost } = req.body;
+    const cost = Number(purchaseCost);
+    if (isNaN(cost) || cost < 0) {
+      res.status(400).json({ success: false, message: 'Valid purchaseCost is required' });
+      return;
+    }
+
+    const filter: Record<string, any> = {};
+    if (productIds === 'all') {
+      filter.isActive = true;
+    } else if (Array.isArray(productIds) && productIds.length > 0) {
+      filter._id = { $in: productIds.map((pid: string) => new mongoose.Types.ObjectId(pid)) };
+    } else {
+      res.status(400).json({ success: false, message: 'productIds array or "all" is required' });
+      return;
+    }
+
+    const result = await Product.updateMany(filter, {
+      $set: { defaultPurchaseCost: cost, weightedAvgCost: cost }
+    });
+
+    await createAuditLog({
+      action: 'UPDATE',
+      resource: 'Product',
+      userId: req.user?._id,
+      details: `Bulk updated purchase cost to ₹${(cost / 100).toFixed(2)} for ${result.modifiedCount} products`,
+    });
+
+    res.json({
+      success: true,
+      message: `Updated purchase cost for ${result.modifiedCount} product(s)`,
       modifiedCount: result.modifiedCount,
     });
   } catch (err) {

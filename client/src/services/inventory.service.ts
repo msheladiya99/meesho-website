@@ -16,6 +16,10 @@ export const productsApi = {
     printLabelCost: number;
     packingPreset?: string;
   }) => api.post<ApiResponse<{ modifiedCount: number }>>('/products/bulk-update-packing', data),
+  syncStockCost: (data?: { unitCost?: number }) =>
+    api.post<ApiResponse<{ modifiedCount: number; targetPrice: number }>>('/products/sync-stock-cost', data || {}),
+  bulkUpdateCost: (data: { productIds: string[] | 'all'; purchaseCost: number }) =>
+    api.post<ApiResponse<{ modifiedCount: number }>>('/products/bulk-update-cost', data),
 };
 
 export const categoriesApi = {

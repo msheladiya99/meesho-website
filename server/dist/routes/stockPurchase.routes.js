@@ -7,6 +7,7 @@ exports.calculateNextInvoiceNumber = calculateNextInvoiceNumber;
 const express_1 = require("express");
 const mongoose_1 = __importDefault(require("mongoose"));
 const StockPurchase_1 = require("../models/StockPurchase");
+const Product_1 = require("../models/Product");
 const StockMovement_1 = require("../models/StockMovement");
 const auth_1 = require("../middleware/auth");
 const audit_service_1 = require("../services/audit.service");
@@ -220,6 +221,18 @@ router.post('/', auth_1.requireManagerOrAdmin, auth_1.enforceAccountAccess, asyn
                 createdBy: req.user?._id?.toString(),
             });
         }
+        // Keep active products' purchase cost synchronized with the latest purchase price
+        if (calculatedUnitPrice > 0) {
+            const activeProducts = await Product_1.Product.find({ isActive: true });
+            for (const prod of activeProducts) {
+                const multiplier = (prod.sizeml && prod.sizeml > 50) ? Math.round(prod.sizeml / 50) : 1;
+                const syncedCost = calculatedUnitPrice * multiplier;
+                await Product_1.Product.findByIdAndUpdate(prod._id, {
+                    defaultPurchaseCost: syncedCost,
+                    weightedAvgCost: syncedCost,
+                });
+            }
+        }
         await (0, audit_service_1.createAuditLog)({ action: 'CREATE', resource: 'StockPurchase', resourceId: purchase._id.toString(), userId: req.user?._id });
         const populated = await StockPurchase_1.StockPurchase.findById(purchase._id)
             .populate('vendor', 'name')
@@ -315,6 +328,18 @@ router.put('/:id', auth_1.requireManagerOrAdmin, auth_1.enforceAccountAccess, as
                 reason: `Direct stock purchase updated: ${parsedQty} units`,
                 createdBy: req.user?._id?.toString(),
             });
+        }
+        // Keep active products' purchase cost synchronized with the latest purchase price
+        if (calculatedUnitPrice > 0) {
+            const activeProducts = await Product_1.Product.find({ isActive: true });
+            for (const prod of activeProducts) {
+                const multiplier = (prod.sizeml && prod.sizeml > 50) ? Math.round(prod.sizeml / 50) : 1;
+                const syncedCost = calculatedUnitPrice * multiplier;
+                await Product_1.Product.findByIdAndUpdate(prod._id, {
+                    defaultPurchaseCost: syncedCost,
+                    weightedAvgCost: syncedCost,
+                });
+            }
         }
         await (0, audit_service_1.createAuditLog)({ action: 'UPDATE', resource: 'StockPurchase', resourceId: purchaseId, userId: req.user?._id?.toString() });
         const populated = await StockPurchase_1.StockPurchase.findById(updated._id)

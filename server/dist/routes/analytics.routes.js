@@ -44,6 +44,7 @@ const Expense_1 = require("../models/Expense");
 const Partner_1 = require("../models/Partner");
 const BusinessAccount_1 = require("../models/BusinessAccount");
 const Product_1 = require("../models/Product");
+const StockPurchase_1 = require("../models/StockPurchase");
 const StockMovement_1 = require("../models/StockMovement");
 const inventory_service_1 = require("../services/inventory.service");
 const auth_1 = require("../middleware/auth");
@@ -255,6 +256,12 @@ router.get('/perfume-performance', auth_1.enforceAccountAccess, async (req, res)
             .sort({ name: 1 })
             .lean();
         const productIds = products.map(p => p._id);
+        // Latest stock purchase unit price for reliable fallback
+        const latestPurchase = await StockPurchase_1.StockPurchase.findOne({
+            isDeleted: false,
+            purchasePricePerUnit: { $gt: 0 },
+        }).sort({ purchaseDate: -1, createdAt: -1 }).select('purchasePricePerUnit').lean();
+        const latestStockPrice = latestPurchase?.purchasePricePerUnit || 5500;
         // 2. Resolve account-specific stock if accountId is provided
         const accountStockMap = new Map();
         let isSharedStock = false;
@@ -311,7 +318,9 @@ router.get('/perfume-performance', auth_1.enforceAccountAccess, async (req, res)
             const bcCost = p.bagCardCost ?? 100;
             const plCost = p.printLabelCost ?? 100;
             const packCost = p.packingCost ?? (bCost + sCost + bcCost + plCost);
-            const purchaseCost = p.defaultPurchaseCost || 0;
+            const multiplier = (p.sizeml && p.sizeml > 50) ? Math.round(p.sizeml / 50) : 1;
+            const fallbackCost = latestStockPrice * multiplier;
+            const purchaseCost = (p.defaultPurchaseCost && p.defaultPurchaseCost > 0) ? p.defaultPurchaseCost : fallbackCost;
             const unitCost = purchaseCost + packCost;
             statsMap.set(pIdStr, {
                 _id: pIdStr,

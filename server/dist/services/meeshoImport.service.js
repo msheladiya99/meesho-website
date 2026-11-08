@@ -42,6 +42,7 @@ const XLSX = __importStar(require("xlsx"));
 const Order_1 = require("../models/Order");
 const ReturnOrder_1 = require("../models/ReturnOrder");
 const Product_1 = require("../models/Product");
+const StockPurchase_1 = require("../models/StockPurchase");
 const Category_1 = require("../models/Category");
 const PackingRecord_1 = require("../models/PackingRecord");
 const inventory_service_1 = require("./inventory.service");
@@ -432,6 +433,12 @@ const importMeeshoOrdersAndReturns = async (params) => {
     if (!defaultCategory) {
         defaultCategory = await Category_1.Category.create({ name: 'Perfumes', isActive: true });
     }
+    // Fetch latest stock purchase price as baseline for auto-created products
+    const latestPurchase = await StockPurchase_1.StockPurchase.findOne({
+        isDeleted: false,
+        purchasePricePerUnit: { $gt: 0 },
+    }).sort({ purchaseDate: -1, createdAt: -1 }).select('purchasePricePerUnit').lean();
+    const fallbackStockPurchaseCost = latestPurchase?.purchasePricePerUnit || 5500;
     // Product cache to minimize DB queries
     const productCache = new Map();
     for (const row of activeRows) {
@@ -461,16 +468,18 @@ const importMeeshoOrdersAndReturns = async (params) => {
                 // Auto-create product if not yet in database
                 if (!product) {
                     const sizeMatch = (row.productName + ' ' + row.sku).match(/(\d+)\s*ml/i);
-                    const sizeml = sizeMatch ? parseInt(sizeMatch[1], 10) : 100;
-                    const estimatedCost = Math.round((row.sellingPrice || 49900) * 0.4);
+                    const sizeml = sizeMatch ? parseInt(sizeMatch[1], 10) : 50;
+                    // Scale cost if it's a 2-bottle combo (e.g. 100ml = 2x 50ml) or standard 50ml
+                    const bottleMultiplier = sizeml > 50 ? Math.round(sizeml / 50) : 1;
+                    const actualCost = fallbackStockPurchaseCost * bottleMultiplier;
                     product = await Product_1.Product.create({
                         name: row.productName || row.sku,
                         sku: skuKey,
                         category: defaultCategory._id,
-                        sizeml: sizeml || 100,
-                        sellingPrice: row.sellingPrice || 49900,
-                        defaultPurchaseCost: estimatedCost,
-                        weightedAvgCost: estimatedCost,
+                        sizeml: sizeml || 50,
+                        sellingPrice: row.sellingPrice || 11000,
+                        defaultPurchaseCost: actualCost,
+                        weightedAvgCost: actualCost,
                         currentStock: 0,
                         isActive: true,
                     });

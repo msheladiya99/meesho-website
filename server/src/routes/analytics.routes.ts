@@ -6,6 +6,7 @@ import { Expense } from '../models/Expense';
 import { Partner } from '../models/Partner';
 import { BusinessAccount } from '../models/BusinessAccount';
 import { Product } from '../models/Product';
+import { StockPurchase } from '../models/StockPurchase';
 import { StockMovement } from '../models/StockMovement';
 import { resolveStockAccountIds } from '../services/inventory.service';
 import { authenticate, enforceAccountAccess, AuthRequest } from '../middleware/auth';
@@ -229,6 +230,13 @@ router.get('/perfume-performance', enforceAccountAccess, async (req: AuthRequest
 
     const productIds = products.map(p => p._id);
 
+    // Latest stock purchase unit price for reliable fallback
+    const latestPurchase = await StockPurchase.findOne({
+      isDeleted: false,
+      purchasePricePerUnit: { $gt: 0 },
+    }).sort({ purchaseDate: -1, createdAt: -1 }).select('purchasePricePerUnit').lean();
+    const latestStockPrice = latestPurchase?.purchasePricePerUnit || 5500;
+
     // 2. Resolve account-specific stock if accountId is provided
     const accountStockMap = new Map<string, number>();
     let isSharedStock = false;
@@ -325,7 +333,9 @@ router.get('/perfume-performance', enforceAccountAccess, async (req: AuthRequest
       const bcCost = p.bagCardCost ?? 100;
       const plCost = p.printLabelCost ?? 100;
       const packCost = p.packingCost ?? (bCost + sCost + bcCost + plCost);
-      const purchaseCost = p.defaultPurchaseCost || 0;
+      const multiplier = (p.sizeml && p.sizeml > 50) ? Math.round(p.sizeml / 50) : 1;
+      const fallbackCost = latestStockPrice * multiplier;
+      const purchaseCost = (p.defaultPurchaseCost && p.defaultPurchaseCost > 0) ? p.defaultPurchaseCost : fallbackCost;
       const unitCost = purchaseCost + packCost;
 
       statsMap.set(pIdStr, {

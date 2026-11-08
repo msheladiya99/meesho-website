@@ -3,6 +3,7 @@ import * as XLSX from 'xlsx';
 import { Order, OrderStatus } from '../models/Order';
 import { ReturnOrder, ReturnType, ReturnStatus, ItemCondition } from '../models/ReturnOrder';
 import { Product } from '../models/Product';
+import { StockPurchase } from '../models/StockPurchase';
 import { Category } from '../models/Category';
 import { PackingRecord } from '../models/PackingRecord';
 import { recordStockMovement } from './inventory.service';
@@ -496,6 +497,14 @@ export const importMeeshoOrdersAndReturns = async (params: {
     defaultCategory = await Category.create({ name: 'Perfumes', isActive: true });
   }
 
+  // Fetch latest stock purchase price as baseline for auto-created products
+  const latestPurchase = await StockPurchase.findOne({
+    isDeleted: false,
+    purchasePricePerUnit: { $gt: 0 },
+  }).sort({ purchaseDate: -1, createdAt: -1 }).select('purchasePricePerUnit').lean();
+
+  const fallbackStockPurchaseCost = latestPurchase?.purchasePricePerUnit || 5500;
+
   // Product cache to minimize DB queries
   const productCache = new Map<string, any>();
 
@@ -530,17 +539,19 @@ export const importMeeshoOrdersAndReturns = async (params: {
         // Auto-create product if not yet in database
         if (!product) {
           const sizeMatch = (row.productName + ' ' + row.sku).match(/(\d+)\s*ml/i);
-          const sizeml = sizeMatch ? parseInt(sizeMatch[1], 10) : 100;
-          const estimatedCost = Math.round((row.sellingPrice || 49900) * 0.4);
+          const sizeml = sizeMatch ? parseInt(sizeMatch[1], 10) : 50;
+          // Scale cost if it's a 2-bottle combo (e.g. 100ml = 2x 50ml) or standard 50ml
+          const bottleMultiplier = sizeml > 50 ? Math.round(sizeml / 50) : 1;
+          const actualCost = fallbackStockPurchaseCost * bottleMultiplier;
 
           product = await Product.create({
             name: row.productName || row.sku,
             sku: skuKey,
             category: defaultCategory._id,
-            sizeml: sizeml || 100,
-            sellingPrice: row.sellingPrice || 49900,
-            defaultPurchaseCost: estimatedCost,
-            weightedAvgCost: estimatedCost,
+            sizeml: sizeml || 50,
+            sellingPrice: row.sellingPrice || 11000,
+            defaultPurchaseCost: actualCost,
+            weightedAvgCost: actualCost,
             currentStock: 0,
             isActive: true,
           });

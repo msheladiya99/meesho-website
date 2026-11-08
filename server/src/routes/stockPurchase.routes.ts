@@ -1,6 +1,7 @@
 import { Router, Response } from 'express';
 import mongoose from 'mongoose';
 import { StockPurchase } from '../models/StockPurchase';
+import { Product } from '../models/Product';
 import { StockMovement } from '../models/StockMovement';
 import { authenticate, requireManagerOrAdmin, enforceAccountAccess, AuthRequest } from '../middleware/auth';
 import { createAuditLog } from '../services/audit.service';
@@ -227,6 +228,19 @@ router.post('/', requireManagerOrAdmin, enforceAccountAccess, async (req: AuthRe
       });
     }
 
+    // Keep active products' purchase cost synchronized with the latest purchase price
+    if (calculatedUnitPrice > 0) {
+      const activeProducts = await Product.find({ isActive: true });
+      for (const prod of activeProducts) {
+        const multiplier = (prod.sizeml && prod.sizeml > 50) ? Math.round(prod.sizeml / 50) : 1;
+        const syncedCost = calculatedUnitPrice * multiplier;
+        await Product.findByIdAndUpdate(prod._id, {
+          defaultPurchaseCost: syncedCost,
+          weightedAvgCost: syncedCost,
+        });
+      }
+    }
+
     await createAuditLog({ action: 'CREATE', resource: 'StockPurchase', resourceId: purchase._id.toString(), userId: req.user?._id });
     const populated = await StockPurchase.findById(purchase._id)
       .populate('vendor', 'name')
@@ -322,6 +336,19 @@ router.put('/:id', requireManagerOrAdmin, enforceAccountAccess, async (req: Auth
         reason: `Direct stock purchase updated: ${parsedQty} units`,
         createdBy: req.user?._id?.toString(),
       });
+    }
+
+    // Keep active products' purchase cost synchronized with the latest purchase price
+    if (calculatedUnitPrice > 0) {
+      const activeProducts = await Product.find({ isActive: true });
+      for (const prod of activeProducts) {
+        const multiplier = (prod.sizeml && prod.sizeml > 50) ? Math.round(prod.sizeml / 50) : 1;
+        const syncedCost = calculatedUnitPrice * multiplier;
+        await Product.findByIdAndUpdate(prod._id, {
+          defaultPurchaseCost: syncedCost,
+          weightedAvgCost: syncedCost,
+        });
+      }
     }
 
     await createAuditLog({ action: 'UPDATE', resource: 'StockPurchase', resourceId: purchaseId, userId: req.user?._id?.toString() });
