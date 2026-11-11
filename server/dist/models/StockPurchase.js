@@ -35,6 +35,21 @@ var __importStar = (this && this.__importStar) || (function () {
 Object.defineProperty(exports, "__esModule", { value: true });
 exports.StockPurchase = void 0;
 const mongoose_1 = __importStar(require("mongoose"));
+const stockPurchasePaymentSchema = new mongoose_1.Schema({
+    amount: { type: Number, required: true, min: 1 },
+    paymentDate: { type: Date, default: Date.now },
+    paymentMode: {
+        type: String,
+        enum: ['upi', 'bank_transfer', 'cash', 'cheque', 'partner_out_of_pocket', 'other'],
+        default: 'upi'
+    },
+    paidByPartner: { type: mongoose_1.Schema.Types.ObjectId, ref: 'Partner' },
+    referenceNumber: { type: String, trim: true },
+    notes: { type: String, trim: true },
+    recordedBy: { type: mongoose_1.Schema.Types.ObjectId, ref: 'User' },
+    linkedExpenseId: { type: mongoose_1.Schema.Types.ObjectId, ref: 'Expense' },
+    createdAt: { type: Date, default: Date.now },
+}, { _id: true });
 const stockPurchaseItemSchema = new mongoose_1.Schema({
     product: { type: mongoose_1.Schema.Types.ObjectId, ref: 'Product', required: false },
     quantityPurchased: { type: Number, required: true, min: 1 },
@@ -53,11 +68,30 @@ const stockPurchaseSchema = new mongoose_1.Schema({
     additionalCosts: { type: Number, default: 0 },
     taxAmount: { type: Number, default: 0 },
     totalAmount: { type: Number, required: true }, // paise
-    paymentStatus: { type: String, enum: ['paid', 'partial', 'unpaid'], default: 'paid' },
+    paidAmount: { type: Number, default: 0, min: 0 }, // paise
+    dueAmount: { type: Number, default: 0, min: 0 }, // paise
+    paymentStatus: { type: String, enum: ['paid', 'partial', 'unpaid'], default: 'unpaid' },
+    payments: { type: [stockPurchasePaymentSchema], default: [] },
     notes: { type: String },
     isDeleted: { type: Boolean, default: false },
     createdBy: { type: mongoose_1.Schema.Types.ObjectId, ref: 'User' },
 }, { timestamps: true });
+stockPurchaseSchema.pre('save', function () {
+    if (Array.isArray(this.payments) && this.payments.length > 0) {
+        this.paidAmount = this.payments.reduce((sum, p) => sum + (p.amount || 0), 0);
+    }
+    this.dueAmount = Math.max(0, (this.totalAmount || 0) - (this.paidAmount || 0));
+    if ((this.paidAmount || 0) <= 0) {
+        this.paymentStatus = 'unpaid';
+    }
+    else if ((this.paidAmount || 0) >= (this.totalAmount || 0)) {
+        this.paymentStatus = 'paid';
+        this.dueAmount = 0;
+    }
+    else {
+        this.paymentStatus = 'partial';
+    }
+});
 stockPurchaseSchema.index({ businessAccount: 1, purchaseDate: -1 });
 stockPurchaseSchema.index({ vendor: 1 });
 stockPurchaseSchema.index({ 'items.product': 1 });

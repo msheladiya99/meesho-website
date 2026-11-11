@@ -5,6 +5,19 @@ export interface IStockPurchaseItem {
     purchasePricePerUnit: number;
     totalAmount: number;
 }
+export type PaymentMode = 'upi' | 'bank_transfer' | 'cash' | 'cheque' | 'partner_out_of_pocket' | 'other';
+export interface IStockPurchasePayment {
+    _id?: mongoose.Types.ObjectId;
+    amount: number;
+    paymentDate: Date;
+    paymentMode: PaymentMode;
+    paidByPartner?: mongoose.Types.ObjectId;
+    referenceNumber?: string;
+    notes?: string;
+    recordedBy?: mongoose.Types.ObjectId;
+    linkedExpenseId?: mongoose.Types.ObjectId;
+    createdAt: Date;
+}
 export interface IStockPurchase extends Document {
     businessAccount: mongoose.Types.ObjectId;
     purchaseDate: Date;
@@ -17,7 +30,10 @@ export interface IStockPurchase extends Document {
     additionalCosts: number;
     taxAmount: number;
     totalAmount: number;
+    paidAmount: number;
+    dueAmount: number;
     paymentStatus: 'paid' | 'partial' | 'unpaid';
+    payments?: IStockPurchasePayment[];
     notes?: string;
     isDeleted: boolean;
     createdBy: mongoose.Types.ObjectId;

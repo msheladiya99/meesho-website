@@ -3,6 +3,8 @@ import mongoose from 'mongoose';
 import { StockPurchase } from '../models/StockPurchase';
 import { Product } from '../models/Product';
 import { StockMovement } from '../models/StockMovement';
+import { Expense } from '../models/Expense';
+import { Partner } from '../models/Partner';
 import { authenticate, requireManagerOrAdmin, enforceAccountAccess, AuthRequest } from '../middleware/auth';
 import { createAuditLog } from '../services/audit.service';
 import { recordStockMovement, reverseMovementsByReference } from '../services/inventory.service';
@@ -83,17 +85,112 @@ router.get('/', enforceAccountAccess, async (req: AuthRequest, res: Response): P
     const skip = (parseInt(page) - 1) * parseInt(limit);
     const [purchases, total] = await Promise.all([
       StockPurchase.find(filter)
-        .populate('vendor', 'name')
+        .populate('vendor', 'name phone')
         .populate({
           path: 'items.product',
           select: 'name sku category defaultPurchaseCost weightedAvgCost currentStock',
           populate: { path: 'category', select: 'name' }
         })
         .populate('businessAccount', 'name gstin')
+        .populate('payments.paidByPartner', 'name upiId')
+        .populate('payments.recordedBy', 'name email')
         .sort({ purchaseDate: -1 }).skip(skip).limit(parseInt(limit)),
       StockPurchase.countDocuments(filter),
     ]);
     res.json({ success: true, data: purchases, total });
+  } catch (err) {
+    res.status(500).json({ success: false, message: (err as Error).message });
+  }
+});
+
+// GET /api/stock-purchases/accounting-summary
+router.get('/accounting-summary', enforceAccountAccess, async (req: AuthRequest, res: Response): Promise<void> => {
+  try {
+    const { accountId, startDate, endDate } = req.query as Record<string, string>;
+    const filter: Record<string, unknown> = { isDeleted: false, ...accountFilter(accountId) };
+    if (startDate || endDate) {
+      filter.purchaseDate = {};
+      if (startDate) (filter.purchaseDate as Record<string, unknown>)['$gte'] = new Date(startDate);
+      if (endDate) (filter.purchaseDate as Record<string, unknown>)['$lte'] = new Date(endDate + 'T23:59:59.999Z');
+    }
+
+    const purchases = await StockPurchase.find(filter)
+      .populate('vendor', 'name phone')
+      .lean();
+
+    let totalPurchased = 0;
+    let totalPaid = 0;
+    let totalDue = 0;
+    let paidCount = 0;
+    let partialCount = 0;
+    let unpaidCount = 0;
+
+    const vendorMap = new Map<string, {
+      vendorId: string;
+      vendorName: string;
+      vendorPhone?: string;
+      totalPurchased: number;
+      totalPaid: number;
+      totalDue: number;
+      invoiceCount: number;
+      unpaidCount: number;
+    }>();
+
+    for (const p of purchases) {
+      const pTotal = p.totalAmount || 0;
+      const pPaid = p.paidAmount ?? (p.paymentStatus === 'paid' ? pTotal : 0);
+      const pDue = p.dueAmount ?? Math.max(0, pTotal - pPaid);
+
+      totalPurchased += pTotal;
+      totalPaid += pPaid;
+      totalDue += pDue;
+
+      if (p.paymentStatus === 'paid') paidCount++;
+      else if (p.paymentStatus === 'partial') partialCount++;
+      else unpaidCount++;
+
+      const vendorObj = (p.vendor && typeof p.vendor === 'object') ? (p.vendor as any) : null;
+      const vendorId = vendorObj?._id ? vendorObj._id.toString() : (p.vendor ? p.vendor.toString() : 'unknown');
+      const vendorName = vendorObj?.name || 'Unknown Vendor';
+      const vendorPhone = vendorObj?.phone || '';
+
+      const existingV = vendorMap.get(vendorId) || {
+        vendorId,
+        vendorName,
+        vendorPhone,
+        totalPurchased: 0,
+        totalPaid: 0,
+        totalDue: 0,
+        invoiceCount: 0,
+        unpaidCount: 0,
+      };
+
+      existingV.totalPurchased += pTotal;
+      existingV.totalPaid += pPaid;
+      existingV.totalDue += pDue;
+      existingV.invoiceCount += 1;
+      if (p.paymentStatus !== 'paid') {
+        existingV.unpaidCount += 1;
+      }
+
+      vendorMap.set(vendorId, existingV);
+    }
+
+    const vendors = Array.from(vendorMap.values()).sort((a, b) => b.totalDue - a.totalDue);
+
+    res.json({
+      success: true,
+      data: {
+        totalPurchased,
+        totalPaid,
+        totalDue,
+        totalPurchases: purchases.length,
+        paidCount,
+        partialCount,
+        unpaidCount,
+        vendors,
+      },
+    });
   } catch (err) {
     res.status(500).json({ success: false, message: (err as Error).message });
   }
@@ -131,16 +228,189 @@ router.get('/next-invoice-number', enforceAccountAccess, async (req: AuthRequest
 router.get('/:id', async (req, res: Response): Promise<void> => {
   try {
     const p = await StockPurchase.findById(req.params.id)
-      .populate('vendor')
+      .populate('vendor', 'name phone')
       .populate({
         path: 'items.product',
         select: 'name sku category defaultPurchaseCost weightedAvgCost currentStock',
         populate: { path: 'category', select: 'name' }
       })
-      .populate('businessAccount');
+      .populate('businessAccount')
+      .populate('payments.paidByPartner', 'name upiId')
+      .populate('payments.recordedBy', 'name email');
     if (!p || p.isDeleted) { res.status(404).json({ success: false, message: 'Purchase not found' }); return; }
     res.json({ success: true, data: p });
   } catch (err) {
+    res.status(500).json({ success: false, message: (err as Error).message });
+  }
+});
+
+// POST /api/stock-purchases/:id/payments
+router.post('/:id/payments', requireManagerOrAdmin, async (req: AuthRequest, res: Response): Promise<void> => {
+  const purchaseId = req.params.id as string;
+  if (!mongoose.Types.ObjectId.isValid(purchaseId)) {
+    res.status(400).json({ success: false, message: 'Invalid purchase ID' });
+    return;
+  }
+
+  try {
+    const purchase = await StockPurchase.findById(purchaseId).populate('vendor', 'name');
+    if (!purchase || purchase.isDeleted) {
+      res.status(404).json({ success: false, message: 'Purchase not found' });
+      return;
+    }
+
+    const { amount, paymentDate, paymentMode, paidByPartner, referenceNumber, notes } = req.body;
+    const numAmount = Math.round(Number(amount));
+    if (!numAmount || numAmount <= 0) {
+      res.status(400).json({ success: false, message: 'Payment amount must be greater than 0' });
+      return;
+    }
+
+    const currentDue = purchase.dueAmount ?? Math.max(0, purchase.totalAmount - (purchase.paidAmount || 0));
+    if (numAmount > currentDue) {
+      res.status(400).json({
+        success: false,
+        message: `Payment amount (₹${(numAmount / 100).toFixed(2)}) exceeds remaining balance due of ₹${(currentDue / 100).toFixed(2)}`,
+      });
+      return;
+    }
+
+    let linkedExpenseId: mongoose.Types.ObjectId | undefined;
+
+    // If payment is made out-of-pocket by a partner, record an Expense entry so it factors into partner settlements
+    if (paidByPartner && paymentMode === 'partner_out_of_pocket') {
+      const partner = await Partner.findById(paidByPartner);
+      if (partner && partner.isActive) {
+        const activePartners = await Partner.find({ isActive: true });
+        const count = activePartners.length || 1;
+        const splitAmount = Math.floor(numAmount / count);
+        const remainder = numAmount - splitAmount * count;
+        const allocations = activePartners.map((p, idx) => ({
+          partner: p._id as mongoose.Types.ObjectId,
+          amount: splitAmount + (idx === 0 ? remainder : 0),
+          percent: Math.round((100 / count) * 100) / 100,
+        }));
+
+        const vendorName = (purchase.vendor as any)?.name || 'Vendor';
+        const invoiceLabel = purchase.vendorInvoiceNumber ? `#${purchase.vendorInvoiceNumber}` : purchase._id.toString().slice(-6);
+
+        const expense = await Expense.create({
+          businessAccount: purchase.businessAccount,
+          expenseDate: paymentDate ? new Date(paymentDate) : new Date(),
+          category: 'Stock Purchase',
+          description: `Stock Purchase Payment: Inv ${invoiceLabel} (${vendorName})`,
+          amount: numAmount,
+          paidBy: 'partner',
+          paidByPartner: partner._id,
+          allocationMethod: 'equal',
+          allocations,
+          vendor: vendorName,
+          paymentMethod: 'Partner Out of Pocket',
+          notes: notes ? `Purchase Payment Note: ${notes}` : `Paid on behalf of business for purchase invoice ${invoiceLabel}`,
+          createdBy: req.user?._id,
+        });
+        linkedExpenseId = expense._id as mongoose.Types.ObjectId;
+      }
+    }
+
+    if (!Array.isArray(purchase.payments)) {
+      purchase.payments = [];
+    }
+
+    purchase.payments.push({
+      amount: numAmount,
+      paymentDate: paymentDate ? new Date(paymentDate) : new Date(),
+      paymentMode: paymentMode || 'upi',
+      paidByPartner: paidByPartner ? new mongoose.Types.ObjectId(paidByPartner) : undefined,
+      referenceNumber: referenceNumber?.trim() || undefined,
+      notes: notes?.trim() || undefined,
+      recordedBy: req.user?._id ? new mongoose.Types.ObjectId(req.user._id) : undefined,
+      linkedExpenseId,
+      createdAt: new Date(),
+    });
+
+    await purchase.save();
+
+    await createAuditLog({
+      action: 'UPDATE',
+      resource: 'StockPurchasePayment',
+      resourceId: purchase._id.toString(),
+      userId: req.user?._id?.toString(),
+    });
+
+    const populated = await StockPurchase.findById(purchase._id)
+      .populate('vendor', 'name phone')
+      .populate({
+        path: 'items.product',
+        select: 'name sku category defaultPurchaseCost weightedAvgCost currentStock',
+        populate: { path: 'category', select: 'name' },
+      })
+      .populate('businessAccount', 'name gstin')
+      .populate('payments.paidByPartner', 'name upiId')
+      .populate('payments.recordedBy', 'name email');
+
+    res.json({ success: true, data: populated, message: 'Payment recorded successfully' });
+  } catch (err) {
+    console.error('Error recording stock purchase payment:', err);
+    res.status(400).json({ success: false, message: (err as Error).message });
+  }
+});
+
+// DELETE /api/stock-purchases/:id/payments/:paymentId
+router.delete('/:id/payments/:paymentId', requireManagerOrAdmin, async (req: AuthRequest, res: Response): Promise<void> => {
+  const purchaseId = req.params.id as string;
+  const paymentId = req.params.paymentId as string;
+  if (!purchaseId || !paymentId || !mongoose.Types.ObjectId.isValid(purchaseId) || !mongoose.Types.ObjectId.isValid(paymentId)) {
+    res.status(400).json({ success: false, message: 'Invalid ID' });
+    return;
+  }
+
+  try {
+    const purchase = await StockPurchase.findById(purchaseId);
+    if (!purchase || purchase.isDeleted) {
+      res.status(404).json({ success: false, message: 'Purchase not found' });
+      return;
+    }
+
+    const paymentIndex = (purchase.payments || []).findIndex(
+      p => p._id && p._id.toString() === paymentId
+    );
+    if (paymentIndex === -1) {
+      res.status(404).json({ success: false, message: 'Payment entry not found' });
+      return;
+    }
+
+    const removedPayment = purchase.payments![paymentIndex];
+
+    // If there is a linked expense, soft-delete it
+    if (removedPayment.linkedExpenseId) {
+      await Expense.findByIdAndUpdate(removedPayment.linkedExpenseId, { isDeleted: true });
+    }
+
+    purchase.payments!.splice(paymentIndex, 1);
+    await purchase.save();
+
+    await createAuditLog({
+      action: 'DELETE',
+      resource: 'StockPurchasePayment',
+      resourceId: `${purchaseId}:${paymentId}`,
+      userId: req.user?._id?.toString(),
+    });
+
+    const populated = await StockPurchase.findById(purchase._id)
+      .populate('vendor', 'name phone')
+      .populate({
+        path: 'items.product',
+        select: 'name sku category defaultPurchaseCost weightedAvgCost currentStock',
+        populate: { path: 'category', select: 'name' },
+      })
+      .populate('businessAccount', 'name gstin')
+      .populate('payments.paidByPartner', 'name upiId')
+      .populate('payments.recordedBy', 'name email');
+
+    res.json({ success: true, data: populated, message: 'Payment entry deleted' });
+  } catch (err) {
+    console.error('Error deleting stock purchase payment:', err);
     res.status(500).json({ success: false, message: (err as Error).message });
   }
 });
@@ -187,12 +457,27 @@ router.post('/', requireManagerOrAdmin, enforceAccountAccess, async (req: AuthRe
       assignedInvoiceNumber = calculateNextInvoiceNumber(existingInvoices);
     }
 
+    const paymentStatusInput = req.body.paymentStatus || 'unpaid';
+    const totalAmountPaise = Math.round(Number(totalAmount) || (parsedQty * calculatedUnitPrice));
+    let paidAmountInitial = 0;
+    let dueAmountInitial = totalAmountPaise;
+
+    if (paymentStatusInput === 'paid') {
+      paidAmountInitial = totalAmountPaise;
+      dueAmountInitial = 0;
+    }
+
     const purchase = await StockPurchase.create({
       ...req.body,
       vendorInvoiceNumber: assignedInvoiceNumber,
       totalQuantity: parsedQty,
       purchasePricePerUnit: calculatedUnitPrice,
+      totalAmount: totalAmountPaise,
+      paidAmount: paidAmountInitial,
+      dueAmount: dueAmountInitial,
+      paymentStatus: paymentStatusInput,
       items: Array.isArray(items) ? items : [],
+      payments: Array.isArray(req.body.payments) ? req.body.payments : [],
       createdBy: req.user?._id
     });
 
@@ -243,13 +528,15 @@ router.post('/', requireManagerOrAdmin, enforceAccountAccess, async (req: AuthRe
 
     await createAuditLog({ action: 'CREATE', resource: 'StockPurchase', resourceId: purchase._id.toString(), userId: req.user?._id });
     const populated = await StockPurchase.findById(purchase._id)
-      .populate('vendor', 'name')
+      .populate('vendor', 'name phone')
       .populate({
         path: 'items.product',
         select: 'name sku category defaultPurchaseCost weightedAvgCost currentStock',
         populate: { path: 'category', select: 'name' }
       })
-      .populate('businessAccount', 'name gstin');
+      .populate('businessAccount', 'name gstin')
+      .populate('payments.paidByPartner', 'name upiId')
+      .populate('payments.recordedBy', 'name email');
     res.status(201).json({ success: true, data: populated });
   } catch (err) {
     console.error('Error creating stock purchase:', err);
@@ -289,23 +576,32 @@ router.put('/:id', requireManagerOrAdmin, enforceAccountAccess, async (req: Auth
       referenceId: new mongoose.Types.ObjectId(purchaseId),
     });
 
-    const updateData = {
-      totalQuantity: parsedQty,
-      purchasePricePerUnit: calculatedUnitPrice,
-      items: Array.isArray(items) ? items : [],
-      purchaseDate,
-      vendor,
-      vendorInvoiceNumber,
-      discount,
-      additionalCosts,
-      taxAmount,
-      totalAmount,
-      paymentStatus,
-      notes,
-    };
+    existing.totalQuantity = parsedQty;
+    existing.purchasePricePerUnit = calculatedUnitPrice;
+    existing.items = Array.isArray(items) ? items : [];
+    if (purchaseDate) existing.purchaseDate = purchaseDate;
+    if (vendor) existing.vendor = vendor;
+    if (vendorInvoiceNumber !== undefined) existing.vendorInvoiceNumber = vendorInvoiceNumber;
+    existing.discount = Number(discount) || 0;
+    existing.additionalCosts = Number(additionalCosts) || 0;
+    existing.taxAmount = Number(taxAmount) || 0;
+    existing.totalAmount = Number(totalAmount) || 0;
+    if (notes !== undefined) existing.notes = notes;
 
-    const updated = await StockPurchase.findByIdAndUpdate(purchaseId, updateData, { new: true });
-    if (!updated) { res.status(404).json({ success: false, message: 'Not found' }); return; }
+    // Handle payment status update if specified
+    if (paymentStatus) {
+      existing.paymentStatus = paymentStatus;
+      if (paymentStatus === 'paid' && (!existing.payments || existing.payments.length === 0)) {
+        existing.paidAmount = existing.totalAmount;
+        existing.dueAmount = 0;
+      } else if (paymentStatus === 'unpaid' && (!existing.payments || existing.payments.length === 0)) {
+        existing.paidAmount = 0;
+        existing.dueAmount = existing.totalAmount;
+      }
+    }
+
+    await existing.save();
+    const updated = existing;
 
     // Re-record stock movements
     if (Array.isArray(items) && items.length > 0 && items.some(it => it.product)) {
@@ -353,13 +649,16 @@ router.put('/:id', requireManagerOrAdmin, enforceAccountAccess, async (req: Auth
 
     await createAuditLog({ action: 'UPDATE', resource: 'StockPurchase', resourceId: purchaseId, userId: req.user?._id?.toString() });
     const populated = await StockPurchase.findById(updated._id)
-      .populate('vendor', 'name')
+      .populate('vendor', 'name phone')
       .populate({
         path: 'items.product',
         select: 'name sku category defaultPurchaseCost weightedAvgCost currentStock',
         populate: { path: 'category', select: 'name' }
       })
-      .populate('businessAccount', 'name gstin');
+      .populate('businessAccount', 'name gstin')
+      .populate('payments.paidByPartner', 'name upiId')
+      .populate('payments.recordedBy', 'name email');
+    res.json({ success: true, data: populated });
     res.json({ success: true, data: populated });
   } catch (err) {
     console.error('Update error:', err);

@@ -1,1 +1,1 @@
-{"version":3,"file":"stockPurchase.routes.d.ts","sourceRoot":"","sources":["../../src/routes/stockPurchase.routes.ts"],"names":[],"mappings":"AASA,QAAA,MAAM,MAAM,4CAAW,CAAC;AAUxB,wBAAgB,0BAA0B,CAAC,QAAQ,EAAE,CAAC,MAAM,GAAG,SAAS,GAAG,IAAI,CAAC,EAAE,GAAG,MAAM,CAkD1F;eA0Uc,MAAM"}
+{"version":3,"file":"stockPurchase.routes.d.ts","sourceRoot":"","sources":["../../src/routes/stockPurchase.routes.ts"],"names":[],"mappings":"AAWA,QAAA,MAAM,MAAM,4CAAW,CAAC;AAUxB,wBAAgB,0BAA0B,CAAC,QAAQ,EAAE,CAAC,MAAM,GAAG,SAAS,GAAG,IAAI,CAAC,EAAE,GAAG,MAAM,CAkD1F;eAmnBc,MAAM"}

@@ -211,6 +211,21 @@ export interface ScanException {
 }
 
 // ─── Stock Purchase ──────────────────────────────────────────────────────────
+export type PaymentMode = 'upi' | 'bank_transfer' | 'cash' | 'cheque' | 'partner_out_of_pocket' | 'other';
+
+export interface StockPurchasePayment {
+  _id?: string;
+  amount: number; // paise
+  paymentDate: string;
+  paymentMode: PaymentMode;
+  paidByPartner?: Partner | string;
+  referenceNumber?: string;
+  notes?: string;
+  recordedBy?: User | string;
+  linkedExpenseId?: string;
+  createdAt?: string;
+}
+
 export interface StockPurchaseItem {
   product: Product | string;
   quantityPurchased: number;
@@ -231,9 +246,34 @@ export interface StockPurchase {
   additionalCosts: number; // paise
   taxAmount: number; // paise
   totalAmount: number; // paise
+  paidAmount?: number; // paise
+  dueAmount?: number; // paise
   paymentStatus: 'paid' | 'partial' | 'unpaid';
+  payments?: StockPurchasePayment[];
   notes?: string;
   createdAt: string;
+}
+
+export interface StockVendorDueSummary {
+  vendorId: string;
+  vendorName: string;
+  vendorPhone?: string;
+  totalPurchased: number; // paise
+  totalPaid: number;      // paise
+  totalDue: number;       // paise
+  invoiceCount: number;
+  unpaidCount: number;
+}
+
+export interface StockAccountingSummary {
+  totalPurchased: number; // paise
+  totalPaid: number;      // paise
+  totalDue: number;       // paise
+  totalPurchases: number;
+  paidCount: number;
+  partialCount: number;
+  unpaidCount: number;
+  vendors: StockVendorDueSummary[];
 }
 
 // ─── Stock Movement ──────────────────────────────────────────────────────────

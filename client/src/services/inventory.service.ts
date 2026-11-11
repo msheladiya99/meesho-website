@@ -1,5 +1,5 @@
 import api from '../lib/axios';
-import type { ApiResponse, Product, Category, StockPurchase, StockMovement, Vendor, PaginationParams } from '../types';
+import type { ApiResponse, Product, Category, StockPurchase, StockMovement, Vendor, PaginationParams, StockAccountingSummary } from '../types';
 
 export const productsApi = {
   list: (params?: PaginationParams) =>
@@ -37,14 +37,26 @@ export const vendorsApi = {
 };
 
 export const stockPurchasesApi = {
-  list: (params?: PaginationParams) =>
+  list: (params?: PaginationParams & { startDate?: string; endDate?: string }) =>
     api.get<ApiResponse<StockPurchase[]>>('/stock-purchases', { params }),
+  getAccountingSummary: (params?: { accountId?: string; startDate?: string; endDate?: string }) =>
+    api.get<ApiResponse<StockAccountingSummary>>('/stock-purchases/accounting-summary', { params }),
   getNextInvoiceNumber: (params?: { accountId?: string }) =>
     api.get<ApiResponse<{ nextInvoiceNumber: string; totalPurchases: number }>>('/stock-purchases/next-invoice-number', { params }),
   get: (id: string) => api.get<ApiResponse<StockPurchase>>(`/stock-purchases/${id}`),
   create: (data: Partial<StockPurchase>) => api.post<ApiResponse<StockPurchase>>('/stock-purchases', data),
   update: (id: string, data: Partial<StockPurchase>) => api.put<ApiResponse<StockPurchase>>(`/stock-purchases/${id}`, data),
   delete: (id: string) => api.delete(`/stock-purchases/${id}`),
+  recordPayment: (id: string, data: {
+    amount: number;
+    paymentDate?: string;
+    paymentMode?: string;
+    paidByPartner?: string;
+    referenceNumber?: string;
+    notes?: string;
+  }) => api.post<ApiResponse<StockPurchase>>(`/stock-purchases/${id}/payments`, data),
+  deletePayment: (id: string, paymentId: string) =>
+    api.delete<ApiResponse<StockPurchase>>(`/stock-purchases/${id}/payments/${paymentId}`),
 };
 
 export const inventoryApi = {

@@ -2,10 +2,13 @@ import React, { useState, useMemo, useRef } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import {
   Plus, Edit2, Trash2, TruckIcon, Search, Eye,
-  Package, CreditCard, Calendar, AlertCircle, Loader2
+  Package, CreditCard, Calendar, AlertCircle, Loader2,
+  CheckCircle2, Building2, Receipt, ArrowRight, Clock,
+  Check, X
 } from 'lucide-react';
 import { useForm } from 'react-hook-form';
 import { stockPurchasesApi, vendorsApi } from '../services/inventory.service';
+import { partnersApi } from '../services/expenses.service';
 import { useAccountStore } from '../store/accountStore';
 import { formatCurrency, formatDate, rupeesToPaise, paiseToRupees, dateRangePresets, calculateNextInvoiceNumber } from '../lib/utils';
 import DateRangePicker from '../components/ui/DateRangePicker';
@@ -13,7 +16,7 @@ import Modal from '../components/ui/Modal';
 import { EmptyState, LoadingSpinner, ConfirmDialog } from '../components/ui/Feedback';
 import { Pagination, TableSummaryStatus } from '../components/ui/Pagination';
 import toast from 'react-hot-toast';
-import type { DateRange, StockPurchase, Vendor } from '../types';
+import type { DateRange, StockPurchase, Vendor, Partner, PaymentMode } from '../types';
 
 interface FormData {
   purchaseDate: string;
@@ -28,18 +31,44 @@ interface FormData {
   notes?: string;
 }
 
+const paymentModeLabels: Record<PaymentMode, string> = {
+  upi: 'UPI (GPay / PhonePe / Paytm / BHIM)',
+  bank_transfer: 'Bank Transfer (NEFT / IMPS / RTGS)',
+  cash: 'Cash',
+  cheque: 'Cheque',
+  partner_out_of_pocket: 'Partner Out-of-Pocket (Personal Expense)',
+  other: 'Other Mode',
+};
+
+const paymentColors: Record<string, string> = {
+  paid: 'bg-emerald-50 text-emerald-700 border-emerald-200',
+  partial: 'bg-amber-50 text-amber-700 border-amber-200',
+  unpaid: 'bg-rose-50 text-rose-700 border-rose-200'
+};
+
 const StockPurchasesPage: React.FC = () => {
   const { activeAccountId } = useAccountStore();
   const qc = useQueryClient();
   const [dateRange, setDateRange] = useState<DateRange>(dateRangePresets().thisMonth);
   const [search, setSearch] = useState('');
   const [paymentFilter, setPaymentFilter] = useState<string>('all');
+  const [selectedVendorFilter, setSelectedVendorFilter] = useState<string>('all');
   const [page, setPage] = useState(1);
   const [pageSize, setPageSize] = useState(10);
   const [viewingPurchase, setViewingPurchase] = useState<StockPurchase | null>(null);
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [editingPurchase, setEditingPurchase] = useState<StockPurchase | null>(null);
   const [deleteId, setDeleteId] = useState<string | null>(null);
+
+  // Record Payment Modal State
+  const [payingPurchase, setPayingPurchase] = useState<StockPurchase | null>(null);
+  const [paymentAmount, setPaymentAmount] = useState<number>(0);
+  const [paymentDate, setPaymentDate] = useState<string>(new Date().toISOString().split('T')[0]);
+  const [paymentMode, setPaymentMode] = useState<PaymentMode>('upi');
+  const [paidByPartner, setPaidByPartner] = useState<string>('');
+  const [referenceNumber, setReferenceNumber] = useState<string>('');
+  const [paymentNotes, setPaymentNotes] = useState<string>('');
+  const [deletePaymentTarget, setDeletePaymentTarget] = useState<{ purchaseId: string; paymentId: string; amount: number; invoiceNo?: string } | null>(null);
 
   const params = {
     accountId: activeAccountId === 'all' ? undefined : activeAccountId,
@@ -53,6 +82,7 @@ const StockPurchasesPage: React.FC = () => {
   });
 
   const { data: vendorsData } = useQuery({ queryKey: ['vendors'], queryFn: () => vendorsApi.list() });
+  const { data: partnersData } = useQuery({ queryKey: ['partners'], queryFn: () => partnersApi.list() });
 
   const { data: nextInvoiceRes } = useQuery({
     queryKey: ['next-invoice-number', activeAccountId],
@@ -61,6 +91,13 @@ const StockPurchasesPage: React.FC = () => {
 
   const rawPurchases: StockPurchase[] = data?.data?.data || [];
   const vendors: Vendor[] = vendorsData?.data?.data || [];
+  const partners: Partner[] = partnersData?.data?.data || [];
+
+  // Keep viewingPurchase synced if data updates
+  const activeViewingPurchase = useMemo(() => {
+    if (!viewingPurchase) return null;
+    return rawPurchases.find(p => p._id === viewingPurchase._id) || viewingPurchase;
+  }, [viewingPurchase, rawPurchases]);
 
   // Determine next sequential bill/invoice number
   const nextSequenceNumber = useMemo(() => {
@@ -71,27 +108,54 @@ const StockPurchasesPage: React.FC = () => {
     return calculateNextInvoiceNumber(invoices);
   }, [nextInvoiceRes, rawPurchases]);
 
-  // Filter purchases by search and payment status
+  // Filter purchases by search, payment status, and vendor
   const purchases = useMemo(() => {
     return rawPurchases.filter(p => {
       const vend = typeof p.vendor === 'object' ? p.vendor : vendors.find(v => v._id === p.vendor);
       const vendorName = vend?.name?.toLowerCase() || '';
+      const vendorId = typeof p.vendor === 'object' ? p.vendor._id : p.vendor;
       const invoiceNo = (p.vendorInvoiceNumber || '').toLowerCase();
       const s = search.toLowerCase().trim();
 
       const matchesSearch = !s || vendorName.includes(s) || invoiceNo.includes(s);
-      const matchesPayment = paymentFilter === 'all' || p.paymentStatus === paymentFilter;
 
-      return matchesSearch && matchesPayment;
+      let matchesPayment = true;
+      if (paymentFilter === 'paid') matchesPayment = p.paymentStatus === 'paid';
+      else if (paymentFilter === 'partial') matchesPayment = p.paymentStatus === 'partial';
+      else if (paymentFilter === 'unpaid') matchesPayment = p.paymentStatus === 'unpaid';
+      else if (paymentFilter === 'due') {
+        const paid = p.paidAmount !== undefined ? p.paidAmount : (p.paymentStatus === 'paid' ? p.totalAmount : 0);
+        const due = p.dueAmount !== undefined ? p.dueAmount : Math.max(0, (p.totalAmount || 0) - paid);
+        matchesPayment = due > 0;
+      }
+
+      const matchesVendor = selectedVendorFilter === 'all' || vendorId === selectedVendorFilter;
+
+      return matchesSearch && matchesPayment && matchesVendor;
     });
-  }, [rawPurchases, search, paymentFilter, vendors]);
+  }, [rawPurchases, search, paymentFilter, selectedVendorFilter, vendors]);
 
   const paginatedPurchases = useMemo(() => {
     return purchases.slice((page - 1) * pageSize, page * pageSize);
   }, [purchases, page, pageSize]);
 
-  // Overall Statistics
-  const totalSpend = useMemo(() => rawPurchases.reduce((s, p) => s + (p.totalAmount || 0), 0), [rawPurchases]);
+  // Overall Statistics & Accounts Payable Breakdown
+  const totalInvoiced = useMemo(() => rawPurchases.reduce((s, p) => s + (p.totalAmount || 0), 0), [rawPurchases]);
+  const totalPaid = useMemo(() => {
+    return rawPurchases.reduce((s, p) => {
+      const paid = p.paidAmount !== undefined ? p.paidAmount : (p.paymentStatus === 'paid' ? p.totalAmount : 0);
+      return s + paid;
+    }, 0);
+  }, [rawPurchases]);
+
+  const totalDue = useMemo(() => {
+    return rawPurchases.reduce((s, p) => {
+      const paid = p.paidAmount !== undefined ? p.paidAmount : (p.paymentStatus === 'paid' ? p.totalAmount : 0);
+      const due = p.dueAmount !== undefined ? p.dueAmount : Math.max(0, (p.totalAmount || 0) - paid);
+      return s + due;
+    }, 0);
+  }, [rawPurchases]);
+
   const totalUnits = useMemo(() => {
     return rawPurchases.reduce((sum, p) => {
       if (p.totalQuantity) return sum + p.totalQuantity;
@@ -99,8 +163,53 @@ const StockPurchasesPage: React.FC = () => {
       return sum + pItems.reduce((iSum: number, item: any) => iSum + (item.quantityPurchased || 0), 0);
     }, 0);
   }, [rawPurchases]);
+
   const unpaidCount = useMemo(() => rawPurchases.filter(p => p.paymentStatus === 'unpaid').length, [rawPurchases]);
+  const partialCount = useMemo(() => rawPurchases.filter(p => p.paymentStatus === 'partial').length, [rawPurchases]);
   const paidCount = useMemo(() => rawPurchases.filter(p => p.paymentStatus === 'paid').length, [rawPurchases]);
+
+  // Vendor Outstandings Summary
+  const vendorSummaries = useMemo(() => {
+    const map = new Map<string, {
+      vendorId: string;
+      vendorName: string;
+      totalInvoiced: number;
+      totalPaid: number;
+      totalDue: number;
+      billsCount: number;
+      dueBillsCount: number;
+    }>();
+
+    for (const p of rawPurchases) {
+      const vend = typeof p.vendor === 'object' ? p.vendor : vendors.find(v => v._id === p.vendor);
+      const vId = (vend?._id || (typeof p.vendor === 'string' ? p.vendor : 'unknown')) as string;
+      const vName = vend?.name || 'Unknown Vendor';
+
+      const pTotal = p.totalAmount || 0;
+      const pPaid = p.paidAmount !== undefined ? p.paidAmount : (p.paymentStatus === 'paid' ? pTotal : 0);
+      const pDue = p.dueAmount !== undefined ? p.dueAmount : Math.max(0, pTotal - pPaid);
+
+      const existing = map.get(vId) || {
+        vendorId: vId,
+        vendorName: vName,
+        totalInvoiced: 0,
+        totalPaid: 0,
+        totalDue: 0,
+        billsCount: 0,
+        dueBillsCount: 0,
+      };
+
+      existing.totalInvoiced += pTotal;
+      existing.totalPaid += pPaid;
+      existing.totalDue += pDue;
+      existing.billsCount += 1;
+      if (pDue > 0) existing.dueBillsCount += 1;
+
+      map.set(vId, existing);
+    }
+
+    return Array.from(map.values()).sort((a, b) => b.totalDue - a.totalDue);
+  }, [rawPurchases, vendors]);
 
   const { register, handleSubmit, watch, reset, setValue, formState: { errors } } = useForm<FormData>({
     defaultValues: {
@@ -129,6 +238,8 @@ const StockPurchasesPage: React.FC = () => {
     qc.invalidateQueries({ queryKey: ['next-invoice-number'] });
     qc.invalidateQueries({ queryKey: ['inventory'] });
     qc.invalidateQueries({ queryKey: ['products'] });
+    qc.invalidateQueries({ queryKey: ['expenses'] });
+    qc.invalidateQueries({ queryKey: ['partners'] });
     qc.invalidateQueries({ queryKey: ['dashboard'] });
   };
 
@@ -173,6 +284,39 @@ const StockPurchasesPage: React.FC = () => {
       setDeleteId(null);
     },
     onError: (e: unknown) => toast.error((e as { response?: { data?: { message?: string } } })?.response?.data?.message || 'Error deleting purchase'),
+  });
+
+  // Record Payment Mutation
+  const recordPaymentMut = useMutation({
+    mutationFn: ({ id, data }: { id: string; data: any }) => stockPurchasesApi.recordPayment(id, data),
+    onSuccess: (res) => {
+      invalidateAll();
+      if (activeViewingPurchase && res?.data?.data) {
+        setViewingPurchase(res.data.data);
+      }
+      setPayingPurchase(null);
+      toast.success('Payment recorded successfully!');
+    },
+    onError: (e: unknown) => {
+      toast.error((e as { response?: { data?: { message?: string } } })?.response?.data?.message || 'Error recording payment');
+    },
+  });
+
+  // Delete Payment Mutation
+  const deletePaymentMut = useMutation({
+    mutationFn: ({ purchaseId, paymentId }: { purchaseId: string; paymentId: string }) =>
+      stockPurchasesApi.deletePayment(purchaseId, paymentId),
+    onSuccess: (res) => {
+      invalidateAll();
+      if (activeViewingPurchase && res?.data?.data) {
+        setViewingPurchase(res.data.data);
+      }
+      setDeletePaymentTarget(null);
+      toast.success('Payment entry deleted and balance restored');
+    },
+    onError: (e: unknown) => {
+      toast.error((e as { response?: { data?: { message?: string } } })?.response?.data?.message || 'Error deleting payment');
+    },
   });
 
   const onSubmit = (d: FormData) => {
@@ -245,7 +389,7 @@ const StockPurchasesPage: React.FC = () => {
 
     reset({
       purchaseDate: new Date().toISOString().split('T')[0],
-      paymentStatus: 'paid',
+      paymentStatus: 'unpaid',
       totalQuantity: 1,
       purchasePricePerUnit: 0,
       discount: 0,
@@ -257,10 +401,47 @@ const StockPurchasesPage: React.FC = () => {
     setIsModalOpen(true);
   };
 
-  const paymentColors: Record<string, string> = {
-    paid: 'bg-green-100 text-green-800 border-green-200',
-    partial: 'bg-yellow-100 text-yellow-800 border-yellow-200',
-    unpaid: 'bg-red-100 text-red-800 border-red-200'
+  const openRecordPayment = (p: StockPurchase) => {
+    setPayingPurchase(p);
+    const paid = p.paidAmount !== undefined ? p.paidAmount : (p.paymentStatus === 'paid' ? p.totalAmount : 0);
+    const due = p.dueAmount !== undefined ? p.dueAmount : Math.max(0, p.totalAmount - paid);
+    setPaymentAmount(paiseToRupees(due));
+    setPaymentDate(new Date().toISOString().split('T')[0]);
+    setPaymentMode('upi');
+    setPaidByPartner('');
+    setReferenceNumber('');
+    setPaymentNotes('');
+  };
+
+  const handleConfirmPayment = () => {
+    if (!payingPurchase) return;
+    const paid = payingPurchase.paidAmount !== undefined ? payingPurchase.paidAmount : (payingPurchase.paymentStatus === 'paid' ? payingPurchase.totalAmount : 0);
+    const maxDueRupees = paiseToRupees(payingPurchase.dueAmount !== undefined ? payingPurchase.dueAmount : Math.max(0, payingPurchase.totalAmount - paid));
+
+    if (!paymentAmount || paymentAmount <= 0) {
+      toast.error('Please enter a valid payment amount greater than ₹0');
+      return;
+    }
+    if (paymentAmount > maxDueRupees) {
+      toast.error(`Payment amount cannot exceed remaining due of ${formatCurrency(rupeesToPaise(maxDueRupees))}`);
+      return;
+    }
+    if (paymentMode === 'partner_out_of_pocket' && !paidByPartner) {
+      toast.error('Please select which partner paid for this purchase');
+      return;
+    }
+
+    recordPaymentMut.mutate({
+      id: payingPurchase._id,
+      data: {
+        amount: rupeesToPaise(paymentAmount),
+        paymentDate,
+        paymentMode,
+        paidByPartner: paymentMode === 'partner_out_of_pocket' ? paidByPartner : undefined,
+        referenceNumber: referenceNumber.trim() || undefined,
+        notes: paymentNotes.trim() || undefined,
+      },
+    });
   };
 
   return (
@@ -268,9 +449,14 @@ const StockPurchasesPage: React.FC = () => {
       {/* Top Header */}
       <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
         <div>
-          <h1 className="text-2xl font-bold text-gray-900 tracking-tight">Stock Purchases</h1>
+          <h1 className="text-2xl font-bold text-gray-900 tracking-tight flex items-center gap-2">
+            Stock Purchases
+            <span className="text-xs px-2.5 py-0.5 rounded-full font-semibold bg-primary-50 text-primary-700 border border-primary-200">
+              Accounts Payable
+            </span>
+          </h1>
           <p className="text-sm text-gray-500 mt-1">
-            Directly add total stock quantities and costs without needing to select perfume names or categories.
+            Track vendor purchase bills, record supplier payments, and monitor outstanding dues.
           </p>
         </div>
         <button
@@ -286,60 +472,133 @@ const StockPurchasesPage: React.FC = () => {
         </button>
       </div>
 
-      {/* KPI Cards */}
+      {/* Accounting KPI Summary Cards */}
       <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
-        <div className="card p-4 flex items-center gap-3.5">
+        {/* Total Invoiced */}
+        <div className="card p-4 flex items-center gap-3.5 border-l-4 border-l-blue-500">
           <div className="w-10 h-10 rounded-lg bg-blue-50 text-blue-600 flex items-center justify-center shrink-0">
-            <TruckIcon className="w-5 h-5" />
+            <Receipt className="w-5 h-5" />
           </div>
           <div>
-            <p className="text-xs font-semibold text-gray-500 uppercase tracking-wider">Total Purchases</p>
-            <p className="text-xl font-bold text-gray-900 mt-0.5">{rawPurchases.length}</p>
+            <p className="text-xs font-semibold text-gray-500 uppercase tracking-wider">Total Invoiced</p>
+            <p className="text-xl font-bold text-gray-900 mt-0.5">{formatCurrency(totalInvoiced)}</p>
+            <p className="text-[11px] text-gray-400 mt-0.5">{rawPurchases.length} bills · {totalUnits.toLocaleString()} units</p>
           </div>
         </div>
 
-        <div className="card p-4 flex items-center gap-3.5">
-          <div className="w-10 h-10 rounded-lg bg-indigo-50 text-indigo-600 flex items-center justify-center shrink-0">
-            <Package className="w-5 h-5" />
-          </div>
-          <div>
-            <p className="text-xs font-semibold text-gray-500 uppercase tracking-wider">Total Units</p>
-            <p className="text-xl font-bold text-gray-900 mt-0.5">{totalUnits.toLocaleString()} units</p>
-          </div>
-        </div>
-
-        <div className="card p-4 flex items-center gap-3.5">
+        {/* Total Paid */}
+        <div className="card p-4 flex items-center gap-3.5 border-l-4 border-l-emerald-500">
           <div className="w-10 h-10 rounded-lg bg-emerald-50 text-emerald-600 flex items-center justify-center shrink-0">
-            <CreditCard className="w-5 h-5" />
+            <CheckCircle2 className="w-5 h-5" />
           </div>
           <div>
-            <p className="text-xs font-semibold text-gray-500 uppercase tracking-wider">Total Spend</p>
-            <p className="text-xl font-bold text-gray-900 mt-0.5">{formatCurrency(totalSpend)}</p>
+            <p className="text-xs font-semibold text-gray-500 uppercase tracking-wider">Total Paid</p>
+            <p className="text-xl font-bold text-emerald-700 mt-0.5">{formatCurrency(totalPaid)}</p>
+            <p className="text-[11px] text-emerald-600 font-medium mt-0.5">
+              {paidCount} paid · {partialCount} partial
+            </p>
           </div>
         </div>
 
-        <div className="card p-4 flex items-center gap-3.5">
-          <div className="w-10 h-10 rounded-lg bg-amber-50 text-amber-600 flex items-center justify-center shrink-0">
+        {/* Total Due / Outstanding Balance */}
+        <div className={`card p-4 flex items-center gap-3.5 border-l-4 ${totalDue > 0 ? 'border-l-rose-500 bg-rose-50/20' : 'border-l-gray-300'}`}>
+          <div className={`w-10 h-10 rounded-lg flex items-center justify-center shrink-0 ${totalDue > 0 ? 'bg-rose-100 text-rose-600' : 'bg-gray-100 text-gray-400'}`}>
             <AlertCircle className="w-5 h-5" />
           </div>
           <div>
-            <p className="text-xs font-semibold text-gray-500 uppercase tracking-wider">Payment Status</p>
-            <p className="text-sm font-semibold text-gray-900 mt-0.5">
-              <span className="text-red-600">{unpaidCount} unpaid</span> · <span className="text-green-600">{paidCount} paid</span>
+            <p className="text-xs font-semibold text-gray-500 uppercase tracking-wider">Total Due (Payable)</p>
+            <p className={`text-xl font-bold mt-0.5 ${totalDue > 0 ? 'text-rose-600' : 'text-gray-900'}`}>
+              {formatCurrency(totalDue)}
+            </p>
+            <p className="text-[11px] text-rose-600 font-medium mt-0.5">
+              {unpaidCount + partialCount} bills outstanding
+            </p>
+          </div>
+        </div>
+
+        {/* Vendor Payables Summary Count */}
+        <div className="card p-4 flex items-center gap-3.5 border-l-4 border-l-indigo-500">
+          <div className="w-10 h-10 rounded-lg bg-indigo-50 text-indigo-600 flex items-center justify-center shrink-0">
+            <Building2 className="w-5 h-5" />
+          </div>
+          <div>
+            <p className="text-xs font-semibold text-gray-500 uppercase tracking-wider">Vendors with Due</p>
+            <p className="text-xl font-bold text-gray-900 mt-0.5">
+              {vendorSummaries.filter(v => v.totalDue > 0).length} <span className="text-xs font-normal text-gray-500">/ {vendorSummaries.length} vendors</span>
+            </p>
+            <p className="text-[11px] text-indigo-600 font-medium mt-0.5">
+              {selectedVendorFilter !== 'all' ? 'Filtered by vendor' : 'Click chip below to filter'}
             </p>
           </div>
         </div>
       </div>
 
+      {/* Vendor Due Breakdown Banner (When dues exist) */}
+      {vendorSummaries.some(v => v.totalDue > 0) && (
+        <div className="card p-3.5 bg-gradient-to-r from-gray-50 to-amber-50/40 border border-amber-200/70">
+          <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2.5">
+            <div className="flex items-center gap-2">
+              <span className="flex h-2 w-2 rounded-full bg-rose-500 animate-pulse" />
+              <span className="text-xs font-bold text-gray-700 uppercase tracking-wider">
+                Vendor Outstanding Balances:
+              </span>
+            </div>
+            {selectedVendorFilter !== 'all' && (
+              <button
+                onClick={() => { setSelectedVendorFilter('all'); setPage(1); }}
+                className="text-xs text-primary-600 hover:text-primary-800 font-medium flex items-center gap-1 self-start sm:self-auto"
+              >
+                <X className="w-3.5 h-3.5" /> Clear vendor filter
+              </button>
+            )}
+          </div>
+
+          <div className="flex flex-wrap gap-2 mt-2.5">
+            {vendorSummaries.map(v => {
+              const isSelected = selectedVendorFilter === v.vendorId;
+              const hasDue = v.totalDue > 0;
+              return (
+                <button
+                  key={v.vendorId}
+                  onClick={() => {
+                    setSelectedVendorFilter(isSelected ? 'all' : v.vendorId);
+                    setPage(1);
+                  }}
+                  className={`px-3 py-1.5 rounded-lg text-xs font-medium border transition-all flex items-center gap-2 ${
+                    isSelected
+                      ? 'bg-primary-600 text-white border-primary-600 shadow-sm'
+                      : hasDue
+                        ? 'bg-white text-gray-800 border-amber-300 hover:border-amber-400 hover:bg-amber-50/50'
+                        : 'bg-white/60 text-gray-600 border-gray-200 hover:bg-white'
+                  }`}
+                >
+                  <span className="font-semibold">{v.vendorName}</span>
+                  {hasDue ? (
+                    <span className={`px-1.5 py-0.2 rounded font-bold ${isSelected ? 'bg-white/20 text-white' : 'bg-rose-100 text-rose-700'}`}>
+                      Due: {formatCurrency(v.totalDue)}
+                    </span>
+                  ) : (
+                    <span className={`px-1.5 py-0.2 rounded text-[11px] ${isSelected ? 'bg-white/20 text-white' : 'bg-emerald-100 text-emerald-700'}`}>
+                      All Paid
+                    </span>
+                  )}
+                  <span className="text-[10px] opacity-75 font-mono">({v.billsCount} bills)</span>
+                </button>
+              );
+            })}
+          </div>
+        </div>
+      )}
+
       {/* Filter and Date Bar */}
       <div className="card p-4 space-y-3">
         <div className="flex flex-col md:flex-row gap-3 items-stretch md:items-center justify-between">
-          <div className="flex flex-1 flex-col sm:flex-row gap-3 max-w-xl">
+          <div className="flex flex-1 flex-col sm:flex-row gap-3 max-w-2xl">
             <div className="relative flex-1">
               <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-400" />
               <input
                 type="text"
-                placeholder="Search by vendor, invoice #..."
+                placeholder="Search vendor name, invoice #..."
                 value={search}
                 onChange={e => { setSearch(e.target.value); setPage(1); }}
                 className="input pl-9"
@@ -349,12 +608,26 @@ const StockPurchasesPage: React.FC = () => {
             <select
               value={paymentFilter}
               onChange={e => { setPaymentFilter(e.target.value); setPage(1); }}
-              className="select sm:w-40"
+              className="select sm:w-44"
             >
-              <option value="all">All Payments</option>
-              <option value="paid">Paid</option>
-              <option value="partial">Partial</option>
-              <option value="unpaid">Unpaid</option>
+              <option value="all">All Payment Status</option>
+              <option value="due">⚠️ Has Balance Due ({unpaidCount + partialCount})</option>
+              <option value="unpaid">Unpaid ({unpaidCount})</option>
+              <option value="partial">Partial ({partialCount})</option>
+              <option value="paid">Fully Paid ({paidCount})</option>
+            </select>
+
+            <select
+              value={selectedVendorFilter}
+              onChange={e => { setSelectedVendorFilter(e.target.value); setPage(1); }}
+              className="select sm:w-44"
+            >
+              <option value="all">All Vendors ({vendors.length})</option>
+              {vendors.map(v => (
+                <option key={v._id} value={v._id}>
+                  {v.name}
+                </option>
+              ))}
             </select>
           </div>
 
@@ -400,9 +673,11 @@ const StockPurchasesPage: React.FC = () => {
                   <th className="hidden sm:table-cell">Invoice #</th>
                   <th className="text-center sm:text-left">Qty</th>
                   <th className="hidden md:table-cell text-right">Price / Unit</th>
-                  <th className="text-right sm:text-left">Total Amount</th>
-                  <th className="text-center sm:text-left">Payment</th>
-                  <th className="text-right pr-2">Actions</th>
+                  <th className="text-right">Total Bill</th>
+                  <th className="text-right">Paid</th>
+                  <th className="text-right">Due / Balance</th>
+                  <th className="text-center">Status</th>
+                  <th className="text-right pr-3">Actions</th>
                 </tr>
               </thead>
               <tbody>
@@ -412,6 +687,10 @@ const StockPurchasesPage: React.FC = () => {
                   const rowUnitPrice = p.purchasePricePerUnit !== undefined && p.purchasePricePerUnit > 0
                     ? p.purchasePricePerUnit
                     : (rowQty > 0 ? Math.round(p.totalAmount / rowQty) : 0);
+
+                  const paidAmt = p.paidAmount !== undefined ? p.paidAmount : (p.paymentStatus === 'paid' ? p.totalAmount : 0);
+                  const dueAmt = p.dueAmount !== undefined ? p.dueAmount : Math.max(0, p.totalAmount - paidAmt);
+                  const hasDue = dueAmt > 0;
 
                   return (
                     <tr key={p._id} className="transition-colors hover:bg-gray-50/80">
@@ -457,24 +736,61 @@ const StockPurchasesPage: React.FC = () => {
                       </td>
 
                       {/* Total Amount */}
-                      <td className="text-right sm:text-left align-middle font-bold text-gray-900 text-xs sm:text-sm">
+                      <td className="text-right align-middle font-bold text-gray-900 text-xs sm:text-sm">
                         {formatCurrency(p.totalAmount)}
                       </td>
 
+                      {/* Paid Amount */}
+                      <td className="text-right align-middle font-semibold text-emerald-700 text-xs sm:text-sm">
+                        {formatCurrency(paidAmt)}
+                      </td>
+
+                      {/* Due / Balance Amount */}
+                      <td className="text-right align-middle font-bold text-xs sm:text-sm">
+                        {hasDue ? (
+                          <span className="text-rose-600 bg-rose-50 px-2 py-0.5 rounded border border-rose-200">
+                            {formatCurrency(dueAmt)}
+                          </span>
+                        ) : (
+                          <span className="text-emerald-600 text-xs font-medium flex items-center justify-end gap-1">
+                            <Check className="w-3.5 h-3.5" /> ₹0.00
+                          </span>
+                        )}
+                      </td>
+
                       {/* Payment Status */}
-                      <td className="text-center sm:text-left align-middle">
-                        <span className={`inline-flex items-center px-1.5 sm:px-2 py-0.5 rounded-full text-[9px] sm:text-xs font-semibold capitalize border ${paymentColors[p.paymentStatus] || 'bg-gray-100 text-gray-800'}`}>
+                      <td className="text-center align-middle">
+                        <span className={`inline-flex items-center px-2 py-0.5 rounded-full text-[10px] sm:text-xs font-semibold capitalize border ${paymentColors[p.paymentStatus] || 'bg-gray-100 text-gray-800'}`}>
                           {p.paymentStatus}
                         </span>
                       </td>
 
                       {/* Actions */}
-                      <td className="text-right pr-2 align-middle">
-                        <div className="flex items-center justify-end gap-0.5 sm:gap-1">
+                      <td className="text-right pr-3 align-middle">
+                        <div className="flex items-center justify-end gap-1">
+                          {/* Record Payment Button */}
+                          {hasDue ? (
+                            <button
+                              onClick={() => openRecordPayment(p)}
+                              className="px-2.5 py-1 rounded-lg bg-emerald-50 hover:bg-emerald-100 text-emerald-700 border border-emerald-300 text-xs font-semibold inline-flex items-center gap-1 transition-colors shadow-xs"
+                              title="Record Payment against this invoice"
+                            >
+                              <CreditCard className="w-3.5 h-3.5" /> Pay
+                            </button>
+                          ) : (
+                            <button
+                              onClick={() => setViewingPurchase(p)}
+                              className="px-2 py-1 rounded-lg bg-gray-50 text-gray-400 hover:text-emerald-700 text-[11px] font-medium inline-flex items-center gap-1 transition-colors"
+                              title="Paid in full · View receipt"
+                            >
+                              <CheckCircle2 className="w-3.5 h-3.5 text-emerald-600" /> Paid
+                            </button>
+                          )}
+
                           <button
                             onClick={() => setViewingPurchase(p)}
                             className="p-1.5 rounded-lg hover:bg-primary-50 text-gray-400 hover:text-primary-600 transition-colors"
-                            title="View Invoice Details"
+                            title="View Invoice & Payment Ledger"
                           >
                             <Eye className="w-4 h-4" />
                           </button>
@@ -513,6 +829,171 @@ const StockPurchasesPage: React.FC = () => {
         </>
         )}
       </div>
+
+      {/* Record Payment Modal */}
+      {payingPurchase && (
+        <Modal
+          isOpen={!!payingPurchase}
+          onClose={() => setPayingPurchase(null)}
+          title={`Record Payment — Invoice #${payingPurchase.vendorInvoiceNumber || payingPurchase._id.slice(-6)}`}
+          size="md"
+          footer={
+            <div className="flex gap-2 justify-end">
+              <button onClick={() => setPayingPurchase(null)} className="btn-secondary">
+                Cancel
+              </button>
+              <button
+                type="button"
+                onClick={handleConfirmPayment}
+                disabled={recordPaymentMut.isPending}
+                className="btn-primary min-w-[140px] flex items-center justify-center gap-1.5 bg-emerald-600 hover:bg-emerald-700"
+              >
+                {recordPaymentMut.isPending && <Loader2 className="w-4 h-4 animate-spin" />}
+                {recordPaymentMut.isPending ? 'Recording...' : 'Confirm Payment'}
+              </button>
+            </div>
+          }
+        >
+          {(() => {
+            const vend = typeof payingPurchase.vendor === 'object' ? payingPurchase.vendor : vendors.find(v => v._id === payingPurchase.vendor);
+            const paid = payingPurchase.paidAmount !== undefined ? payingPurchase.paidAmount : (payingPurchase.paymentStatus === 'paid' ? payingPurchase.totalAmount : 0);
+            const due = payingPurchase.dueAmount !== undefined ? payingPurchase.dueAmount : Math.max(0, payingPurchase.totalAmount - paid);
+            const dueInRupees = paiseToRupees(due);
+
+            return (
+              <div className="space-y-4">
+                {/* Invoice Due Summary Card */}
+                <div className="p-4 bg-gray-50 rounded-xl border border-gray-200 space-y-2">
+                  <div className="flex justify-between items-center text-xs text-gray-500">
+                    <span>Vendor: <strong className="text-gray-800 font-semibold">{vend?.name || '—'}</strong></span>
+                    <span>Date: <strong className="text-gray-800">{formatDate(payingPurchase.purchaseDate)}</strong></span>
+                  </div>
+                  <div className="grid grid-cols-3 gap-2 pt-2 border-t border-gray-200 text-center">
+                    <div>
+                      <p className="text-[11px] text-gray-400">Total Bill</p>
+                      <p className="text-sm font-bold text-gray-800">{formatCurrency(payingPurchase.totalAmount)}</p>
+                    </div>
+                    <div>
+                      <p className="text-[11px] text-gray-400">Paid So Far</p>
+                      <p className="text-sm font-bold text-emerald-600">{formatCurrency(paid)}</p>
+                    </div>
+                    <div>
+                      <p className="text-[11px] text-rose-500 font-semibold">Remaining Due</p>
+                      <p className="text-sm font-bold text-rose-600">{formatCurrency(due)}</p>
+                    </div>
+                  </div>
+                </div>
+
+                {/* Quick Pay Full Balance Button */}
+                <div className="flex items-center justify-between bg-primary-50/60 p-2.5 rounded-lg border border-primary-200">
+                  <span className="text-xs text-primary-800 font-medium">Quick Shortcut:</span>
+                  <button
+                    type="button"
+                    onClick={() => setPaymentAmount(dueInRupees)}
+                    className="text-xs px-3 py-1 rounded-md bg-primary-600 hover:bg-primary-700 text-white font-semibold flex items-center gap-1 transition-colors"
+                  >
+                    ⚡ Pay Full Due ({formatCurrency(due)})
+                  </button>
+                </div>
+
+                {/* Payment Form Fields */}
+                <div className="space-y-3">
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                    <div>
+                      <label className="label font-bold text-gray-800">Payment Amount (₹) *</label>
+                      <input
+                        type="number"
+                        min="1"
+                        max={dueInRupees}
+                        step="0.01"
+                        value={paymentAmount || ''}
+                        onChange={e => setPaymentAmount(Number(e.target.value))}
+                        className="input font-bold text-base bg-white"
+                        placeholder="e.g. 5000"
+                      />
+                      <p className="text-[11px] text-gray-500 mt-1">
+                        Max payable: {formatCurrency(due)}
+                      </p>
+                    </div>
+
+                    <div>
+                      <label className="label">Payment Date *</label>
+                      <input
+                        type="date"
+                        value={paymentDate}
+                        onChange={e => setPaymentDate(e.target.value)}
+                        className="input"
+                      />
+                    </div>
+                  </div>
+
+                  {/* Payment Mode */}
+                  <div>
+                    <label className="label font-semibold">Payment Mode *</label>
+                    <select
+                      value={paymentMode}
+                      onChange={e => setPaymentMode(e.target.value as PaymentMode)}
+                      className="select font-medium"
+                    >
+                      {(Object.keys(paymentModeLabels) as PaymentMode[]).map(mode => (
+                        <option key={mode} value={mode}>
+                          {paymentModeLabels[mode]}
+                        </option>
+                      ))}
+                    </select>
+                  </div>
+
+                  {/* Partner Selection (When paid out-of-pocket by partner) */}
+                  {paymentMode === 'partner_out_of_pocket' && (
+                    <div className="p-3 bg-amber-50 rounded-xl border border-amber-200 space-y-2">
+                      <label className="label font-bold text-amber-900">Paid By Which Partner? *</label>
+                      <select
+                        value={paidByPartner}
+                        onChange={e => setPaidByPartner(e.target.value)}
+                        className="select bg-white border-amber-300"
+                      >
+                        <option value="">Select Partner</option>
+                        {partners.map(p => (
+                          <option key={p._id} value={p._id}>
+                            {p.name}
+                          </option>
+                        ))}
+                      </select>
+                      <p className="text-[11px] text-amber-800 flex items-center gap-1 mt-1">
+                        <CheckCircle2 className="w-3.5 h-3.5 shrink-0 text-amber-700" />
+                        This payment will be recorded in <strong>Partner Settlements</strong> so this partner gets reimbursed.
+                      </p>
+                    </div>
+                  )}
+
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                    <div>
+                      <label className="label text-xs">Reference / UTR / Cheque Number</label>
+                      <input
+                        type="text"
+                        value={referenceNumber}
+                        onChange={e => setReferenceNumber(e.target.value)}
+                        placeholder="e.g. UPI-1234567890"
+                        className="input font-mono text-sm"
+                      />
+                    </div>
+                    <div>
+                      <label className="label text-xs">Payment Notes</label>
+                      <input
+                        type="text"
+                        value={paymentNotes}
+                        onChange={e => setPaymentNotes(e.target.value)}
+                        placeholder="e.g. Paid via GPay bank transfer"
+                        className="input text-sm"
+                      />
+                    </div>
+                  </div>
+                </div>
+              </div>
+            );
+          })()}
+        </Modal>
+      )}
 
       {/* Add / Edit Purchase Modal */}
       <Modal
@@ -599,9 +1080,9 @@ const StockPurchasesPage: React.FC = () => {
             <div>
               <label className="label">Payment Status</label>
               <select {...register('paymentStatus')} className="select">
-                <option value="paid">Paid</option>
+                <option value="unpaid">Unpaid (Balance Due)</option>
+                <option value="paid">Paid (Fully Paid)</option>
                 <option value="partial">Partial</option>
-                <option value="unpaid">Unpaid</option>
               </select>
             </div>
           </div>
@@ -694,110 +1175,252 @@ const StockPurchasesPage: React.FC = () => {
         </form>
       </Modal>
 
-      {/* Invoice Details Quick View Modal */}
-      {viewingPurchase && (
+      {/* Invoice Details & Payment Ledger Quick View Modal */}
+      {activeViewingPurchase && (
         <Modal
-          isOpen={!!viewingPurchase}
+          isOpen={!!activeViewingPurchase}
           onClose={() => setViewingPurchase(null)}
-          title={`Purchase Invoice: #${viewingPurchase.vendorInvoiceNumber || viewingPurchase._id.slice(-6)}`}
-          size="md"
+          title={`Purchase Invoice: #${activeViewingPurchase.vendorInvoiceNumber || activeViewingPurchase._id.slice(-6)}`}
+          size="lg"
           footer={
-            <div className="flex gap-2 justify-end">
-              <button onClick={() => setViewingPurchase(null)} className="btn-secondary">Close</button>
-              <button
-                onClick={() => {
-                  const p = viewingPurchase;
-                  setViewingPurchase(null);
-                  openEdit(p);
-                }}
-                className="btn-primary"
-              >
-                <Edit2 className="w-4 h-4" /> Edit Purchase
-              </button>
+            <div className="flex items-center justify-between w-full">
+              <div>
+                {(activeViewingPurchase.dueAmount ?? Math.max(0, activeViewingPurchase.totalAmount - (activeViewingPurchase.paidAmount || 0))) > 0 && (
+                  <button
+                    onClick={() => {
+                      const p = activeViewingPurchase;
+                      openRecordPayment(p);
+                    }}
+                    className="btn-primary bg-emerald-600 hover:bg-emerald-700 inline-flex items-center gap-1.5 text-xs px-3.5 py-1.5"
+                  >
+                    <CreditCard className="w-4 h-4" /> Record Payment
+                  </button>
+                )}
+              </div>
+              <div className="flex gap-2">
+                <button onClick={() => setViewingPurchase(null)} className="btn-secondary">Close</button>
+                <button
+                  onClick={() => {
+                    const p = activeViewingPurchase;
+                    setViewingPurchase(null);
+                    openEdit(p);
+                  }}
+                  className="btn-primary"
+                >
+                  <Edit2 className="w-4 h-4" /> Edit Purchase
+                </button>
+              </div>
             </div>
           }
         >
-          <div className="space-y-4">
-            {/* Header info */}
-            <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 bg-gray-50 p-3.5 rounded-xl border border-gray-200 text-xs">
-              <div>
-                <span className="text-gray-400 block font-medium">Date</span>
-                <span className="font-semibold text-gray-800">{formatDate(viewingPurchase.purchaseDate)}</span>
-              </div>
-              <div>
-                <span className="text-gray-400 block font-medium">Vendor</span>
-                <span className="font-semibold text-gray-800">
-                  {(typeof viewingPurchase.vendor === 'object' ? viewingPurchase.vendor?.name : null) || '—'}
-                </span>
-              </div>
-              <div>
-                <span className="text-gray-400 block font-medium">Invoice #</span>
-                <span className="font-mono font-semibold text-gray-800">{viewingPurchase.vendorInvoiceNumber || '—'}</span>
-              </div>
-              <div>
-                <span className="text-gray-400 block font-medium">Payment</span>
-                <span className={`inline-block px-2 py-0.5 rounded text-xs font-bold uppercase ${paymentColors[viewingPurchase.paymentStatus]}`}>
-                  {viewingPurchase.paymentStatus}
-                </span>
-              </div>
-            </div>
+          {(() => {
+            const vend = typeof activeViewingPurchase.vendor === 'object' ? activeViewingPurchase.vendor : vendors.find(v => v._id === activeViewingPurchase.vendor);
+            const paid = activeViewingPurchase.paidAmount !== undefined ? activeViewingPurchase.paidAmount : (activeViewingPurchase.paymentStatus === 'paid' ? activeViewingPurchase.totalAmount : 0);
+            const due = activeViewingPurchase.dueAmount !== undefined ? activeViewingPurchase.dueAmount : Math.max(0, activeViewingPurchase.totalAmount - paid);
+            const payments = Array.isArray(activeViewingPurchase.payments) ? activeViewingPurchase.payments : [];
 
-            {/* Quantity and Price summary */}
-            <div className="p-4 bg-primary-50/50 rounded-xl border border-primary-200 flex justify-between items-center">
-              <div>
-                <span className="text-xs text-gray-500 font-medium block">Total Units Added</span>
-                <span className="text-2xl font-bold text-primary-700">
-                  {(viewingPurchase.totalQuantity || (Array.isArray(viewingPurchase.items) ? viewingPurchase.items.reduce((s, it) => s + (it.quantityPurchased || 0), 0) : 0)).toLocaleString()} units
-                </span>
-              </div>
-              <div className="text-right">
-                <span className="text-xs text-gray-500 font-medium block">Price / Unit</span>
-                <span className="text-lg font-bold text-gray-900">
-                  {formatCurrency(
-                    viewingPurchase.purchasePricePerUnit !== undefined && viewingPurchase.purchasePricePerUnit > 0
-                      ? viewingPurchase.purchasePricePerUnit
-                      : ((viewingPurchase.totalQuantity || 1) > 0 ? Math.round(viewingPurchase.totalAmount / (viewingPurchase.totalQuantity || 1)) : 0)
+            return (
+              <div className="space-y-5">
+                {/* Header info */}
+                <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 bg-gray-50 p-3.5 rounded-xl border border-gray-200 text-xs">
+                  <div>
+                    <span className="text-gray-400 block font-medium">Date</span>
+                    <span className="font-semibold text-gray-800">{formatDate(activeViewingPurchase.purchaseDate)}</span>
+                  </div>
+                  <div>
+                    <span className="text-gray-400 block font-medium">Vendor</span>
+                    <span className="font-semibold text-gray-800">
+                      {vend?.name || '—'}
+                    </span>
+                  </div>
+                  <div>
+                    <span className="text-gray-400 block font-medium">Invoice #</span>
+                    <span className="font-mono font-semibold text-gray-800">{activeViewingPurchase.vendorInvoiceNumber || '—'}</span>
+                  </div>
+                  <div>
+                    <span className="text-gray-400 block font-medium">Payment Status</span>
+                    <span className={`inline-block px-2 py-0.5 rounded text-xs font-bold uppercase ${paymentColors[activeViewingPurchase.paymentStatus]}`}>
+                      {activeViewingPurchase.paymentStatus}
+                    </span>
+                  </div>
+                </div>
+
+                {/* Accounting Due Overview Banner */}
+                <div className="grid grid-cols-3 gap-3 p-4 bg-gradient-to-r from-gray-50 to-primary-50/30 rounded-xl border border-gray-200 text-center">
+                  <div>
+                    <span className="text-xs text-gray-500 font-medium block">Total Invoiced</span>
+                    <span className="text-lg font-bold text-gray-900">{formatCurrency(activeViewingPurchase.totalAmount)}</span>
+                  </div>
+                  <div>
+                    <span className="text-xs text-gray-500 font-medium block">Amount Paid</span>
+                    <span className="text-lg font-bold text-emerald-700">{formatCurrency(paid)}</span>
+                  </div>
+                  <div>
+                    <span className="text-xs text-rose-500 font-medium block">Remaining Due</span>
+                    <span className={`text-lg font-bold ${due > 0 ? 'text-rose-600' : 'text-emerald-600'}`}>
+                      {formatCurrency(due)}
+                    </span>
+                  </div>
+                </div>
+
+                {/* Quantity and Price summary */}
+                <div className="p-3.5 bg-gray-50 rounded-xl border border-gray-200 flex justify-between items-center text-xs">
+                  <div>
+                    <span className="text-gray-500 block">Total Units Added:</span>
+                    <span className="font-bold text-gray-900 text-sm">
+                      {(activeViewingPurchase.totalQuantity || (Array.isArray(activeViewingPurchase.items) ? activeViewingPurchase.items.reduce((s, it) => s + (it.quantityPurchased || 0), 0) : 0)).toLocaleString()} units
+                    </span>
+                  </div>
+                  <div className="text-right">
+                    <span className="text-gray-500 block">Calculated Price / Unit:</span>
+                    <span className="font-bold text-gray-900 text-sm">
+                      {formatCurrency(
+                        activeViewingPurchase.purchasePricePerUnit !== undefined && activeViewingPurchase.purchasePricePerUnit > 0
+                          ? activeViewingPurchase.purchasePricePerUnit
+                          : ((activeViewingPurchase.totalQuantity || 1) > 0 ? Math.round(activeViewingPurchase.totalAmount / (activeViewingPurchase.totalQuantity || 1)) : 0)
+                      )}
+                    </span>
+                  </div>
+                </div>
+
+                {/* Payment History Ledger */}
+                <div className="space-y-2">
+                  <div className="flex items-center justify-between">
+                    <h3 className="text-sm font-bold text-gray-900 flex items-center gap-1.5">
+                      <CreditCard className="w-4 h-4 text-emerald-600" />
+                      Payment History Ledger
+                      <span className="text-xs font-normal text-gray-500">({payments.length} entries)</span>
+                    </h3>
+                    {due > 0 && (
+                      <button
+                        onClick={() => openRecordPayment(activeViewingPurchase)}
+                        className="text-xs text-emerald-700 hover:text-emerald-800 font-semibold inline-flex items-center gap-1 hover:underline"
+                      >
+                        <Plus className="w-3.5 h-3.5" /> Add Payment
+                      </button>
+                    )}
+                  </div>
+
+                  {payments.length === 0 ? (
+                    <div className="p-4 bg-gray-50 rounded-xl border border-dashed border-gray-300 text-center">
+                      <p className="text-xs text-gray-500">
+                        {activeViewingPurchase.paymentStatus === 'paid'
+                          ? 'This bill was marked as Paid in full directly upon entry.'
+                          : 'No individual payment entries recorded yet for this invoice.'}
+                      </p>
+                      {due > 0 && (
+                        <button
+                          onClick={() => openRecordPayment(activeViewingPurchase)}
+                          className="btn-primary mt-2 text-xs py-1.5 px-3 bg-emerald-600 hover:bg-emerald-700"
+                        >
+                          <CreditCard className="w-3.5 h-3.5 mr-1" /> Record First Payment
+                        </button>
+                      )}
+                    </div>
+                  ) : (
+                    <div className="border border-gray-200 rounded-xl overflow-hidden">
+                      <table className="min-w-full divide-y divide-gray-200 text-xs">
+                        <thead className="bg-gray-50 text-gray-600 font-semibold">
+                          <tr>
+                            <th className="py-2 px-3 text-left">Date</th>
+                            <th className="py-2 px-3 text-left">Mode</th>
+                            <th className="py-2 px-3 text-left">Reference / Notes</th>
+                            <th className="py-2 px-3 text-left">Paid By</th>
+                            <th className="py-2 px-3 text-right">Amount</th>
+                            <th className="py-2 px-3 text-right">Action</th>
+                          </tr>
+                        </thead>
+                        <tbody className="divide-y divide-gray-100 bg-white">
+                          {payments.map(pay => {
+                            const partnerName = pay.paidByPartner && typeof pay.paidByPartner === 'object'
+                              ? (pay.paidByPartner as Partner).name
+                              : (partners.find(p => p._id === pay.paidByPartner)?.name || (pay.paymentMode === 'partner_out_of_pocket' ? 'Partner' : '—'));
+
+                            return (
+                              <tr key={pay._id} className="hover:bg-gray-50/60">
+                                <td className="py-2 px-3 whitespace-nowrap text-gray-700">
+                                  {formatDate(pay.paymentDate)}
+                                </td>
+                                <td className="py-2 px-3">
+                                  <span className="inline-block px-2 py-0.5 rounded text-[10px] font-bold uppercase bg-gray-100 text-gray-700">
+                                    {pay.paymentMode.replace(/_/g, ' ')}
+                                  </span>
+                                </td>
+                                <td className="py-2 px-3 text-gray-600 max-w-[150px] truncate">
+                                  {pay.referenceNumber && (
+                                    <span className="font-mono font-semibold text-gray-800 block">
+                                      {pay.referenceNumber}
+                                    </span>
+                                  )}
+                                  {pay.notes && <span className="text-gray-500 text-[11px] block">{pay.notes}</span>}
+                                  {!pay.referenceNumber && !pay.notes && '—'}
+                                </td>
+                                <td className="py-2 px-3 text-gray-700">
+                                  {partnerName}
+                                </td>
+                                <td className="py-2 px-3 text-right font-bold text-emerald-700 whitespace-nowrap">
+                                  {formatCurrency(pay.amount)}
+                                </td>
+                                <td className="py-2 px-3 text-right">
+                                  <button
+                                    onClick={() => {
+                                      if (pay._id) {
+                                        setDeletePaymentTarget({
+                                          purchaseId: activeViewingPurchase._id,
+                                          paymentId: pay._id,
+                                          amount: pay.amount,
+                                          invoiceNo: activeViewingPurchase.vendorInvoiceNumber,
+                                        });
+                                      }
+                                    }}
+                                    className="p-1 rounded text-gray-400 hover:text-rose-600 hover:bg-rose-50 transition-colors"
+                                    title="Delete payment entry"
+                                  >
+                                    <Trash2 className="w-3.5 h-3.5" />
+                                  </button>
+                                </td>
+                              </tr>
+                            );
+                          })}
+                        </tbody>
+                      </table>
+                    </div>
                   )}
-                </span>
-              </div>
-            </div>
+                </div>
 
-            {/* Total breakdown */}
-            <div className="bg-gray-50 p-3.5 rounded-xl border border-gray-200 text-xs space-y-1.5 ml-auto max-w-xs">
-              {viewingPurchase.discount > 0 && (
-                <div className="flex justify-between text-emerald-600">
-                  <span>Discount:</span>
-                  <span>− {formatCurrency(viewingPurchase.discount)}</span>
-                </div>
-              )}
-              {viewingPurchase.taxAmount > 0 && (
-                <div className="flex justify-between text-gray-600">
-                  <span>Tax:</span>
-                  <span>+ {formatCurrency(viewingPurchase.taxAmount)}</span>
-                </div>
-              )}
-              {viewingPurchase.additionalCosts > 0 && (
-                <div className="flex justify-between text-gray-600">
-                  <span>Additional Costs:</span>
-                  <span>+ {formatCurrency(viewingPurchase.additionalCosts)}</span>
-                </div>
-              )}
-              <div className="flex justify-between text-sm font-bold text-gray-900 border-t border-gray-200 pt-1.5">
-                <span>Grand Total:</span>
-                <span className="text-primary-700">{formatCurrency(viewingPurchase.totalAmount)}</span>
+                {activeViewingPurchase.notes && (
+                  <div className="text-xs text-gray-600 bg-gray-50 p-3 rounded-lg border border-gray-200">
+                    <strong>Invoice Notes:</strong> {activeViewingPurchase.notes}
+                  </div>
+                )}
               </div>
-            </div>
-
-            {viewingPurchase.notes && (
-              <div className="text-xs text-gray-600 bg-gray-50 p-3 rounded-lg border border-gray-200">
-                <strong>Notes:</strong> {viewingPurchase.notes}
-              </div>
-            )}
-          </div>
+            );
+          })()}
         </Modal>
       )}
 
-      {/* Delete Confirmation */}
+      {/* Delete Payment Entry Confirmation */}
+      <ConfirmDialog
+        isOpen={!!deletePaymentTarget}
+        title="Delete Payment Entry"
+        message={`Delete this payment of ${formatCurrency(deletePaymentTarget?.amount || 0)} against invoice #${deletePaymentTarget?.invoiceNo || ''}? The invoice due balance will increase accordingly.`}
+        onConfirm={() => {
+          if (deletePaymentTarget && !deletePaymentMut.isPending) {
+            deletePaymentMut.mutate({
+              purchaseId: deletePaymentTarget.purchaseId,
+              paymentId: deletePaymentTarget.paymentId,
+            });
+          }
+        }}
+        onCancel={() => {
+          if (!deletePaymentMut.isPending) setDeletePaymentTarget(null);
+        }}
+        confirmText={deletePaymentMut.isPending ? 'Deleting...' : 'Delete Payment'}
+        isLoading={deletePaymentMut.isPending}
+        isDangerous
+      />
+
+      {/* Delete Purchase Confirmation */}
       <ConfirmDialog
         isOpen={!!deleteId}
         title="Delete Stock Purchase"
