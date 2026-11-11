@@ -217,6 +217,7 @@ export interface StockPurchasePayment {
   _id?: string;
   amount: number; // paise
   paymentDate: string;
+  paidBy?: 'business' | 'partner';
   paymentMode: PaymentMode;
   paidByPartner?: Partner | string;
   referenceNumber?: string;
@@ -286,6 +287,7 @@ export interface VendorLedgerEntry {
   debit: number;   // paise
   credit: number;  // paise
   runningBalance: number; // paise
+  paidBy?: 'business' | 'partner';
   paymentMode?: PaymentMode;
   paidByPartner?: Partner | string;
   referenceNumber?: string;

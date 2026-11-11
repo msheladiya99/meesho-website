@@ -50,6 +50,7 @@ export const stockPurchasesApi = {
   recordPayment: (id: string, data: {
     amount: number;
     paymentDate?: string;
+    paidBy?: 'business' | 'partner';
     paymentMode?: string;
     paidByPartner?: string;
     referenceNumber?: string;
@@ -62,6 +63,7 @@ export const stockPurchasesApi = {
   payVendorDue: (vendorId: string, data: {
     amount: number;
     paymentDate?: string;
+    paidBy?: 'business' | 'partner';
     paymentMode?: string;
     paidByPartner?: string;
     referenceNumber?: string;

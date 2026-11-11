@@ -4,7 +4,7 @@ import {
   Plus, Edit2, Trash2, TruckIcon, Search, Eye,
   Package, CreditCard, Calendar, AlertCircle, Loader2,
   CheckCircle2, Building2, Receipt, ArrowRight, Clock,
-  Check, X, BookOpen, ArrowUpRight, ArrowDownLeft, FileText
+  Check, X, BookOpen, ArrowUpRight, ArrowDownLeft, FileText, User
 } from 'lucide-react';
 import { useForm } from 'react-hook-form';
 import { stockPurchasesApi, vendorsApi } from '../services/inventory.service';
@@ -30,15 +30,6 @@ interface FormData {
   paymentStatus: 'paid' | 'partial' | 'unpaid';
   notes?: string;
 }
-
-const paymentModeLabels: Record<PaymentMode, string> = {
-  upi: 'UPI (GPay / PhonePe / Paytm / BHIM)',
-  bank_transfer: 'Bank Transfer (NEFT / IMPS / RTGS)',
-  cash: 'Cash',
-  cheque: 'Cheque',
-  partner_out_of_pocket: 'Partner Out-of-Pocket (Personal Expense)',
-  other: 'Other Mode',
-};
 
 const paymentColors: Record<string, string> = {
   paid: 'bg-emerald-50 text-emerald-700 border-emerald-200',
@@ -68,8 +59,9 @@ const StockPurchasesPage: React.FC = () => {
   const [payingPurchase, setPayingPurchase] = useState<StockPurchase | null>(null);
   const [paymentAmount, setPaymentAmount] = useState<number>(0);
   const [paymentDate, setPaymentDate] = useState<string>(new Date().toISOString().split('T')[0]);
-  const [paymentMode, setPaymentMode] = useState<PaymentMode>('upi');
+  const [paymentPaidBy, setPaymentPaidBy] = useState<'business' | 'partner'>('business');
   const [paidByPartner, setPaidByPartner] = useState<string>('');
+  const [paymentMode, setPaymentMode] = useState<PaymentMode>('upi');
   const [referenceNumber, setReferenceNumber] = useState<string>('');
   const [paymentNotes, setPaymentNotes] = useState<string>('');
   const [deletePaymentTarget, setDeletePaymentTarget] = useState<{ purchaseId: string; paymentId: string; amount: number; invoiceNo?: string } | null>(null);
@@ -78,8 +70,9 @@ const StockPurchasesPage: React.FC = () => {
   const [payingVendor, setPayingVendor] = useState<{ vendorId: string; vendorName: string; totalDue: number } | null>(null);
   const [vendorPayAmount, setVendorPayAmount] = useState<number>(0);
   const [vendorPayDate, setVendorPayDate] = useState<string>(new Date().toISOString().split('T')[0]);
-  const [vendorPayMode, setVendorPayMode] = useState<PaymentMode>('upi');
+  const [vendorPaidBy, setVendorPaidBy] = useState<'business' | 'partner'>('business');
   const [vendorPaidByPartner, setVendorPaidByPartner] = useState<string>('');
+  const [vendorPayMode, setVendorPayMode] = useState<PaymentMode>('upi');
   const [vendorPayRef, setVendorPayRef] = useState<string>('');
   const [vendorPayNotes, setVendorPayNotes] = useState<string>('');
 
@@ -458,8 +451,9 @@ const StockPurchasesPage: React.FC = () => {
     const due = p.dueAmount !== undefined ? p.dueAmount : Math.max(0, p.totalAmount - paid);
     setPaymentAmount(paiseToRupees(due));
     setPaymentDate(new Date().toISOString().split('T')[0]);
-    setPaymentMode('upi');
+    setPaymentPaidBy('business');
     setPaidByPartner('');
+    setPaymentMode('upi');
     setReferenceNumber('');
     setPaymentNotes('');
   };
@@ -468,8 +462,9 @@ const StockPurchasesPage: React.FC = () => {
     setPayingVendor(v);
     setVendorPayAmount(paiseToRupees(v.totalDue));
     setVendorPayDate(new Date().toISOString().split('T')[0]);
-    setVendorPayMode('upi');
+    setVendorPaidBy('business');
     setVendorPaidByPartner('');
+    setVendorPayMode('upi');
     setVendorPayRef('');
     setVendorPayNotes('');
   };
@@ -492,8 +487,8 @@ const StockPurchasesPage: React.FC = () => {
       toast.error(`Payment amount cannot exceed remaining due of ${formatCurrency(rupeesToPaise(maxDueRupees))}`);
       return;
     }
-    if (paymentMode === 'partner_out_of_pocket' && !paidByPartner) {
-      toast.error('Please select which partner paid for this purchase');
+    if (paymentPaidBy === 'partner' && !paidByPartner) {
+      toast.error('Please select which partner / person paid for this purchase');
       return;
     }
 
@@ -502,8 +497,9 @@ const StockPurchasesPage: React.FC = () => {
       data: {
         amount: rupeesToPaise(paymentAmount),
         paymentDate,
+        paidBy: paymentPaidBy,
         paymentMode,
-        paidByPartner: paymentMode === 'partner_out_of_pocket' ? paidByPartner : undefined,
+        paidByPartner: paymentPaidBy === 'partner' ? paidByPartner : undefined,
         referenceNumber: referenceNumber.trim() || undefined,
         notes: paymentNotes.trim() || undefined,
       },
@@ -522,7 +518,7 @@ const StockPurchasesPage: React.FC = () => {
       toast.error(`Payment amount cannot exceed total vendor due of ${formatCurrency(payingVendor.totalDue)}`);
       return;
     }
-    if (vendorPayMode === 'partner_out_of_pocket' && !vendorPaidByPartner) {
+    if (vendorPaidBy === 'partner' && !vendorPaidByPartner) {
       toast.error('Please select which partner / person paid for this vendor payment');
       return;
     }
@@ -532,8 +528,9 @@ const StockPurchasesPage: React.FC = () => {
       data: {
         amount: rupeesToPaise(vendorPayAmount),
         paymentDate: vendorPayDate,
+        paidBy: vendorPaidBy,
         paymentMode: vendorPayMode,
-        paidByPartner: vendorPayMode === 'partner_out_of_pocket' ? vendorPaidByPartner : undefined,
+        paidByPartner: vendorPaidBy === 'partner' ? vendorPaidByPartner : undefined,
         referenceNumber: vendorPayRef.trim() || undefined,
         notes: vendorPayNotes.trim() || undefined,
       },
@@ -1115,7 +1112,7 @@ const StockPurchasesPage: React.FC = () => {
                       <th>Type</th>
                       <th>Invoice / Ref #</th>
                       <th>Particulars / Description</th>
-                      <th>Paid By (Person / Mode)</th>
+                      <th>Paid By (Person / Source)</th>
                       <th className="text-right">Debit (Dr - Bill)</th>
                       <th className="text-right">Credit (Cr - Paid)</th>
                       <th className="text-right pr-4">Balance Due</th>
@@ -1124,9 +1121,10 @@ const StockPurchasesPage: React.FC = () => {
                   <tbody>
                     {ledgerData.entries.map((entry, idx) => {
                       const isDebit = entry.type === 'debit';
+                      const isPartnerPaid = entry.paidBy === 'partner' || Boolean(entry.paidByPartner);
                       const partnerName = entry.paidByPartner && typeof entry.paidByPartner === 'object'
                         ? (entry.paidByPartner as Partner).name
-                        : (partners.find(p => p._id === entry.paidByPartner)?.name || (entry.paymentMode === 'partner_out_of_pocket' ? 'Partner' : ''));
+                        : (partners.find(p => p._id === entry.paidByPartner)?.name || (isPartnerPaid ? 'Partner' : ''));
 
                       return (
                         <tr key={entry.id || idx} className={`transition-colors ${isDebit ? 'hover:bg-blue-50/20' : 'hover:bg-emerald-50/20'}`}>
@@ -1165,25 +1163,28 @@ const StockPurchasesPage: React.FC = () => {
                             {entry.notes && <span className="block text-[11px] text-gray-500 mt-0.5">{entry.notes}</span>}
                           </td>
 
-                          {/* Paid By Person / Mode */}
+                          {/* Paid By (Person / Source) */}
                           <td className="text-xs">
                             {!isDebit ? (
-                              <div>
-                                {partnerName ? (
-                                  <span className="font-semibold text-indigo-700 block">
+                              isPartnerPaid && partnerName ? (
+                                <div>
+                                  <span className="font-bold text-amber-800 bg-amber-50 px-2 py-0.5 rounded border border-amber-200 inline-flex items-center gap-1 text-[11px]">
                                     👤 {partnerName}
                                   </span>
-                                ) : (
-                                  <span className="text-gray-700 font-medium block">
-                                    {entry.paymentMode ? entry.paymentMode.replace(/_/g, ' ').toUpperCase() : 'Cash / Bank'}
+                                  <span className="text-[10px] text-gray-400 block font-mono mt-0.5">
+                                    via {entry.paymentMode ? entry.paymentMode.replace(/_/g, ' ').toUpperCase() : 'UPI'}
                                   </span>
-                                )}
-                                {entry.referenceNumber && (
-                                  <span className="text-[10px] font-mono text-gray-400 block">
-                                    Ref: {entry.referenceNumber}
+                                </div>
+                              ) : (
+                                <div>
+                                  <span className="font-semibold text-blue-800 bg-blue-50 px-2 py-0.5 rounded border border-blue-200 inline-flex items-center gap-1 text-[11px]">
+                                    🏢 Business Account
                                   </span>
-                                )}
-                              </div>
+                                  <span className="text-[10px] text-gray-400 block font-mono mt-0.5">
+                                    via {entry.paymentMode ? entry.paymentMode.replace(/_/g, ' ').toUpperCase() : 'BANK'}
+                                  </span>
+                                </div>
+                              )
                             ) : (
                               <span className="text-gray-400">—</span>
                             )}
@@ -1290,7 +1291,7 @@ const StockPurchasesPage: React.FC = () => {
                 </div>
 
                 {/* Payment Form Fields */}
-                <div className="space-y-3">
+                <div className="space-y-3.5">
                   <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
                     <div>
                       <label className="label font-bold text-gray-800">Payment Amount (Credit) ₹ *</label>
@@ -1320,44 +1321,103 @@ const StockPurchasesPage: React.FC = () => {
                     </div>
                   </div>
 
-                  {/* Payment Mode */}
+                  {/* Payer Source Selector: Business Account vs Partner / Person */}
                   <div>
-                    <label className="label font-semibold">Payment Mode *</label>
-                    <select
-                      value={vendorPayMode}
-                      onChange={e => setVendorPayMode(e.target.value as PaymentMode)}
-                      className="select font-medium"
-                    >
-                      {(Object.keys(paymentModeLabels) as PaymentMode[]).map(mode => (
-                        <option key={mode} value={mode}>
-                          {paymentModeLabels[mode]}
-                        </option>
-                      ))}
-                    </select>
+                    <label className="label font-bold text-gray-800 text-xs">Payment Paid By (Source) *</label>
+                    <div className="grid grid-cols-2 gap-3 mt-1">
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setVendorPaidBy('business');
+                          setVendorPaidByPartner('');
+                        }}
+                        className={`p-3 rounded-xl border text-left transition-all flex items-center gap-2.5 ${
+                          vendorPaidBy === 'business'
+                            ? 'bg-blue-50/80 border-blue-500 text-blue-900 shadow-xs ring-1 ring-blue-500'
+                            : 'bg-white border-gray-200 text-gray-700 hover:bg-gray-50'
+                        }`}
+                      >
+                        <div className={`w-8 h-8 rounded-lg flex items-center justify-center shrink-0 ${
+                          vendorPaidBy === 'business' ? 'bg-blue-600 text-white' : 'bg-gray-100 text-gray-500'
+                        }`}>
+                          <Building2 className="w-4 h-4" />
+                        </div>
+                        <div>
+                          <p className="font-bold text-xs">Business Account</p>
+                          <p className="text-[10px] text-gray-500">Company Bank / Cash</p>
+                        </div>
+                      </button>
+
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setVendorPaidBy('partner');
+                          if (!vendorPaidByPartner && partners.length > 0) {
+                            setVendorPaidByPartner(partners[0]._id);
+                          }
+                        }}
+                        className={`p-3 rounded-xl border text-left transition-all flex items-center gap-2.5 ${
+                          vendorPaidBy === 'partner'
+                            ? 'bg-amber-50/80 border-amber-500 text-amber-900 shadow-xs ring-1 ring-amber-500'
+                            : 'bg-white border-gray-200 text-gray-700 hover:bg-gray-50'
+                        }`}
+                      >
+                        <div className={`w-8 h-8 rounded-lg flex items-center justify-center shrink-0 ${
+                          vendorPaidBy === 'partner' ? 'bg-amber-600 text-white' : 'bg-gray-100 text-gray-500'
+                        }`}>
+                          <User className="w-4 h-4" />
+                        </div>
+                        <div>
+                          <p className="font-bold text-xs">Partner / Person</p>
+                          <p className="text-[10px] text-gray-500">Paid from personal funds</p>
+                        </div>
+                      </button>
+                    </div>
                   </div>
 
-                  {/* Paid by Person / Partner dropdown */}
-                  {vendorPayMode === 'partner_out_of_pocket' && (
-                    <div className="p-3 bg-amber-50 rounded-xl border border-amber-200 space-y-2">
-                      <label className="label font-bold text-amber-900">Paid By Which Person / Partner? *</label>
+                  {/* If Partner selected: Dropdown to pick partner */}
+                  {vendorPaidBy === 'partner' ? (
+                    <div className="p-3.5 bg-amber-50/80 rounded-xl border border-amber-200 space-y-2">
+                      <label className="label font-bold text-amber-900 text-xs">Which Partner / Person Paid? *</label>
                       <select
                         value={vendorPaidByPartner}
                         onChange={e => setVendorPaidByPartner(e.target.value)}
-                        className="select bg-white border-amber-300"
+                        className="select bg-white border-amber-300 font-semibold text-gray-800"
                       >
-                        <option value="">Select Person / Partner</option>
+                        <option value="">Select Partner / Person Name</option>
                         {partners.map(p => (
                           <option key={p._id} value={p._id}>
-                            {p.name}
+                            👤 {p.name}
                           </option>
                         ))}
                       </select>
-                      <p className="text-[11px] text-amber-800 flex items-center gap-1 mt-1">
+                      <p className="text-[11px] text-amber-800 flex items-center gap-1.5 mt-1 font-medium">
                         <CheckCircle2 className="w-3.5 h-3.5 shrink-0 text-amber-700" />
-                        This payment will be recorded in <strong>Partner Settlements</strong> so this partner gets credited and reimbursed.
+                        Recorded in <strong>Partner Settlements</strong> so this partner gets credited/reimbursed.
                       </p>
                     </div>
+                  ) : (
+                    <div className="p-2.5 bg-blue-50/50 rounded-lg border border-blue-200/70 text-xs text-blue-800 flex items-center gap-2">
+                      <Building2 className="w-4 h-4 text-blue-600 shrink-0" />
+                      <span>Paid directly from business / company funds (Bank Account / Current Account / Cash).</span>
+                    </div>
                   )}
+
+                  {/* Payment Method / Mode */}
+                  <div>
+                    <label className="label font-semibold text-xs">Payment Method / Mode *</label>
+                    <select
+                      value={vendorPayMode}
+                      onChange={e => setVendorPayMode(e.target.value as PaymentMode)}
+                      className="select font-medium text-xs sm:text-sm"
+                    >
+                      <option value="upi">UPI (GPay / PhonePe / Paytm / BHIM)</option>
+                      <option value="bank_transfer">Bank Transfer (NEFT / IMPS / RTGS / Net Banking)</option>
+                      <option value="cash">Cash</option>
+                      <option value="cheque">Cheque</option>
+                      <option value="other">Other</option>
+                    </select>
+                  </div>
 
                   <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
                     <div>
@@ -1376,7 +1436,7 @@ const StockPurchasesPage: React.FC = () => {
                         type="text"
                         value={vendorPayNotes}
                         onChange={e => setVendorPayNotes(e.target.value)}
-                        placeholder="e.g. Paid from personal account via GPay"
+                        placeholder="e.g. Paid via GPay bank transfer"
                         className="input text-sm"
                       />
                     </div>
@@ -1452,7 +1512,7 @@ const StockPurchasesPage: React.FC = () => {
                       <th className="py-2 px-3 text-left">Date</th>
                       <th className="py-2 px-3 text-left">Type</th>
                       <th className="py-2 px-3 text-left">Particulars / Description</th>
-                      <th className="py-2 px-3 text-left">Paid By</th>
+                      <th className="py-2 px-3 text-left">Paid By (Person / Source)</th>
                       <th className="py-2 px-3 text-right">Debit (Dr)</th>
                       <th className="py-2 px-3 text-right">Credit (Cr)</th>
                       <th className="py-2 px-3 text-right">Balance Due</th>
@@ -1461,9 +1521,10 @@ const StockPurchasesPage: React.FC = () => {
                   <tbody className="divide-y divide-gray-100 bg-white">
                     {ledgerData.entries.map((entry, idx) => {
                       const isDebit = entry.type === 'debit';
+                      const isPartnerPaid = entry.paidBy === 'partner' || Boolean(entry.paidByPartner);
                       const partnerName = entry.paidByPartner && typeof entry.paidByPartner === 'object'
                         ? (entry.paidByPartner as Partner).name
-                        : (partners.find(p => p._id === entry.paidByPartner)?.name || (entry.paymentMode === 'partner_out_of_pocket' ? 'Partner' : ''));
+                        : (partners.find(p => p._id === entry.paidByPartner)?.name || (isPartnerPaid ? 'Partner' : ''));
 
                       return (
                         <tr key={entry.id || idx} className={isDebit ? 'hover:bg-blue-50/20' : 'hover:bg-emerald-50/20'}>
@@ -1489,10 +1550,14 @@ const StockPurchasesPage: React.FC = () => {
                           </td>
                           <td className="py-2 px-3 text-gray-700">
                             {!isDebit ? (
-                              partnerName ? (
-                                <span className="font-semibold text-indigo-700">👤 {partnerName}</span>
+                              isPartnerPaid && partnerName ? (
+                                <span className="font-bold text-amber-800 bg-amber-50 px-2 py-0.5 rounded border border-amber-200 inline-flex items-center gap-1 text-[11px]">
+                                  👤 {partnerName}
+                                </span>
                               ) : (
-                                entry.paymentMode ? entry.paymentMode.replace(/_/g, ' ') : '—'
+                                <span className="font-semibold text-blue-800 bg-blue-50 px-2 py-0.5 rounded border border-blue-200 inline-flex items-center gap-1 text-[11px]">
+                                  🏢 Business Account
+                                </span>
                               )
                             ) : '—'}
                           </td>
@@ -1587,7 +1652,7 @@ const StockPurchasesPage: React.FC = () => {
                 </div>
 
                 {/* Payment Form Fields */}
-                <div className="space-y-3">
+                <div className="space-y-3.5">
                   <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
                     <div>
                       <label className="label font-bold text-gray-800">Payment Amount (Credit) ₹ *</label>
@@ -1617,44 +1682,103 @@ const StockPurchasesPage: React.FC = () => {
                     </div>
                   </div>
 
-                  {/* Payment Mode */}
+                  {/* Payer Source Selector: Business Account vs Partner / Person */}
                   <div>
-                    <label className="label font-semibold">Payment Mode *</label>
-                    <select
-                      value={paymentMode}
-                      onChange={e => setPaymentMode(e.target.value as PaymentMode)}
-                      className="select font-medium"
-                    >
-                      {(Object.keys(paymentModeLabels) as PaymentMode[]).map(mode => (
-                        <option key={mode} value={mode}>
-                          {paymentModeLabels[mode]}
-                        </option>
-                      ))}
-                    </select>
+                    <label className="label font-bold text-gray-800 text-xs">Payment Paid By (Source) *</label>
+                    <div className="grid grid-cols-2 gap-3 mt-1">
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setPaymentPaidBy('business');
+                          setPaidByPartner('');
+                        }}
+                        className={`p-3 rounded-xl border text-left transition-all flex items-center gap-2.5 ${
+                          paymentPaidBy === 'business'
+                            ? 'bg-blue-50/80 border-blue-500 text-blue-900 shadow-xs ring-1 ring-blue-500'
+                            : 'bg-white border-gray-200 text-gray-700 hover:bg-gray-50'
+                        }`}
+                      >
+                        <div className={`w-8 h-8 rounded-lg flex items-center justify-center shrink-0 ${
+                          paymentPaidBy === 'business' ? 'bg-blue-600 text-white' : 'bg-gray-100 text-gray-500'
+                        }`}>
+                          <Building2 className="w-4 h-4" />
+                        </div>
+                        <div>
+                          <p className="font-bold text-xs">Business Account</p>
+                          <p className="text-[10px] text-gray-500">Company Bank / Cash</p>
+                        </div>
+                      </button>
+
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setPaymentPaidBy('partner');
+                          if (!paidByPartner && partners.length > 0) {
+                            setPaidByPartner(partners[0]._id);
+                          }
+                        }}
+                        className={`p-3 rounded-xl border text-left transition-all flex items-center gap-2.5 ${
+                          paymentPaidBy === 'partner'
+                            ? 'bg-amber-50/80 border-amber-500 text-amber-900 shadow-xs ring-1 ring-amber-500'
+                            : 'bg-white border-gray-200 text-gray-700 hover:bg-gray-50'
+                        }`}
+                      >
+                        <div className={`w-8 h-8 rounded-lg flex items-center justify-center shrink-0 ${
+                          paymentPaidBy === 'partner' ? 'bg-amber-600 text-white' : 'bg-gray-100 text-gray-500'
+                        }`}>
+                          <User className="w-4 h-4" />
+                        </div>
+                        <div>
+                          <p className="font-bold text-xs">Partner / Person</p>
+                          <p className="text-[10px] text-gray-500">Paid from personal funds</p>
+                        </div>
+                      </button>
+                    </div>
                   </div>
 
-                  {/* Partner Selection (When paid out-of-pocket by partner) */}
-                  {paymentMode === 'partner_out_of_pocket' && (
-                    <div className="p-3 bg-amber-50 rounded-xl border border-amber-200 space-y-2">
-                      <label className="label font-bold text-amber-900">Paid By Which Partner / Person? *</label>
+                  {/* If Partner selected: Dropdown to pick partner */}
+                  {paymentPaidBy === 'partner' ? (
+                    <div className="p-3.5 bg-amber-50/80 rounded-xl border border-amber-200 space-y-2">
+                      <label className="label font-bold text-amber-900 text-xs">Which Partner / Person Paid? *</label>
                       <select
                         value={paidByPartner}
                         onChange={e => setPaidByPartner(e.target.value)}
-                        className="select bg-white border-amber-300"
+                        className="select bg-white border-amber-300 font-semibold text-gray-800"
                       >
-                        <option value="">Select Person / Partner</option>
+                        <option value="">Select Partner / Person Name</option>
                         {partners.map(p => (
                           <option key={p._id} value={p._id}>
-                            {p.name}
+                            👤 {p.name}
                           </option>
                         ))}
                       </select>
-                      <p className="text-[11px] text-amber-800 flex items-center gap-1 mt-1">
+                      <p className="text-[11px] text-amber-800 flex items-center gap-1.5 mt-1 font-medium">
                         <CheckCircle2 className="w-3.5 h-3.5 shrink-0 text-amber-700" />
-                        This payment will be recorded in <strong>Partner Settlements</strong> so this partner gets reimbursed.
+                        Recorded in <strong>Partner Settlements</strong> so this partner gets credited/reimbursed.
                       </p>
                     </div>
+                  ) : (
+                    <div className="p-2.5 bg-blue-50/50 rounded-lg border border-blue-200/70 text-xs text-blue-800 flex items-center gap-2">
+                      <Building2 className="w-4 h-4 text-blue-600 shrink-0" />
+                      <span>Paid directly from business / company funds (Bank Account / Current Account / Cash).</span>
+                    </div>
                   )}
+
+                  {/* Payment Method / Mode */}
+                  <div>
+                    <label className="label font-semibold text-xs">Payment Method / Mode *</label>
+                    <select
+                      value={paymentMode}
+                      onChange={e => setPaymentMode(e.target.value as PaymentMode)}
+                      className="select font-medium text-xs sm:text-sm"
+                    >
+                      <option value="upi">UPI (GPay / PhonePe / Paytm / BHIM)</option>
+                      <option value="bank_transfer">Bank Transfer (NEFT / IMPS / RTGS / Net Banking)</option>
+                      <option value="cash">Cash</option>
+                      <option value="cheque">Cheque</option>
+                      <option value="other">Other</option>
+                    </select>
+                  </div>
 
                   <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
                     <div>
@@ -2026,18 +2150,19 @@ const StockPurchasesPage: React.FC = () => {
                         <thead className="bg-gray-50 text-gray-600 font-semibold">
                           <tr>
                             <th className="py-2 px-3 text-left">Date</th>
+                            <th className="py-2 px-3 text-left">Paid By (Person / Source)</th>
                             <th className="py-2 px-3 text-left">Mode</th>
                             <th className="py-2 px-3 text-left">Reference / Notes</th>
-                            <th className="py-2 px-3 text-left">Paid By (Person)</th>
                             <th className="py-2 px-3 text-right">Amount (Cr)</th>
                             <th className="py-2 px-3 text-right">Action</th>
                           </tr>
                         </thead>
                         <tbody className="divide-y divide-gray-100 bg-white">
                           {payments.map(pay => {
+                            const isPartner = pay.paidBy === 'partner' || Boolean(pay.paidByPartner);
                             const partnerName = pay.paidByPartner && typeof pay.paidByPartner === 'object'
                               ? (pay.paidByPartner as Partner).name
-                              : (partners.find(p => p._id === pay.paidByPartner)?.name || (pay.paymentMode === 'partner_out_of_pocket' ? 'Partner' : '—'));
+                              : (partners.find(p => p._id === pay.paidByPartner)?.name || (isPartner ? 'Partner' : ''));
 
                             return (
                               <tr key={pay._id} className="hover:bg-gray-50/60">
@@ -2045,8 +2170,19 @@ const StockPurchasesPage: React.FC = () => {
                                   {formatDate(pay.paymentDate)}
                                 </td>
                                 <td className="py-2 px-3">
+                                  {isPartner && partnerName ? (
+                                    <span className="font-bold text-amber-800 bg-amber-50 px-2 py-0.5 rounded border border-amber-200 inline-flex items-center gap-1 text-[11px]">
+                                      👤 {partnerName}
+                                    </span>
+                                  ) : (
+                                    <span className="font-semibold text-blue-800 bg-blue-50 px-2 py-0.5 rounded border border-blue-200 inline-flex items-center gap-1 text-[11px]">
+                                      🏢 Business Account
+                                    </span>
+                                  )}
+                                </td>
+                                <td className="py-2 px-3">
                                   <span className="inline-block px-2 py-0.5 rounded text-[10px] font-bold uppercase bg-gray-100 text-gray-700">
-                                    {pay.paymentMode.replace(/_/g, ' ')}
+                                    {pay.paymentMode ? pay.paymentMode.replace(/_/g, ' ') : 'UPI'}
                                   </span>
                                 </td>
                                 <td className="py-2 px-3 text-gray-600 max-w-[150px] truncate">
@@ -2057,9 +2193,6 @@ const StockPurchasesPage: React.FC = () => {
                                   )}
                                   {pay.notes && <span className="text-gray-500 text-[11px] block">{pay.notes}</span>}
                                   {!pay.referenceNumber && !pay.notes && '—'}
-                                </td>
-                                <td className="py-2 px-3 text-gray-700 font-semibold text-indigo-700">
-                                  {partnerName !== '—' ? `👤 ${partnerName}` : '—'}
                                 </td>
                                 <td className="py-2 px-3 text-right font-bold text-emerald-700 whitespace-nowrap">
                                   {formatCurrency(pay.amount)}

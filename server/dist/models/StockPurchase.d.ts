@@ -10,6 +10,7 @@ export interface IStockPurchasePayment {
     _id?: mongoose.Types.ObjectId;
     amount: number;
     paymentDate: Date;
+    paidBy: 'business' | 'partner';
     paymentMode: PaymentMode;
     paidByPartner?: mongoose.Types.ObjectId;
     referenceNumber?: string;

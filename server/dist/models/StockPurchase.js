@@ -38,6 +38,7 @@ const mongoose_1 = __importStar(require("mongoose"));
 const stockPurchasePaymentSchema = new mongoose_1.Schema({
     amount: { type: Number, required: true, min: 1 },
     paymentDate: { type: Date, default: Date.now },
+    paidBy: { type: String, enum: ['business', 'partner'], default: 'business' },
     paymentMode: {
         type: String,
         enum: ['upi', 'bank_transfer', 'cash', 'cheque', 'partner_out_of_pocket', 'other'],

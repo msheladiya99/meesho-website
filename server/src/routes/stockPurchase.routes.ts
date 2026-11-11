@@ -270,6 +270,7 @@ router.get('/vendor/:vendorId/ledger', enforceAccountAccess, async (req: AuthReq
       debit: number;
       credit: number;
       runningBalance: number;
+      paidBy?: 'business' | 'partner';
       paymentMode?: string;
       paidByPartner?: any;
       referenceNumber?: string;
@@ -308,6 +309,7 @@ router.get('/vendor/:vendorId/ledger', enforceAccountAccess, async (req: AuthReq
             debit: 0,
             credit: pay.amount,
             runningBalance: 0,
+            paidBy: pay.paidBy || (pay.paidByPartner ? 'partner' : 'business'),
             paymentMode: pay.paymentMode,
             paidByPartner: pay.paidByPartner,
             referenceNumber: pay.referenceNumber,
@@ -364,7 +366,7 @@ router.get('/vendor/:vendorId/ledger', enforceAccountAccess, async (req: AuthReq
 router.post('/vendor/:vendorId/pay-due', requireManagerOrAdmin, enforceAccountAccess, async (req: AuthRequest, res: Response): Promise<void> => {
   try {
     const { vendorId } = req.params;
-    const { amount, paymentDate, paymentMode, paidByPartner, referenceNumber, notes } = req.body;
+    const { amount, paymentDate, paymentMode, paidBy, paidByPartner, referenceNumber, notes } = req.body;
 
     if (!vendorId || !mongoose.Types.ObjectId.isValid(vendorId as string)) {
       res.status(400).json({ success: false, message: 'Invalid vendor ID' });
@@ -408,9 +410,10 @@ router.post('/vendor/:vendorId/pay-due', requireManagerOrAdmin, enforceAccountAc
       return;
     }
 
+    const isPartnerPaid = (paidBy === 'partner' || Boolean(paidByPartner));
     let linkedExpenseId: mongoose.Types.ObjectId | undefined;
 
-    if (paidByPartner && paymentMode === 'partner_out_of_pocket') {
+    if (isPartnerPaid && paidByPartner) {
       const partner = await Partner.findById(paidByPartner);
       if (partner && partner.isActive) {
         const activePartners = await Partner.find({ isActive: true });
@@ -434,7 +437,7 @@ router.post('/vendor/:vendorId/pay-due', requireManagerOrAdmin, enforceAccountAc
           allocationMethod: 'equal',
           allocations,
           vendor: vendor.name,
-          paymentMethod: 'Partner Out of Pocket',
+          paymentMethod: paymentMode ? paymentMode.replace(/_/g, ' ') : 'Partner Out of Pocket',
           notes: notes ? `Vendor Payment Note: ${notes}` : `Paid on behalf of business for vendor ${vendor.name}`,
           createdBy: req.user?._id,
         });
@@ -459,8 +462,9 @@ router.post('/vendor/:vendorId/pay-due', requireManagerOrAdmin, enforceAccountAc
       purchase.payments.push({
         amount: allocation,
         paymentDate: paymentDate ? new Date(paymentDate) : new Date(),
+        paidBy: isPartnerPaid ? 'partner' : 'business',
         paymentMode: paymentMode || 'upi',
-        paidByPartner: paidByPartner ? new mongoose.Types.ObjectId(paidByPartner) : undefined,
+        paidByPartner: (isPartnerPaid && paidByPartner) ? new mongoose.Types.ObjectId(paidByPartner) : undefined,
         referenceNumber: referenceNumber?.trim() || undefined,
         notes: notes ? `${notes} (Part of ₹${(numAmount / 100).toFixed(2)} vendor payment)` : `Vendor Due Payment`,
         recordedBy: req.user?._id ? new mongoose.Types.ObjectId(req.user._id) : undefined,
@@ -529,7 +533,7 @@ router.post('/:id/payments', requireManagerOrAdmin, async (req: AuthRequest, res
       return;
     }
 
-    const { amount, paymentDate, paymentMode, paidByPartner, referenceNumber, notes } = req.body;
+    const { amount, paymentDate, paymentMode, paidBy, paidByPartner, referenceNumber, notes } = req.body;
     const numAmount = Math.round(Number(amount));
     if (!numAmount || numAmount <= 0) {
       res.status(400).json({ success: false, message: 'Payment amount must be greater than 0' });
@@ -545,10 +549,11 @@ router.post('/:id/payments', requireManagerOrAdmin, async (req: AuthRequest, res
       return;
     }
 
+    const isPartnerPaid = (paidBy === 'partner' || Boolean(paidByPartner));
     let linkedExpenseId: mongoose.Types.ObjectId | undefined;
 
     // If payment is made out-of-pocket by a partner, record an Expense entry so it factors into partner settlements
-    if (paidByPartner && paymentMode === 'partner_out_of_pocket') {
+    if (isPartnerPaid && paidByPartner) {
       const partner = await Partner.findById(paidByPartner);
       if (partner && partner.isActive) {
         const activePartners = await Partner.find({ isActive: true });
@@ -575,7 +580,7 @@ router.post('/:id/payments', requireManagerOrAdmin, async (req: AuthRequest, res
           allocationMethod: 'equal',
           allocations,
           vendor: vendorName,
-          paymentMethod: 'Partner Out of Pocket',
+          paymentMethod: paymentMode ? paymentMode.replace(/_/g, ' ') : 'Partner Out of Pocket',
           notes: notes ? `Purchase Payment Note: ${notes}` : `Paid on behalf of business for purchase invoice ${invoiceLabel}`,
           createdBy: req.user?._id,
         });
@@ -590,8 +595,9 @@ router.post('/:id/payments', requireManagerOrAdmin, async (req: AuthRequest, res
     purchase.payments.push({
       amount: numAmount,
       paymentDate: paymentDate ? new Date(paymentDate) : new Date(),
+      paidBy: isPartnerPaid ? 'partner' : 'business',
       paymentMode: paymentMode || 'upi',
-      paidByPartner: paidByPartner ? new mongoose.Types.ObjectId(paidByPartner) : undefined,
+      paidByPartner: (isPartnerPaid && paidByPartner) ? new mongoose.Types.ObjectId(paidByPartner) : undefined,
       referenceNumber: referenceNumber?.trim() || undefined,
       notes: notes?.trim() || undefined,
       recordedBy: req.user?._id ? new mongoose.Types.ObjectId(req.user._id) : undefined,

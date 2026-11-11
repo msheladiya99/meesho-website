@@ -13,6 +13,7 @@ export interface IStockPurchasePayment {
   _id?: mongoose.Types.ObjectId;
   amount: number;             // paise
   paymentDate: Date;
+  paidBy: 'business' | 'partner';
   paymentMode: PaymentMode;
   paidByPartner?: mongoose.Types.ObjectId;
   referenceNumber?: string;   // UTR / Transaction ID / Cheque #
@@ -46,6 +47,7 @@ export interface IStockPurchase extends Document {
 const stockPurchasePaymentSchema = new Schema<IStockPurchasePayment>({
   amount: { type: Number, required: true, min: 1 },
   paymentDate: { type: Date, default: Date.now },
+  paidBy: { type: String, enum: ['business', 'partner'], default: 'business' },
   paymentMode: {
     type: String,
     enum: ['upi', 'bank_transfer', 'cash', 'cheque', 'partner_out_of_pocket', 'other'],
