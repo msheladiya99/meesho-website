@@ -276,6 +276,39 @@ export interface StockAccountingSummary {
   vendors: StockVendorDueSummary[];
 }
 
+export interface VendorLedgerEntry {
+  id: string;
+  date: string;
+  type: 'debit' | 'credit';
+  entryType: 'purchase' | 'payment';
+  invoiceNumber?: string;
+  description: string;
+  debit: number;   // paise
+  credit: number;  // paise
+  runningBalance: number; // paise
+  paymentMode?: PaymentMode;
+  paidByPartner?: Partner | string;
+  referenceNumber?: string;
+  notes?: string;
+  purchaseId?: string;
+  paymentId?: string;
+}
+
+export interface VendorLedgerResponse {
+  vendor: {
+    _id: string;
+    name: string;
+    phone?: string;
+    company?: string;
+    gstin?: string;
+  };
+  totalDebit: number;   // paise
+  totalCredit: number;  // paise
+  closingBalance: number; // paise
+  totalPurchases: number;
+  entries: VendorLedgerEntry[];
+}
+
 // ─── Stock Movement ──────────────────────────────────────────────────────────
 export interface StockMovement {
   _id: string;

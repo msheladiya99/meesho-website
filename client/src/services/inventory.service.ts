@@ -1,5 +1,5 @@
 import api from '../lib/axios';
-import type { ApiResponse, Product, Category, StockPurchase, StockMovement, Vendor, PaginationParams, StockAccountingSummary } from '../types';
+import type { ApiResponse, Product, Category, StockPurchase, StockMovement, Vendor, PaginationParams, StockAccountingSummary, VendorLedgerResponse } from '../types';
 
 export const productsApi = {
   list: (params?: PaginationParams) =>
@@ -57,6 +57,16 @@ export const stockPurchasesApi = {
   }) => api.post<ApiResponse<StockPurchase>>(`/stock-purchases/${id}/payments`, data),
   deletePayment: (id: string, paymentId: string) =>
     api.delete<ApiResponse<StockPurchase>>(`/stock-purchases/${id}/payments/${paymentId}`),
+  getVendorLedger: (vendorId: string, params?: { accountId?: string; startDate?: string; endDate?: string }) =>
+    api.get<ApiResponse<VendorLedgerResponse>>(`/stock-purchases/vendor/${vendorId}/ledger`, { params }),
+  payVendorDue: (vendorId: string, data: {
+    amount: number;
+    paymentDate?: string;
+    paymentMode?: string;
+    paidByPartner?: string;
+    referenceNumber?: string;
+    notes?: string;
+  }) => api.post<ApiResponse<{ totalPaid: number; allocatedInvoicesCount: number; remainingVendorDue: number }>>(`/stock-purchases/vendor/${vendorId}/pay-due`, data),
 };
 
 export const inventoryApi = {

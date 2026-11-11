@@ -11,6 +11,7 @@ const Product_1 = require("../models/Product");
 const StockMovement_1 = require("../models/StockMovement");
 const Expense_1 = require("../models/Expense");
 const Partner_1 = require("../models/Partner");
+const Vendor_1 = require("../models/Vendor");
 const auth_1 = require("../middleware/auth");
 const audit_service_1 = require("../services/audit.service");
 const inventory_service_1 = require("../services/inventory.service");
@@ -196,6 +197,235 @@ router.get('/next-invoice-number', auth_1.enforceAccountAccess, async (req, res)
         });
     }
     catch (err) {
+        res.status(500).json({ success: false, message: err.message });
+    }
+});
+// GET /api/stock-purchases/vendor/:vendorId/ledger
+router.get('/vendor/:vendorId/ledger', auth_1.enforceAccountAccess, async (req, res) => {
+    try {
+        const { vendorId } = req.params;
+        const { accountId, startDate, endDate } = req.query;
+        if (!vendorId || !mongoose_1.default.Types.ObjectId.isValid(vendorId)) {
+            res.status(400).json({ success: false, message: 'Invalid vendor ID' });
+            return;
+        }
+        const vendor = await Vendor_1.Vendor.findById(vendorId);
+        if (!vendor) {
+            res.status(404).json({ success: false, message: 'Vendor not found' });
+            return;
+        }
+        const filter = {
+            isDeleted: false,
+            vendor: new mongoose_1.default.Types.ObjectId(vendorId),
+            ...accountFilter(accountId),
+        };
+        if (startDate || endDate) {
+            filter.purchaseDate = {};
+            if (startDate)
+                filter.purchaseDate['$gte'] = new Date(startDate);
+            if (endDate)
+                filter.purchaseDate['$lte'] = new Date(endDate + 'T23:59:59.999Z');
+        }
+        const purchases = await StockPurchase_1.StockPurchase.find(filter)
+            .populate('businessAccount', 'name')
+            .populate('payments.paidByPartner', 'name upiId')
+            .populate('payments.recordedBy', 'name email')
+            .sort({ purchaseDate: 1 });
+        const entries = [];
+        for (const p of purchases) {
+            const pQty = p.totalQuantity || (Array.isArray(p.items) ? p.items.reduce((s, it) => s + (it.quantityPurchased || 0), 0) : 0);
+            entries.push({
+                id: `bill_${p._id}`,
+                date: p.purchaseDate.toISOString(),
+                type: 'debit',
+                entryType: 'purchase',
+                invoiceNumber: p.vendorInvoiceNumber || p._id.toString().slice(-6),
+                description: `Stock Purchase Bill #${p.vendorInvoiceNumber || p._id.toString().slice(-6)} (${pQty} units)`,
+                debit: p.totalAmount,
+                credit: 0,
+                runningBalance: 0,
+                purchaseId: p._id.toString(),
+                notes: p.notes,
+            });
+            if (Array.isArray(p.payments)) {
+                for (const pay of p.payments) {
+                    entries.push({
+                        id: `pay_${pay._id || Math.random()}`,
+                        date: pay.paymentDate.toISOString(),
+                        type: 'credit',
+                        entryType: 'payment',
+                        invoiceNumber: p.vendorInvoiceNumber || p._id.toString().slice(-6),
+                        description: `Payment for Invoice #${p.vendorInvoiceNumber || p._id.toString().slice(-6)}`,
+                        debit: 0,
+                        credit: pay.amount,
+                        runningBalance: 0,
+                        paymentMode: pay.paymentMode,
+                        paidByPartner: pay.paidByPartner,
+                        referenceNumber: pay.referenceNumber,
+                        notes: pay.notes,
+                        purchaseId: p._id.toString(),
+                        paymentId: pay._id?.toString(),
+                    });
+                }
+            }
+        }
+        entries.sort((a, b) => {
+            const timeDiff = new Date(a.date).getTime() - new Date(b.date).getTime();
+            if (timeDiff !== 0)
+                return timeDiff;
+            if (a.type === 'debit' && b.type === 'credit')
+                return -1;
+            if (a.type === 'credit' && b.type === 'debit')
+                return 1;
+            return 0;
+        });
+        let runningBalance = 0;
+        let totalDebit = 0;
+        let totalCredit = 0;
+        for (const entry of entries) {
+            totalDebit += entry.debit;
+            totalCredit += entry.credit;
+            runningBalance += (entry.debit - entry.credit);
+            entry.runningBalance = runningBalance;
+        }
+        res.json({
+            success: true,
+            data: {
+                vendor: {
+                    _id: vendor._id,
+                    name: vendor.name,
+                    phone: vendor.phone,
+                    company: vendor.company,
+                    gstin: vendor.gstin,
+                },
+                totalDebit,
+                totalCredit,
+                closingBalance: runningBalance,
+                totalPurchases: purchases.length,
+                entries,
+            },
+        });
+    }
+    catch (err) {
+        res.status(500).json({ success: false, message: err.message });
+    }
+});
+// POST /api/stock-purchases/vendor/:vendorId/pay-due
+router.post('/vendor/:vendorId/pay-due', auth_1.requireManagerOrAdmin, auth_1.enforceAccountAccess, async (req, res) => {
+    try {
+        const { vendorId } = req.params;
+        const { amount, paymentDate, paymentMode, paidByPartner, referenceNumber, notes } = req.body;
+        if (!vendorId || !mongoose_1.default.Types.ObjectId.isValid(vendorId)) {
+            res.status(400).json({ success: false, message: 'Invalid vendor ID' });
+            return;
+        }
+        const numAmount = Math.round(Number(amount));
+        if (!numAmount || numAmount <= 0) {
+            res.status(400).json({ success: false, message: 'Payment amount must be greater than 0' });
+            return;
+        }
+        const vendor = await Vendor_1.Vendor.findById(vendorId);
+        if (!vendor) {
+            res.status(404).json({ success: false, message: 'Vendor not found' });
+            return;
+        }
+        const purchases = await StockPurchase_1.StockPurchase.find({
+            vendor: new mongoose_1.default.Types.ObjectId(vendorId),
+            isDeleted: false,
+            paymentStatus: { $ne: 'paid' },
+        }).sort({ purchaseDate: 1 });
+        if (purchases.length === 0) {
+            res.status(400).json({ success: false, message: 'No pending due balance found for this vendor' });
+            return;
+        }
+        const totalDue = purchases.reduce((sum, p) => {
+            const pPaid = p.paidAmount ?? (p.paymentStatus === 'paid' ? p.totalAmount : 0);
+            const pDue = p.dueAmount ?? Math.max(0, p.totalAmount - pPaid);
+            return sum + pDue;
+        }, 0);
+        if (numAmount > totalDue) {
+            res.status(400).json({
+                success: false,
+                message: `Payment amount (₹${(numAmount / 100).toFixed(2)}) exceeds total outstanding balance of ₹${(totalDue / 100).toFixed(2)}`,
+            });
+            return;
+        }
+        let linkedExpenseId;
+        if (paidByPartner && paymentMode === 'partner_out_of_pocket') {
+            const partner = await Partner_1.Partner.findById(paidByPartner);
+            if (partner && partner.isActive) {
+                const activePartners = await Partner_1.Partner.find({ isActive: true });
+                const count = activePartners.length || 1;
+                const splitAmount = Math.floor(numAmount / count);
+                const remainder = numAmount - splitAmount * count;
+                const allocations = activePartners.map((p, idx) => ({
+                    partner: p._id,
+                    amount: splitAmount + (idx === 0 ? remainder : 0),
+                    percent: Math.round((100 / count) * 100) / 100,
+                }));
+                const expense = await Expense_1.Expense.create({
+                    businessAccount: purchases[0].businessAccount,
+                    expenseDate: paymentDate ? new Date(paymentDate) : new Date(),
+                    category: 'Stock Purchase',
+                    description: `Vendor Due Payment: ${vendor.name}`,
+                    amount: numAmount,
+                    paidBy: 'partner',
+                    paidByPartner: partner._id,
+                    allocationMethod: 'equal',
+                    allocations,
+                    vendor: vendor.name,
+                    paymentMethod: 'Partner Out of Pocket',
+                    notes: notes ? `Vendor Payment Note: ${notes}` : `Paid on behalf of business for vendor ${vendor.name}`,
+                    createdBy: req.user?._id,
+                });
+                linkedExpenseId = expense._id;
+            }
+        }
+        let remainingToApply = numAmount;
+        const modifiedPurchases = [];
+        for (const purchase of purchases) {
+            if (remainingToApply <= 0)
+                break;
+            const pPaid = purchase.paidAmount ?? (purchase.paymentStatus === 'paid' ? purchase.totalAmount : 0);
+            const pDue = purchase.dueAmount ?? Math.max(0, purchase.totalAmount - pPaid);
+            if (pDue <= 0)
+                continue;
+            const allocation = Math.min(remainingToApply, pDue);
+            remainingToApply -= allocation;
+            if (!Array.isArray(purchase.payments))
+                purchase.payments = [];
+            purchase.payments.push({
+                amount: allocation,
+                paymentDate: paymentDate ? new Date(paymentDate) : new Date(),
+                paymentMode: paymentMode || 'upi',
+                paidByPartner: paidByPartner ? new mongoose_1.default.Types.ObjectId(paidByPartner) : undefined,
+                referenceNumber: referenceNumber?.trim() || undefined,
+                notes: notes ? `${notes} (Part of ₹${(numAmount / 100).toFixed(2)} vendor payment)` : `Vendor Due Payment`,
+                recordedBy: req.user?._id ? new mongoose_1.default.Types.ObjectId(req.user._id) : undefined,
+                linkedExpenseId,
+                createdAt: new Date(),
+            });
+            await purchase.save();
+            modifiedPurchases.push(purchase);
+        }
+        await (0, audit_service_1.createAuditLog)({
+            action: 'UPDATE',
+            resource: 'VendorPayment',
+            resourceId: vendorId,
+            userId: req.user?._id?.toString(),
+        });
+        res.json({
+            success: true,
+            message: `Successfully paid ₹${(numAmount / 100).toFixed(2)} to ${vendor.name}`,
+            data: {
+                totalPaid: numAmount,
+                allocatedInvoicesCount: modifiedPurchases.length,
+                remainingVendorDue: Math.max(0, totalDue - numAmount),
+            },
+        });
+    }
+    catch (err) {
+        console.error('Error recording vendor payment:', err);
         res.status(500).json({ success: false, message: err.message });
     }
 });
