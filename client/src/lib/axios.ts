@@ -34,6 +34,22 @@ api.interceptors.response.use(
       return Promise.reject(error);
     }
 
+    // Detect Render service suspension (x-render-routing: suspend or "Service Suspended" body)
+    const isSuspended =
+      error.response?.headers?.['x-render-routing'] === 'suspend' ||
+      (typeof error.response?.data === 'string' &&
+        (error.response.data.includes('Service Suspended') ||
+          error.response.data.includes('This service has been suspended')));
+
+    if (isSuspended) {
+      toast.dismiss('backend-cold-start');
+      toast.error('Backend service is suspended on Render. Please resume it in your Render dashboard.', {
+        id: 'backend-suspended',
+        duration: 10000,
+      });
+      return Promise.reject(error);
+    }
+
     // Detect Render cold-start indicators (502 Bad Gateway, 503 Service Unavailable, 504 Gateway Timeout, or Network Timeout)
     const isColdStart =
       !error.response ||
