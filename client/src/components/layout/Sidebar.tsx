@@ -3,7 +3,8 @@ import { NavLink } from 'react-router-dom';
 import {
   LayoutDashboard, ShoppingCart, RotateCcw, Package, Warehouse,
   TruckIcon, DollarSign, Users, TrendingUp, BarChart2, FileText,
-  Settings, Shield, ScrollText, ChevronRight, Flame, PackageCheck, X
+  Settings, Shield, ScrollText, ChevronRight, Flame, PackageCheck, X,
+  Wallet
 } from 'lucide-react';
 import { useAuthStore } from '../../store/authStore';
 import { useUIStore } from '../../store/uiStore';
@@ -13,6 +14,7 @@ const navItems = [
   { to: '/orders', icon: ShoppingCart, label: 'Orders' },
   { to: '/packing', icon: PackageCheck, label: 'Packing & Dispatch' },
   { to: '/returns', icon: RotateCcw, label: 'Returns' },
+  { to: '/payments', icon: Wallet, label: 'Payments' },
   { to: '/perfume-sales', icon: Flame, label: 'Perfume Sell & Return' },
   { to: '/products', icon: Package, label: 'Products' },
   { to: '/inventory', icon: Warehouse, label: 'Inventory' },

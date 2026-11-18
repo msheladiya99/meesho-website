@@ -23,6 +23,7 @@ import reportRoutes from './routes/report.routes';
 import analyticsRoutes from './routes/analytics.routes';
 import auditRoutes from './routes/audit.routes';
 import customerReturnChargeRoutes from './routes/customerReturnCharge.routes';
+import paymentRoutes from './routes/payment.routes';
 
 dotenv.config();
 
@@ -128,6 +129,7 @@ app.use('/api/reports', reportRoutes);
 app.use('/api/analytics', analyticsRoutes);
 app.use('/api/audit-logs', auditRoutes);
 app.use('/api/customer-return-charges', customerReturnChargeRoutes);
+app.use('/api/payments', paymentRoutes);
 
 // Error handler (must be last)
 app.use(errorHandler);

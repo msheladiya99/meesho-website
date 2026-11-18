@@ -589,3 +589,79 @@ export interface PnLData {
   }>;
 }
 
+// ─── Payments & Settlements (Meesho Style) ──────────────────────────────────
+export type PaymentStatus = 'completed' | 'upcoming' | 'unscheduled';
+
+export interface PaymentDaySummary {
+  _id: string;
+  paymentDate: string;
+  displayDate: string;
+  formattedAmount: string;
+  rawAmount: number;
+  netAmount: number;
+  ordersAmount: number;
+  adsCost: number;
+  programCost: number;
+  programBenefits: number;
+  referralEarnings: number;
+  neftId?: string;
+  bankName?: string;
+  status: PaymentStatus;
+  subOrdersCount?: number;
+}
+
+export interface PaymentDashboardData {
+  upcoming: {
+    totalAmount: number;
+    formattedTotal: string;
+    days: PaymentDaySummary[];
+    selectedDay?: PaymentDaySummary;
+  };
+  completed: {
+    totalAmount: number;
+    formattedTotal: string;
+    days: PaymentDaySummary[];
+    selectedDay?: PaymentDaySummary;
+  };
+  unscheduled: {
+    count: number;
+    estimatedAmount: number;
+    formattedAmount: string;
+    description: string;
+  };
+  recentCredits: Array<{
+    amount: number;
+    formattedAmount: string;
+    date: string;
+    displayDate: string;
+    neftId?: string;
+  }>;
+}
+
+export interface Payment {
+  _id: string;
+  businessAccount: BusinessAccount | string;
+  paymentDate: string;
+  status: PaymentStatus;
+  neftId?: string;
+  bankName?: string;
+  bankAccountNumber?: string;
+  ordersAmount: number; // paise
+  salesAmount?: number;
+  returnsDeduction?: number;
+  adsCost: number;
+  programCost: number;
+  otherRecovery: number;
+  programBenefits: number;
+  referralEarnings: number;
+  otherCompensation: number;
+  netAmount: number;
+  ordersCount?: number;
+  subOrderIds?: string[];
+  notes?: string;
+  rawSource: 'manual' | 'sheet_import' | 'auto_calculated';
+  createdAt: string;
+  updatedAt: string;
+}
+
+
