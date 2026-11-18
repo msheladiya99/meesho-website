@@ -36,7 +36,7 @@ import type { Payment, PaymentDaySummary } from '../types';
 
 export const PaymentsPage: React.FC = () => {
   const qc = useQueryClient();
-  const { activeAccountId, getActiveAccount, accounts } = useAccountStore();
+  const { activeAccountId, getActiveAccount } = useAccountStore();
   const activeAccount = getActiveAccount();
 
   // Modals
@@ -160,19 +160,19 @@ export const PaymentsPage: React.FC = () => {
   return (
     <div className="space-y-6 pb-12">
       {/* Top Header matching Meesho layout */}
-      <div className="flex flex-col md:flex-row md:items-center justify-between gap-4 border-b border-slate-200 dark:border-slate-800 pb-4">
+      <div className="flex flex-col md:flex-row md:items-center justify-between gap-4 border-b border-gray-200 pb-4">
         <div>
           <div className="flex items-center gap-2">
-            <h1 className="text-2xl font-bold text-slate-900 dark:text-slate-100">
+            <h1 className="text-2xl font-bold text-gray-900">
               Payments
             </h1>
             {activeAccount && (
-              <span className="text-xs px-2 py-0.5 rounded-full bg-slate-100 dark:bg-slate-800 text-slate-600 dark:text-slate-400 font-semibold border border-slate-200 dark:border-slate-700">
+              <span className="text-xs px-2.5 py-0.5 rounded-full bg-gray-100 text-gray-700 font-semibold border border-gray-200">
                 {activeAccount.tradeName || activeAccount.name}
               </span>
             )}
           </div>
-          <p className="text-xs text-slate-500 dark:text-slate-400 mt-0.5">
+          <p className="text-xs text-gray-500 mt-0.5">
             Monitor Meesho upcoming payouts, completed settlements, NEFT credits, and platform deductions.
           </p>
         </div>
@@ -181,17 +181,17 @@ export const PaymentsPage: React.FC = () => {
         <div className="flex flex-wrap items-center gap-2">
           {/* Search by Sub Order / NEFT */}
           <div className="relative w-48 sm:w-64">
-            <Search className="w-3.5 h-3.5 absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" />
+            <Search className="w-3.5 h-3.5 absolute left-3 top-1/2 -translate-y-1/2 text-gray-400" />
             <input
               type="text"
               placeholder="Order / Sub Order No. / NEFT"
               value={searchQuery}
               onChange={(e) => setSearchQuery(e.target.value)}
-              className="w-full text-xs pl-8 pr-3 py-2 rounded-lg border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 text-slate-800 dark:text-slate-200 focus:outline-none focus:ring-2 focus:ring-primary-500"
+              className="w-full text-xs pl-8 pr-3 py-2 rounded-lg border border-gray-200 bg-white text-gray-800 placeholder:text-gray-400 focus:outline-none focus:ring-2 focus:ring-primary-500"
             />
           </div>
 
-          {/* Download Dropdown / Button */}
+          {/* Download Button */}
           <button
             type="button"
             onClick={handleExportCsv}
@@ -205,7 +205,7 @@ export const PaymentsPage: React.FC = () => {
           <button
             type="button"
             onClick={() => setIsImportModalOpen(true)}
-            className="flex items-center gap-1.5 px-3 py-2 text-xs font-semibold rounded-lg border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-800 hover:bg-slate-50 dark:hover:bg-slate-700 text-slate-700 dark:text-slate-200 transition"
+            className="flex items-center gap-1.5 px-3 py-2 text-xs font-semibold rounded-lg border border-gray-200 bg-white hover:bg-gray-50 text-gray-700 shadow-xs transition"
           >
             <FileSpreadsheet className="w-3.5 h-3.5 text-emerald-600" />
             Upload Sheet
@@ -218,7 +218,7 @@ export const PaymentsPage: React.FC = () => {
               setEditingPayment(null);
               setIsRecordModalOpen(true);
             }}
-            className="flex items-center gap-1.5 px-3.5 py-2 text-xs font-bold rounded-lg bg-primary-600 hover:bg-primary-700 text-white shadow-sm hover:shadow-md transition"
+            className="flex items-center gap-1.5 px-3.5 py-2 text-xs font-bold rounded-lg bg-primary-600 hover:bg-primary-700 text-white shadow-xs hover:shadow-sm transition"
           >
             <Plus className="w-4 h-4" />
             Add Payment Receive
@@ -229,20 +229,20 @@ export const PaymentsPage: React.FC = () => {
       {/* Main Two Dashboard Cards (Upcoming & Completed Payments side-by-side) */}
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-5">
         {/* CARD 1: Upcoming Payments */}
-        <div className="bg-white dark:bg-slate-900 rounded-xl border border-slate-200 dark:border-slate-800 shadow-sm overflow-hidden flex flex-col justify-between">
+        <div className="bg-white rounded-xl border border-gray-200 shadow-xs overflow-hidden flex flex-col justify-between">
           <div>
             {/* Card Header */}
-            <div className="p-4 border-b border-slate-100 dark:border-slate-800/80 flex items-center justify-between">
+            <div className="p-4 border-b border-gray-100 flex items-center justify-between">
               <div className="flex items-center gap-2">
                 <span className="w-2.5 h-2.5 rounded-full bg-amber-500 shadow-xs animate-pulse" />
-                <h3 className="text-sm font-bold text-slate-900 dark:text-slate-100">
+                <h3 className="text-sm font-bold text-gray-900">
                   Upcoming Payments
                 </h3>
               </div>
               <button
                 type="button"
                 onClick={() => setStatusFilter('upcoming')}
-                className="flex items-center gap-1 text-xs font-semibold text-slate-600 dark:text-slate-400 hover:text-primary-600 dark:hover:text-primary-400 bg-slate-50 dark:bg-slate-800/60 px-2.5 py-1 rounded-full border border-slate-200 dark:border-slate-700 transition"
+                className="flex items-center gap-1 text-xs font-semibold text-gray-600 hover:text-primary-600 bg-gray-50 px-2.5 py-1 rounded-full border border-gray-200 transition"
               >
                 <span>Next 7 days ({dashboardData?.upcoming?.formattedTotal || '₹0.00'})</span>
                 <ChevronRight className="w-3.5 h-3.5" />
@@ -250,7 +250,7 @@ export const PaymentsPage: React.FC = () => {
             </div>
 
             {/* Horizontal Date Tabs */}
-            <div className="p-3 bg-slate-50/60 dark:bg-slate-800/30 border-b border-slate-100 dark:border-slate-800 flex items-center gap-2 overflow-x-auto">
+            <div className="p-3 bg-gray-50/70 border-b border-gray-100 flex items-center gap-2 overflow-x-auto">
               {upcomingDays.length > 0 ? (
                 upcomingDays.map((day) => {
                   const isSelected = activeUpcomingDay?._id === day._id;
@@ -261,8 +261,8 @@ export const PaymentsPage: React.FC = () => {
                       onClick={() => setSelectedUpcomingDayId(day._id)}
                       className={`px-3 py-2 rounded-lg text-left transition shrink-0 border ${
                         isSelected
-                          ? 'bg-amber-50 dark:bg-amber-950/40 border-amber-300 dark:border-amber-700 text-amber-950 dark:text-amber-200 shadow-xs'
-                          : 'bg-white dark:bg-slate-800 border-slate-200 dark:border-slate-700/80 text-slate-600 dark:text-slate-400 hover:bg-slate-100 dark:hover:bg-slate-700'
+                          ? 'bg-amber-50 border-amber-300 text-amber-900 shadow-xs'
+                          : 'bg-white border-gray-200 text-gray-600 hover:bg-gray-100'
                       }`}
                     >
                       <div className="text-[11px] font-medium opacity-80">{day.displayDate}</div>
@@ -271,7 +271,7 @@ export const PaymentsPage: React.FC = () => {
                   );
                 })
               ) : (
-                <div className="py-2 text-xs text-slate-400 italic">
+                <div className="py-2 text-xs text-gray-400 italic">
                   No upcoming payouts scheduled in the next 7 days.
                 </div>
               )}
@@ -282,44 +282,44 @@ export const PaymentsPage: React.FC = () => {
               <div className="p-4">
                 <table className="w-full text-xs text-left">
                   <thead>
-                    <tr className="text-[11px] font-semibold text-slate-400 border-b border-slate-100 dark:border-slate-800 pb-2">
+                    <tr className="text-[11px] font-semibold text-gray-400 border-b border-gray-100 pb-2">
                       <th className="py-2">Transaction Type</th>
                       <th className="py-2">Details</th>
                       <th className="py-2 text-right">Amount</th>
                     </tr>
                   </thead>
-                  <tbody className="divide-y divide-slate-100 dark:divide-slate-800">
+                  <tbody className="divide-y divide-gray-100">
                     <tr>
-                      <td className="py-2.5 font-medium text-slate-900 dark:text-slate-100">
+                      <td className="py-2.5 font-medium text-gray-900">
                         Orders
                       </td>
-                      <td className="py-2.5 text-slate-500">Sales and returns</td>
-                      <td className="py-2.5 text-right font-semibold text-slate-900 dark:text-slate-100">
+                      <td className="py-2.5 text-gray-500">Sales and returns</td>
+                      <td className="py-2.5 text-right font-semibold text-gray-900">
                         {formatCurrency(activeUpcomingDay.ordersAmount)}
                       </td>
                     </tr>
                     <tr>
-                      <td className="py-2.5 font-medium text-slate-900 dark:text-slate-100">
+                      <td className="py-2.5 font-medium text-gray-900">
                         Net platform recovery
                       </td>
-                      <td className="py-2.5 text-slate-500 space-y-1">
+                      <td className="py-2.5 text-gray-500 space-y-1">
                         <div>Ads Cost</div>
                         <div>Program Cost</div>
                       </td>
-                      <td className="py-2.5 text-right text-slate-500 space-y-1">
+                      <td className="py-2.5 text-right text-gray-500 space-y-1">
                         <div>{formatCurrency(activeUpcomingDay.adsCost)}</div>
                         <div>{formatCurrency(activeUpcomingDay.programCost)}</div>
                       </td>
                     </tr>
                     <tr>
-                      <td className="py-2.5 font-medium text-slate-900 dark:text-slate-100">
+                      <td className="py-2.5 font-medium text-gray-900">
                         Net platform compensation
                       </td>
-                      <td className="py-2.5 text-slate-500 space-y-1">
+                      <td className="py-2.5 text-gray-500 space-y-1">
                         <div>Program Benefits</div>
                         <div>Referral Earnings</div>
                       </td>
-                      <td className="py-2.5 text-right text-slate-500 space-y-1">
+                      <td className="py-2.5 text-right text-gray-500 space-y-1">
                         <div>{formatCurrency(activeUpcomingDay.programBenefits)}</div>
                         <div>{formatCurrency(activeUpcomingDay.referralEarnings)}</div>
                       </td>
@@ -328,7 +328,7 @@ export const PaymentsPage: React.FC = () => {
                 </table>
               </div>
             ) : (
-              <div className="p-6 text-center text-xs text-slate-400">
+              <div className="p-6 text-center text-xs text-gray-400">
                 Select an upcoming payout day to inspect breakdown
               </div>
             )}
@@ -336,9 +336,9 @@ export const PaymentsPage: React.FC = () => {
 
           {/* Card Footer: Net Amount */}
           {activeUpcomingDay && (
-            <div className="p-4 bg-slate-50/70 dark:bg-slate-800/40 border-t border-slate-100 dark:border-slate-800 flex items-center justify-between">
-              <span className="text-xs font-medium text-slate-500">Net amount</span>
-              <span className="text-base font-black text-slate-900 dark:text-slate-100">
+            <div className="p-4 bg-gray-50/80 border-t border-gray-100 flex items-center justify-between">
+              <span className="text-xs font-medium text-gray-500">Net amount</span>
+              <span className="text-base font-black text-gray-900">
                 {activeUpcomingDay.formattedAmount}
               </span>
             </div>
@@ -346,20 +346,20 @@ export const PaymentsPage: React.FC = () => {
         </div>
 
         {/* CARD 2: Completed Payments */}
-        <div className="bg-white dark:bg-slate-900 rounded-xl border border-slate-200 dark:border-slate-800 shadow-sm overflow-hidden flex flex-col justify-between">
+        <div className="bg-white rounded-xl border border-gray-200 shadow-xs overflow-hidden flex flex-col justify-between">
           <div>
             {/* Card Header */}
-            <div className="p-4 border-b border-slate-100 dark:border-slate-800/80 flex items-center justify-between">
+            <div className="p-4 border-b border-gray-100 flex items-center justify-between">
               <div className="flex items-center gap-2">
                 <span className="w-2.5 h-2.5 rounded-full bg-emerald-500 shadow-xs" />
-                <h3 className="text-sm font-bold text-slate-900 dark:text-slate-100">
+                <h3 className="text-sm font-bold text-gray-900">
                   Completed Payments
                 </h3>
               </div>
               <button
                 type="button"
                 onClick={() => setStatusFilter('completed')}
-                className="flex items-center gap-1 text-xs font-semibold text-slate-600 dark:text-slate-400 hover:text-primary-600 dark:hover:text-primary-400 bg-slate-50 dark:bg-slate-800/60 px-2.5 py-1 rounded-full border border-slate-200 dark:border-slate-700 transition"
+                className="flex items-center gap-1 text-xs font-semibold text-gray-600 hover:text-primary-600 bg-gray-50 px-2.5 py-1 rounded-full border border-gray-200 transition"
               >
                 <span>Last 30 days ({dashboardData?.completed?.formattedTotal || '₹0.00'})</span>
                 <ChevronRight className="w-3.5 h-3.5" />
@@ -367,7 +367,7 @@ export const PaymentsPage: React.FC = () => {
             </div>
 
             {/* Horizontal Date Tabs */}
-            <div className="p-3 bg-slate-50/60 dark:bg-slate-800/30 border-b border-slate-100 dark:border-slate-800 flex items-center gap-2 overflow-x-auto">
+            <div className="p-3 bg-gray-50/70 border-b border-gray-100 flex items-center gap-2 overflow-x-auto">
               {completedDays.length > 0 ? (
                 completedDays.map((day) => {
                   const isSelected = activeCompletedDay?._id === day._id;
@@ -378,8 +378,8 @@ export const PaymentsPage: React.FC = () => {
                       onClick={() => setSelectedCompletedDayId(day._id)}
                       className={`px-3 py-2 rounded-lg text-left transition shrink-0 border ${
                         isSelected
-                          ? 'bg-purple-100/80 dark:bg-purple-950/50 border-purple-300 dark:border-purple-700 text-purple-950 dark:text-purple-200 shadow-xs'
-                          : 'bg-white dark:bg-slate-800 border-slate-200 dark:border-slate-700/80 text-slate-600 dark:text-slate-400 hover:bg-slate-100 dark:hover:bg-slate-700'
+                          ? 'bg-purple-100/90 border-purple-300 text-purple-950 shadow-xs'
+                          : 'bg-white border-gray-200 text-gray-600 hover:bg-gray-100'
                       }`}
                     >
                       <div className="text-[11px] font-medium opacity-80">{day.displayDate}</div>
@@ -388,7 +388,7 @@ export const PaymentsPage: React.FC = () => {
                   );
                 })
               ) : (
-                <div className="py-2 text-xs text-slate-400 italic">
+                <div className="py-2 text-xs text-gray-400 italic">
                   No completed payouts recorded in the last 30 days.
                 </div>
               )}
@@ -399,44 +399,44 @@ export const PaymentsPage: React.FC = () => {
               <div className="p-4">
                 <table className="w-full text-xs text-left">
                   <thead>
-                    <tr className="text-[11px] font-semibold text-slate-400 border-b border-slate-100 dark:border-slate-800 pb-2">
+                    <tr className="text-[11px] font-semibold text-gray-400 border-b border-gray-100 pb-2">
                       <th className="py-2">Transaction Type</th>
                       <th className="py-2">Details</th>
                       <th className="py-2 text-right">Amount</th>
                     </tr>
                   </thead>
-                  <tbody className="divide-y divide-slate-100 dark:divide-slate-800">
+                  <tbody className="divide-y divide-gray-100">
                     <tr>
-                      <td className="py-2.5 font-medium text-slate-900 dark:text-slate-100">
+                      <td className="py-2.5 font-medium text-gray-900">
                         Orders
                       </td>
-                      <td className="py-2.5 text-slate-500">Sales and returns</td>
-                      <td className="py-2.5 text-right font-semibold text-slate-900 dark:text-slate-100">
+                      <td className="py-2.5 text-gray-500">Sales and returns</td>
+                      <td className="py-2.5 text-right font-semibold text-gray-900">
                         {formatCurrency(activeCompletedDay.ordersAmount)}
                       </td>
                     </tr>
                     <tr>
-                      <td className="py-2.5 font-medium text-slate-900 dark:text-slate-100">
+                      <td className="py-2.5 font-medium text-gray-900">
                         Net platform recovery
                       </td>
-                      <td className="py-2.5 text-slate-500 space-y-1">
+                      <td className="py-2.5 text-gray-500 space-y-1">
                         <div>Ads Cost</div>
                         <div>Program Cost</div>
                       </td>
-                      <td className="py-2.5 text-right text-slate-500 space-y-1">
+                      <td className="py-2.5 text-right text-gray-500 space-y-1">
                         <div>{formatCurrency(activeCompletedDay.adsCost)}</div>
                         <div>{formatCurrency(activeCompletedDay.programCost)}</div>
                       </td>
                     </tr>
                     <tr>
-                      <td className="py-2.5 font-medium text-slate-900 dark:text-slate-100">
+                      <td className="py-2.5 font-medium text-gray-900">
                         Net platform compensation
                       </td>
-                      <td className="py-2.5 text-slate-500 space-y-1">
+                      <td className="py-2.5 text-gray-500 space-y-1">
                         <div>Program Benefits</div>
                         <div>Referral Earnings</div>
                       </td>
-                      <td className="py-2.5 text-right text-slate-500 space-y-1">
+                      <td className="py-2.5 text-right text-gray-500 space-y-1">
                         <div>{formatCurrency(activeCompletedDay.programBenefits)}</div>
                         <div>{formatCurrency(activeCompletedDay.referralEarnings)}</div>
                       </td>
@@ -445,7 +445,7 @@ export const PaymentsPage: React.FC = () => {
                 </table>
               </div>
             ) : (
-              <div className="p-6 text-center text-xs text-slate-400">
+              <div className="p-6 text-center text-xs text-gray-400">
                 Select a completed payout day to inspect breakdown
               </div>
             )}
@@ -453,16 +453,16 @@ export const PaymentsPage: React.FC = () => {
 
           {/* Card Footer: NEFT ID & Net Amount */}
           {activeCompletedDay && (
-            <div className="p-4 bg-slate-50/70 dark:bg-slate-800/40 border-t border-slate-100 dark:border-slate-800 flex items-center justify-between">
+            <div className="p-4 bg-gray-50/80 border-t border-gray-100 flex items-center justify-between">
               <div className="flex items-center gap-1.5">
-                <span className="text-xs font-medium text-slate-500">
+                <span className="text-xs font-medium text-gray-500">
                   {activeCompletedDay.neftId ? (
-                    <span className="font-mono flex items-center gap-1">
+                    <span className="font-mono flex items-center gap-1 text-gray-700">
                       NEFT ID: {activeCompletedDay.neftId}
                       <button
                         type="button"
                         onClick={() => handleCopyNeft(activeCompletedDay.neftId!)}
-                        className="text-slate-400 hover:text-slate-600 dark:hover:text-slate-300 ml-1 p-0.5"
+                        className="text-gray-400 hover:text-gray-600 ml-1 p-0.5"
                         title="Copy NEFT ID"
                       >
                         {copiedNeft === activeCompletedDay.neftId ? (
@@ -478,7 +478,7 @@ export const PaymentsPage: React.FC = () => {
                 </span>
               </div>
               <div className="text-right">
-                <span className="text-base font-black text-slate-900 dark:text-slate-100">
+                <span className="text-base font-black text-gray-900">
                   {activeCompletedDay.formattedAmount}
                 </span>
               </div>
@@ -488,30 +488,30 @@ export const PaymentsPage: React.FC = () => {
       </div>
 
       {/* Unscheduled Payments Banner Card */}
-      <div className="bg-white dark:bg-slate-900 rounded-xl border border-slate-200 dark:border-slate-800 p-4 shadow-xs flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+      <div className="bg-white rounded-xl border border-gray-200 p-4 shadow-xs flex flex-col sm:flex-row sm:items-center justify-between gap-3">
         <div className="flex items-start gap-3.5">
-          <div className="w-10 h-10 rounded-xl bg-blue-50 dark:bg-blue-950/60 text-blue-600 flex items-center justify-center shrink-0 border border-blue-100 dark:border-blue-900">
+          <div className="w-10 h-10 rounded-xl bg-blue-50 text-blue-600 flex items-center justify-center shrink-0 border border-blue-100">
             <Truck className="w-5 h-5" />
           </div>
           <div>
             <div className="flex items-center gap-2">
-              <h4 className="text-sm font-bold text-slate-900 dark:text-slate-100">
+              <h4 className="text-sm font-bold text-gray-900">
                 Unscheduled Payments
               </h4>
-              <span className="text-[11px] px-2 py-0.5 rounded-full bg-blue-100 text-blue-800 dark:bg-blue-900/40 dark:text-blue-300 font-semibold">
+              <span className="text-[11px] px-2 py-0.5 rounded-full bg-blue-100 text-blue-800 font-semibold">
                 {dashboardData?.unscheduled?.count || 0} Shipped Orders Pending
               </span>
             </div>
-            <p className="text-xs text-slate-500 dark:text-slate-400 mt-0.5 max-w-2xl">
+            <p className="text-xs text-gray-500 mt-0.5 max-w-2xl">
               {dashboardData?.unscheduled?.description ||
                 'Payments expected from your shipped orders. Once delivered, we will automatically move it to your upcoming payments.'}
             </p>
           </div>
         </div>
 
-        <div className="text-right sm:border-l sm:border-slate-100 sm:dark:border-slate-800 sm:pl-5 shrink-0">
-          <span className="text-[11px] text-slate-400 block">Expected Payout</span>
-          <span className="text-lg font-black text-blue-600 dark:text-blue-400">
+        <div className="text-right sm:border-l sm:border-gray-100 sm:pl-5 shrink-0">
+          <span className="text-[11px] text-gray-400 block">Expected Payout</span>
+          <span className="text-lg font-black text-blue-600">
             {dashboardData?.unscheduled?.formattedAmount || '₹0.00'}
           </span>
         </div>
@@ -524,14 +524,14 @@ export const PaymentsPage: React.FC = () => {
           return (
             <div
               key={idx}
-              className="pointer-events-auto bg-slate-900/90 dark:bg-slate-800/95 text-white p-3 rounded-xl shadow-xl border border-slate-700/60 flex items-center justify-between gap-3 text-xs w-72 backdrop-blur-sm animate-in fade-in slide-in-from-bottom-2"
+              className="pointer-events-auto bg-gray-900 text-white p-3 rounded-xl shadow-xl border border-gray-800 flex items-center justify-between gap-3 text-xs w-72 animate-in fade-in slide-in-from-bottom-2"
             >
               <div>
-                <p className="font-semibold text-slate-100">
+                <p className="font-semibold text-gray-100">
                   Payment of {rc.formattedAmount} Credited on {rc.displayDate}
                 </p>
                 {rc.neftId && (
-                  <p className="text-[10px] text-slate-400 font-mono mt-0.5">
+                  <p className="text-[10px] text-gray-400 font-mono mt-0.5">
                     NEFT: {rc.neftId}
                   </p>
                 )}
@@ -541,7 +541,7 @@ export const PaymentsPage: React.FC = () => {
                 onClick={() =>
                   setDismissedAlerts((prev) => ({ ...prev, [rc.displayDate]: true }))
                 }
-                className="text-slate-400 hover:text-white p-1 rounded-md"
+                className="text-gray-400 hover:text-white p-1 rounded-md"
               >
                 <X className="w-3.5 h-3.5" />
               </button>
@@ -551,19 +551,19 @@ export const PaymentsPage: React.FC = () => {
       </div>
 
       {/* Payment History & Settlements Table Section */}
-      <div className="bg-white dark:bg-slate-900 rounded-xl border border-slate-200 dark:border-slate-800 shadow-sm overflow-hidden">
+      <div className="bg-white rounded-xl border border-gray-200 shadow-xs overflow-hidden">
         {/* Table Filters & Header */}
-        <div className="p-4 border-b border-slate-200 dark:border-slate-800 flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+        <div className="p-4 border-b border-gray-200 flex flex-col sm:flex-row sm:items-center justify-between gap-3">
           <div className="flex items-center gap-2">
-            <h3 className="text-sm font-bold text-slate-900 dark:text-slate-100">
+            <h3 className="text-sm font-bold text-gray-900">
               Payment & Settlement History
             </h3>
-            <span className="text-xs text-slate-500">
+            <span className="text-xs text-gray-500">
               ({pagination.total} records)
             </span>
           </div>
 
-          <div className="flex items-center gap-1.5 p-1 bg-slate-100 dark:bg-slate-800 rounded-lg border border-slate-200 dark:border-slate-700">
+          <div className="flex items-center gap-1.5 p-1 bg-gray-100 rounded-lg border border-gray-200">
             <button
               type="button"
               onClick={() => {
@@ -572,8 +572,8 @@ export const PaymentsPage: React.FC = () => {
               }}
               className={`px-3 py-1 text-xs font-semibold rounded-md transition ${
                 statusFilter === 'all'
-                  ? 'bg-white dark:bg-slate-700 text-slate-900 dark:text-slate-100 shadow-xs'
-                  : 'text-slate-600 dark:text-slate-400 hover:text-slate-900'
+                  ? 'bg-white text-gray-900 shadow-xs'
+                  : 'text-gray-600 hover:text-gray-900'
               }`}
             >
               All Payouts
@@ -587,7 +587,7 @@ export const PaymentsPage: React.FC = () => {
               className={`px-3 py-1 text-xs font-semibold rounded-md transition ${
                 statusFilter === 'completed'
                   ? 'bg-emerald-600 text-white shadow-xs'
-                  : 'text-slate-600 dark:text-slate-400 hover:text-slate-900'
+                  : 'text-gray-600 hover:text-gray-900'
               }`}
             >
               Completed
@@ -601,7 +601,7 @@ export const PaymentsPage: React.FC = () => {
               className={`px-3 py-1 text-xs font-semibold rounded-md transition ${
                 statusFilter === 'upcoming'
                   ? 'bg-amber-500 text-white shadow-xs'
-                  : 'text-slate-600 dark:text-slate-400 hover:text-slate-900'
+                  : 'text-gray-600 hover:text-gray-900'
               }`}
             >
               Upcoming
@@ -632,8 +632,8 @@ export const PaymentsPage: React.FC = () => {
           </div>
         ) : (
           <div className="overflow-x-auto">
-            <table className="w-full text-xs text-left text-slate-600 dark:text-slate-300">
-              <thead className="bg-slate-50 dark:bg-slate-800/70 uppercase text-[11px] font-semibold text-slate-500 border-b border-slate-200 dark:border-slate-800">
+            <table className="w-full text-xs text-left text-gray-600">
+              <thead className="bg-gray-50 uppercase text-[11px] font-semibold text-gray-500 border-b border-gray-200">
                 <tr>
                   <th className="py-3 px-4">Payout Date</th>
                   <th className="py-3 px-4">Status</th>
@@ -645,7 +645,7 @@ export const PaymentsPage: React.FC = () => {
                   <th className="py-3 px-4 text-center">Actions</th>
                 </tr>
               </thead>
-              <tbody className="divide-y divide-slate-100 dark:divide-slate-800">
+              <tbody className="divide-y divide-gray-100">
                 {paymentsList.map((payment) => {
                   const pDate = new Date(payment.paymentDate);
                   const isCompleted = payment.status === 'completed';
@@ -653,10 +653,10 @@ export const PaymentsPage: React.FC = () => {
                   return (
                     <tr
                       key={payment._id}
-                      className="hover:bg-slate-50/80 dark:hover:bg-slate-800/40 transition"
+                      className="hover:bg-gray-50/80 transition"
                     >
                       {/* Payout Date */}
-                      <td className="py-3 px-4 font-semibold text-slate-900 dark:text-slate-100 whitespace-nowrap">
+                      <td className="py-3 px-4 font-semibold text-gray-900 whitespace-nowrap">
                         {pDate.toLocaleDateString('en-IN', {
                           day: 'numeric',
                           month: 'short',
@@ -667,12 +667,12 @@ export const PaymentsPage: React.FC = () => {
                       {/* Status */}
                       <td className="py-3 px-4">
                         {isCompleted ? (
-                          <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[11px] font-semibold bg-emerald-100 text-emerald-800 dark:bg-emerald-900/40 dark:text-emerald-300">
+                          <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[11px] font-semibold bg-emerald-100 text-emerald-800">
                             <CheckCircle2 className="w-3 h-3" />
                             Completed
                           </span>
                         ) : (
-                          <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[11px] font-semibold bg-amber-100 text-amber-800 dark:bg-amber-900/40 dark:text-amber-300">
+                          <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[11px] font-semibold bg-amber-100 text-amber-800">
                             <Clock className="w-3 h-3" />
                             Upcoming
                           </span>
@@ -680,14 +680,14 @@ export const PaymentsPage: React.FC = () => {
                       </td>
 
                       {/* NEFT ID */}
-                      <td className="py-3 px-4 font-mono text-slate-700 dark:text-slate-300">
+                      <td className="py-3 px-4 font-mono text-gray-700">
                         {payment.neftId ? (
                           <div className="flex items-center gap-1.5">
                             <span>{payment.neftId}</span>
                             <button
                               type="button"
                               onClick={() => handleCopyNeft(payment.neftId!)}
-                              className="text-slate-400 hover:text-slate-600 dark:hover:text-slate-200"
+                              className="text-gray-400 hover:text-gray-600"
                               title="Copy NEFT"
                             >
                               {copiedNeft === payment.neftId ? (
@@ -698,29 +698,29 @@ export const PaymentsPage: React.FC = () => {
                             </button>
                           </div>
                         ) : (
-                          <span className="text-slate-400 italic">Scheduled</span>
+                          <span className="text-gray-400 italic">Scheduled</span>
                         )}
                       </td>
 
                       {/* Bank Name */}
-                      <td className="py-3 px-4 text-slate-600 dark:text-slate-400">
+                      <td className="py-3 px-4 text-gray-600">
                         {payment.bankName || 'Axis Bank'}
                       </td>
 
                       {/* Orders Amount */}
-                      <td className="py-3 px-4 text-right font-medium text-slate-900 dark:text-slate-100">
+                      <td className="py-3 px-4 text-right font-medium text-gray-900">
                         {formatCurrency(payment.ordersAmount)}
                       </td>
 
                       {/* Platform Deductions */}
-                      <td className="py-3 px-4 text-right text-rose-500">
+                      <td className="py-3 px-4 text-right text-rose-500 font-medium">
                         {payment.adsCost > 0 || payment.programCost > 0
                           ? `-${formatCurrency(payment.adsCost + payment.programCost)}`
                           : '₹0.00'}
                       </td>
 
                       {/* Net Credited */}
-                      <td className="py-3 px-4 text-right font-bold text-slate-900 dark:text-slate-100 text-sm">
+                      <td className="py-3 px-4 text-right font-bold text-gray-900 text-sm">
                         {formatCurrency(payment.netAmount)}
                       </td>
 
@@ -733,7 +733,7 @@ export const PaymentsPage: React.FC = () => {
                               setEditingPayment(payment);
                               setIsRecordModalOpen(true);
                             }}
-                            className="p-1.5 text-slate-400 hover:text-slate-600 dark:hover:text-slate-200 hover:bg-slate-100 dark:hover:bg-slate-800 rounded-md transition"
+                            className="p-1.5 text-gray-400 hover:text-gray-600 hover:bg-gray-100 rounded-md transition"
                             title="Edit Record"
                           >
                             <Edit2 className="w-3.5 h-3.5" />
@@ -741,7 +741,7 @@ export const PaymentsPage: React.FC = () => {
                           <button
                             type="button"
                             onClick={() => setDeletePaymentId(payment._id)}
-                            className="p-1.5 text-slate-400 hover:text-rose-600 hover:bg-rose-50 dark:hover:bg-rose-950/40 rounded-md transition"
+                            className="p-1.5 text-gray-400 hover:text-rose-600 hover:bg-rose-50 rounded-md transition"
                             title="Delete Record"
                           >
                             <Trash2 className="w-3.5 h-3.5" />
@@ -758,7 +758,7 @@ export const PaymentsPage: React.FC = () => {
 
         {/* Pagination */}
         {pagination.pages > 1 && (
-          <div className="p-4 border-t border-slate-200 dark:border-slate-800">
+          <div className="p-4 border-t border-gray-200">
             <Pagination
               page={page}
               total={pagination.total}
