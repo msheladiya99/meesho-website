@@ -97,12 +97,16 @@ router.post('/import/preview', auth_1.requireManagerOrAdmin, upload.single('file
         }
         const totalRows = parsedRows.length;
         const returnsCount = parsedRows.filter(r => r.isReturn).length;
+        const rtoCount = parsedRows.filter(r => r.returnType === 'rto_return').length;
+        const customerReturnsCount = parsedRows.filter(r => r.returnType === 'customer_return').length;
         const uniqueSkus = Array.from(new Set(parsedRows.map(r => r.sku))).filter(Boolean);
         res.json({
             success: true,
             data: {
                 totalRows,
                 returnsCount,
+                rtoCount,
+                customerReturnsCount,
                 ordersCount: totalRows,
                 uniqueSkusCount: uniqueSkus.length,
                 previewRows: parsedRows.slice(0, 25),
@@ -147,9 +151,12 @@ router.post('/import/execute', auth_1.requireManagerOrAdmin, auth_1.enforceAccou
             userId: req.user?._id?.toString(),
             skipHoldAndReadyToShip,
         });
+        const returnsBreakdown = summary.returnsCreated > 0
+            ? ` (${summary.rtoCreated} RTO, ${summary.customerReturnsCreated} Customer Return)`
+            : '';
         res.json({
             success: true,
-            message: `Import completed: ${summary.ordersCreated} orders created, ${summary.ordersUpdated} orders updated, and ${summary.returnsCreated} return entries recorded.`,
+            message: `Import completed: ${summary.ordersCreated} orders created, ${summary.ordersUpdated} orders updated, and ${summary.returnsCreated} return entries${returnsBreakdown} recorded.`,
             data: summary,
         });
     }

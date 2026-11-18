@@ -26,6 +26,8 @@ export interface ImportSummary {
     ordersUpdated: number;
     ordersSkipped: number;
     returnsCreated: number;
+    rtoCreated: number;
+    customerReturnsCreated: number;
     productsAutoCreated: number;
     errors: Array<{
         rowNumber: number;
@@ -35,7 +37,7 @@ export interface ImportSummary {
 }
 export declare const parseFlexibleDate: (raw: any) => Date;
 export declare const parsePriceToPaise: (raw: any) => number;
-export declare const mapMeeshoStatus: (rawStatusStr?: string, rawReturnTypeStr?: string, rawReturnStatusStr?: string) => {
+export declare const mapMeeshoStatus: (rawStatusStr?: string, rawReturnTypeStr?: string, rawReturnStatusStr?: string, deliveredDateVal?: any, returnReasonStr?: string) => {
     orderStatus: OrderStatus;
     isReturn: boolean;
     returnType?: ReturnType;

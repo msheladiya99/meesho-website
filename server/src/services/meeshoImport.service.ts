@@ -38,6 +38,8 @@ export interface ImportSummary {
   ordersUpdated: number;
   ordersSkipped: number;
   returnsCreated: number;
+  rtoCreated: number;
+  customerReturnsCreated: number;
   productsAutoCreated: number;
   errors: Array<{ rowNumber: number; subOrderId?: string; error: string }>;
 }
@@ -104,7 +106,9 @@ export const parsePriceToPaise = (raw: any): number => {
 export const mapMeeshoStatus = (
   rawStatusStr?: string,
   rawReturnTypeStr?: string,
-  rawReturnStatusStr?: string
+  rawReturnStatusStr?: string,
+  deliveredDateVal?: any,
+  returnReasonStr?: string
 ): {
   orderStatus: OrderStatus;
   isReturn: boolean;
@@ -113,15 +117,21 @@ export const mapMeeshoStatus = (
   itemCondition?: ItemCondition;
 } => {
   const combined = `${rawStatusStr || ''} ${rawReturnTypeStr || ''} ${rawReturnStatusStr || ''}`.toLowerCase();
+  const hasDeliveredDate =
+    deliveredDateVal !== undefined &&
+    deliveredDateVal !== null &&
+    String(deliveredDateVal).trim() !== '' &&
+    !['na', 'null', 'n/a', 'undefined', '-'].includes(String(deliveredDateVal).trim().toLowerCase());
 
   // Check RTO return hints
   if (
     combined.includes('rto') ||
     combined.includes('courier return') ||
     combined.includes('undelivered') ||
-    (rawReturnTypeStr && /rto/i.test(rawReturnTypeStr))
+    (rawReturnTypeStr && /rto|courier/i.test(rawReturnTypeStr))
   ) {
     const isCompleted =
+      hasDeliveredDate ||
       combined.includes('deliver') ||
       combined.includes('received') ||
       combined.includes('complete') ||
@@ -148,16 +158,21 @@ export const mapMeeshoStatus = (
     (rawReturnStatusStr && rawReturnStatusStr.trim() !== '')
   ) {
     const isCompleted =
+      hasDeliveredDate ||
       combined.includes('deliver') ||
       combined.includes('received') ||
       combined.includes('complete');
+
+    // Check if reason indicates defective / damaged product
+    const combinedReason = `${returnReasonStr || ''} ${combined}`.toLowerCase();
+    const isDamagedReason = /defect|damag|broken|torn|stain|dirty|wrong/i.test(combinedReason);
 
     return {
       orderStatus: 'returned',
       isReturn: true,
       returnType: 'customer_return',
       returnStatus: isCompleted ? 'stock_updated' : 'return_initiated',
-      itemCondition: isCompleted ? 'sellable' : 'pending_inspection',
+      itemCondition: isCompleted ? (isDamagedReason ? 'damaged' : 'sellable') : 'pending_inspection',
     };
   }
 
@@ -210,6 +225,7 @@ const COLUMN_ALIASES = {
   ],
   meeshoOrderId: [
     'meeshoorderid',
+    'ordernumber',
     'parentorderid',
     'orderid',
     'orderno',
@@ -220,6 +236,7 @@ const COLUMN_ALIASES = {
     'orderplaceddate',
     'ordercreateddate',
     'createddate',
+    'dispatchdate',
     'date',
     'orderedon',
   ],
@@ -313,19 +330,35 @@ const COLUMN_ALIASES = {
     'returnstatus',
     'returntrackingstatus',
     'returnorderstatus',
+    'subtype',
   ],
   returnDate: [
+    'delivereddate',
     'returndate',
     'returncreateddate',
     'returndeliverydate',
     'rtodelivereddate',
     'rtodate',
+    'dispatchdate',
+  ],
+  deliveredDate: [
+    'delivereddate',
+    'returndeliverydate',
+    'rtodelivereddate',
+    'otpverifiedat',
+  ],
+  returnCreatedDate: [
+    'returncreateddate',
+    'returndate',
   ],
   returnReason: [
     'returnreason',
     'detailedreturnreason',
     'reasonforreturn',
     'reason',
+  ],
+  detailedReturnReason: [
+    'detailedreturnreason',
   ],
 };
 
@@ -406,16 +439,68 @@ export const parseMeeshoRawRows = (
     const returnTypeVal = findMatchingField(raw, COLUMN_ALIASES.returnType);
     const returnStatusVal = findMatchingField(raw, COLUMN_ALIASES.returnStatus);
     const returnReasonVal = findMatchingField(raw, COLUMN_ALIASES.returnReason);
+    const detailedReasonVal = findMatchingField(raw, COLUMN_ALIASES.detailedReturnReason);
+    const deliveredDateVal = findMatchingField(raw, COLUMN_ALIASES.deliveredDate);
+    const returnCreatedDateVal = findMatchingField(raw, COLUMN_ALIASES.returnCreatedDate);
     const returnDateVal = findMatchingField(raw, COLUMN_ALIASES.returnDate);
+
+    // Combine return reasons cleanly
+    const rReason =
+      returnReasonVal && String(returnReasonVal).trim().toUpperCase() !== 'NA'
+        ? String(returnReasonVal).trim()
+        : '';
+    const dReason =
+      detailedReasonVal && String(detailedReasonVal).trim().toUpperCase() !== 'NA'
+        ? String(detailedReasonVal).trim()
+        : '';
+    const combinedReason =
+      rReason && dReason && rReason !== dReason
+        ? `${rReason} - ${dReason}`
+        : rReason || dReason || undefined;
+
+    // Filter out HOLD, READY_TO_SHIP, and CANCELLED orders by default (only add shipped, delivered, and returns)
+    // IMPORTANT: If row has return hints, NEVER skip it!
+    const hasReturnHint =
+      Boolean(returnTypeVal) ||
+      (rawStatus && /return|rto|courier/i.test(rawStatus)) ||
+      Boolean(deliveredDateVal && !['na', 'null', 'n/a', '-'].includes(String(deliveredDateVal).toLowerCase().trim()));
+
+    if (skipHoldAndReady && rawStatus && !hasReturnHint) {
+      const upper = rawStatus.toUpperCase();
+      if (
+        upper === 'HOLD' ||
+        upper.includes('HOLD') ||
+        upper === 'READY_TO_SHIP' ||
+        upper.includes('READY TO SHIP') ||
+        upper.includes('READY_TO_SHIP') ||
+        upper === 'CANCELLED' ||
+        upper.includes('CANCEL')
+      ) {
+        continue;
+      }
+    }
 
     const { orderStatus, isReturn, returnType, returnStatus, itemCondition } = mapMeeshoStatus(
       rawStatus,
       returnTypeVal ? String(returnTypeVal) : undefined,
-      returnStatusVal ? String(returnStatusVal) : undefined
+      returnStatusVal ? String(returnStatusVal) : undefined,
+      deliveredDateVal,
+      combinedReason
     );
 
-    const returnDate = returnDateVal ? parseFlexibleDate(returnDateVal) : (isReturn ? orderDate : undefined);
-    const returnReason = returnReasonVal ? String(returnReasonVal).trim() : undefined;
+    // Determine the most accurate return date
+    let returnDate: Date | undefined = undefined;
+    if (isReturn) {
+      if (deliveredDateVal && !['na', 'null', 'n/a', '-'].includes(String(deliveredDateVal).toLowerCase().trim())) {
+        returnDate = parseFlexibleDate(deliveredDateVal);
+      } else if (returnCreatedDateVal && !['na', 'null', 'n/a', '-'].includes(String(returnCreatedDateVal).toLowerCase().trim())) {
+        returnDate = parseFlexibleDate(returnCreatedDateVal);
+      } else if (returnDateVal && !['na', 'null', 'n/a', '-'].includes(String(returnDateVal).toLowerCase().trim())) {
+        returnDate = parseFlexibleDate(returnDateVal);
+      } else {
+        returnDate = orderDate;
+      }
+    }
 
     parsedRows.push({
       rowNumber: rowNum,
@@ -433,7 +518,7 @@ export const parseMeeshoRawRows = (
       returnType,
       returnStatus,
       returnDate,
-      returnReason,
+      returnReason: combinedReason,
       itemCondition,
       rawStatus,
     });
@@ -452,7 +537,51 @@ export const parseMeeshoWorkbook = (
   if (!firstSheetName) return [];
 
   const worksheet = workbook.Sheets[firstSheetName];
-  const rawRows: Record<string, any>[] = XLSX.utils.sheet_to_json(worksheet, { defval: '' });
+  const aoa: any[][] = XLSX.utils.sheet_to_json(worksheet, { header: 1, defval: '' });
+  if (!aoa || aoa.length === 0) return [];
+
+  // Dynamic header detection: scans up to the first 25 rows
+  // to find the actual table header row (e.g. skips top metadata rows in Meesho Return sheets)
+  let headerRowIndex = 0;
+  for (let r = 0; r < Math.min(aoa.length, 25); r++) {
+    const row = aoa[r];
+    if (!Array.isArray(row)) continue;
+    const normalizedCells = row.map((c) =>
+      String(c)
+        .toLowerCase()
+        .replace(/[^a-z0-9]/g, '')
+    );
+    const hasSubOrder = normalizedCells.some(
+      (c) => c.includes('suborder') || c === 'orderno' || c === 'orderid' || c === 'subordernumber'
+    );
+    const hasSkuOrProduct = normalizedCells.some(
+      (c) => c.includes('sku') || c.includes('product') || c.includes('item')
+    );
+    const hasReturnOrStatus = normalizedCells.some(
+      (c) => c.includes('return') || c.includes('status') || c.includes('awb') || c.includes('courier')
+    );
+
+    if (
+      (hasSubOrder && (hasSkuOrProduct || hasReturnOrStatus)) ||
+      (hasSkuOrProduct && hasReturnOrStatus)
+    ) {
+      headerRowIndex = r;
+      break;
+    }
+  }
+
+  const headers = (aoa[headerRowIndex] || []).map((h: any) => String(h).trim());
+  const rawRows: Record<string, any>[] = [];
+  for (let r = headerRowIndex + 1; r < aoa.length; r++) {
+    const row = aoa[r];
+    if (!Array.isArray(row) || row.every((c) => String(c).trim() === '')) continue;
+    const obj: Record<string, any> = {};
+    headers.forEach((h, idx) => {
+      if (h) obj[h] = row[idx] !== undefined ? row[idx] : '';
+    });
+    rawRows.push(obj);
+  }
+
   return parseMeeshoRawRows(rawRows, options);
 };
 
@@ -468,6 +597,7 @@ export const importMeeshoOrdersAndReturns = async (params: {
   // Filter out HOLD, READY_TO_SHIP, and CANCELLED rows if enabled
   const activeRows = skipHoldAndReadyToShip
     ? rows.filter((r) => {
+        if (r.isReturn) return true; // Always process returns
         const upper = (r.rawStatus || '').toUpperCase();
         return !(
           upper === 'HOLD' ||
@@ -487,6 +617,8 @@ export const importMeeshoOrdersAndReturns = async (params: {
     ordersUpdated: 0,
     ordersSkipped: rows.length - activeRows.length,
     returnsCreated: 0,
+    rtoCreated: 0,
+    customerReturnsCreated: 0,
     productsAutoCreated: 0,
     errors: [],
   };
@@ -666,7 +798,14 @@ export const importMeeshoOrdersAndReturns = async (params: {
 
       // 3. Process Return Entry if row is an RTO or Customer Return
       if (row.isReturn) {
-        // Prevent duplicate return creation for the same original order
+        const isCompleted = row.returnStatus === 'stock_updated';
+        const isDamaged = isCompleted && row.itemCondition === 'damaged';
+        const shouldRestock = isCompleted && row.itemCondition === 'sellable';
+        const goodQty = shouldRestock ? row.quantity : 0;
+        const dmgQty = isDamaged ? row.quantity : 0;
+        const pendQty = shouldRestock || isDamaged ? 0 : row.quantity;
+
+        // Check if return entry already exists
         const existingReturn = await ReturnOrder.findOne({
           originalOrder: orderDoc._id,
           isDeleted: false,
@@ -674,23 +813,20 @@ export const importMeeshoOrdersAndReturns = async (params: {
 
         if (!existingReturn) {
           const returnTxId = generateReturnTxId();
-          const shouldRestock = row.returnStatus === 'stock_updated' && row.itemCondition === 'sellable';
-          const goodQty = shouldRestock ? row.quantity : 0;
-          const pendQty = shouldRestock ? 0 : row.quantity;
 
           await ReturnOrder.create({
             returnTransactionId: returnTxId,
             businessAccount,
             returnDate: row.returnDate || row.orderDate,
             returnType: row.returnType || 'customer_return',
-            status: row.returnStatus || (shouldRestock ? 'stock_updated' : 'inspection_pending'),
+            status: row.returnStatus || (shouldRestock || isDamaged ? 'stock_updated' : 'inspection_pending'),
             originalOrder: orderDoc._id,
             meeshoOrderId: orderDoc.meeshoOrderId || row.subOrderId,
             carrierTrackingId: row.shippingLabelId,
             product: product._id,
             returnedQuantity: row.quantity,
             goodQuantity: goodQty,
-            damagedQuantity: 0,
+            damagedQuantity: dmgQty,
             pendingInspectionQuantity: pendQty,
             originalSellingPrice: row.sellingPrice || product.sellingPrice,
             returnAmount: (row.sellingPrice || product.sellingPrice) * row.quantity,
@@ -699,10 +835,10 @@ export const importMeeshoOrdersAndReturns = async (params: {
               (row.returnType === 'rto_return'
                 ? 'RTO Return imported from Meesho Excel'
                 : 'Customer Return imported from Meesho Excel'),
-            itemCondition: row.itemCondition || (shouldRestock ? 'sellable' : 'pending_inspection'),
-            stockDisposition: shouldRestock ? 'restock' : 'pending',
+            itemCondition: row.itemCondition || (isDamaged ? 'damaged' : shouldRestock ? 'sellable' : 'pending_inspection'),
+            stockDisposition: isDamaged ? 'discard' : shouldRestock ? 'restock' : 'pending',
             stockRestored: shouldRestock,
-            damagedStockRestored: false,
+            damagedStockRestored: isDamaged,
             createdBy: userId,
           });
 
@@ -720,9 +856,23 @@ export const importMeeshoOrdersAndReturns = async (params: {
             });
           }
 
+          // If condition is damaged, record to damaged stock bucket
+          if (isDamaged && dmgQty > 0) {
+            await recordStockMovement({
+              businessAccount,
+              productId: product._id.toString(),
+              movementType: 'return_damaged',
+              stockBucket: 'damaged',
+              quantity: dmgQty,
+              referenceType: 'ReturnOrder',
+              reason: `Meesho Excel Import Damaged Return: ${row.subOrderId} (${product.sku} x${dmgQty})`,
+              createdBy: userId,
+            });
+          }
+
           // Ensure order status reflects return state
-          if (row.returnType === 'rto_return' && orderDoc.status !== 'rto_received') {
-            orderDoc.status = 'rto_received';
+          if (row.returnType === 'rto_return') {
+            orderDoc.status = isCompleted ? 'rto_received' : 'rto_in_transit';
             await orderDoc.save();
           } else if (row.returnType === 'customer_return' && orderDoc.status !== 'returned') {
             orderDoc.status = 'returned';
@@ -740,6 +890,66 @@ export const importMeeshoOrdersAndReturns = async (params: {
           }
 
           summary.returnsCreated++;
+          if (row.returnType === 'rto_return') {
+            summary.rtoCreated++;
+          } else {
+            summary.customerReturnsCreated++;
+          }
+        } else {
+          // If return exists, check if it transitioned from in_transit to delivered
+          if (
+            (existingReturn.status === 'return_initiated' || existingReturn.status === 'inspection_pending') &&
+            row.returnStatus === 'stock_updated'
+          ) {
+            existingReturn.status = 'stock_updated';
+            existingReturn.itemCondition = row.itemCondition || (isDamaged ? 'damaged' : 'sellable');
+            existingReturn.stockDisposition = isDamaged ? 'discard' : shouldRestock ? 'restock' : 'pending';
+            existingReturn.returnDate = row.returnDate || existingReturn.returnDate;
+            if (row.shippingLabelId && !existingReturn.carrierTrackingId) {
+              existingReturn.carrierTrackingId = row.shippingLabelId;
+            }
+            if (row.returnReason && (!existingReturn.returnReason || existingReturn.returnReason.includes('imported from Meesho'))) {
+              existingReturn.returnReason = row.returnReason;
+            }
+
+            if (shouldRestock && !existingReturn.stockRestored && goodQty > 0) {
+              existingReturn.goodQuantity = goodQty;
+              existingReturn.pendingInspectionQuantity = 0;
+              existingReturn.stockRestored = true;
+              await recordStockMovement({
+                businessAccount,
+                productId: product._id.toString(),
+                movementType: 'return_in',
+                stockBucket: 'saleable',
+                quantity: goodQty,
+                referenceType: 'ReturnOrder',
+                reason: `Meesho Return Delivered Update: ${row.subOrderId} (${product.sku} x${goodQty})`,
+                createdBy: userId,
+              });
+            } else if (isDamaged && !existingReturn.damagedStockRestored && dmgQty > 0) {
+              existingReturn.damagedQuantity = dmgQty;
+              existingReturn.pendingInspectionQuantity = 0;
+              existingReturn.damagedStockRestored = true;
+              await recordStockMovement({
+                businessAccount,
+                productId: product._id.toString(),
+                movementType: 'return_damaged',
+                stockBucket: 'damaged',
+                quantity: dmgQty,
+                referenceType: 'ReturnOrder',
+                reason: `Meesho Damaged Return Delivered Update: ${row.subOrderId} (${product.sku} x${dmgQty})`,
+                createdBy: userId,
+              });
+            }
+
+            await existingReturn.save();
+            summary.returnsCreated++;
+            if (row.returnType === 'rto_return') {
+              summary.rtoCreated++;
+            } else {
+              summary.customerReturnsCreated++;
+            }
+          }
         }
       }
     } catch (err: any) {

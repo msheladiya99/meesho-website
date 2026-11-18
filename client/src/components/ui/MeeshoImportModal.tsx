@@ -10,6 +10,7 @@ import {
   Package,
   RotateCcw,
   Tag,
+  Truck,
   Check,
   X,
   ArrowRight,
@@ -30,6 +31,8 @@ interface MeeshoImportModalProps {
 interface PreviewData {
   totalRows: number;
   returnsCount: number;
+  rtoCount?: number;
+  customerReturnsCount?: number;
   ordersCount: number;
   uniqueSkusCount: number;
   previewRows: Array<{
@@ -56,6 +59,8 @@ interface ImportResultSummary {
   ordersUpdated: number;
   ordersSkipped: number;
   returnsCreated: number;
+  rtoCreated?: number;
+  customerReturnsCreated?: number;
   productsAutoCreated: number;
   errors: Array<{ rowNumber: number; subOrderId?: string; error: string }>;
 }
@@ -349,7 +354,7 @@ export const MeeshoImportModal: React.FC<MeeshoImportModalProps> = ({ isOpen, on
               </div>
             </div>
 
-            <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
+            <div className="grid grid-cols-2 sm:grid-cols-5 gap-2.5">
               <div className="bg-white dark:bg-slate-900 p-3 rounded-xl border border-emerald-100 dark:border-emerald-900 shadow-sm">
                 <div className="text-xs text-slate-500 dark:text-slate-400">Orders Added</div>
                 <div className="text-xl font-bold text-emerald-600 dark:text-emerald-400">
@@ -357,9 +362,15 @@ export const MeeshoImportModal: React.FC<MeeshoImportModalProps> = ({ isOpen, on
                 </div>
               </div>
               <div className="bg-white dark:bg-slate-900 p-3 rounded-xl border border-emerald-100 dark:border-emerald-900 shadow-sm">
-                <div className="text-xs text-slate-500 dark:text-slate-400">Returns Created</div>
+                <div className="text-xs text-slate-500 dark:text-slate-400">RTO Returns</div>
                 <div className="text-xl font-bold text-orange-600 dark:text-orange-400">
-                  +{result.returnsCreated}
+                  +{result.rtoCreated ?? result.returnsCreated}
+                </div>
+              </div>
+              <div className="bg-white dark:bg-slate-900 p-3 rounded-xl border border-emerald-100 dark:border-emerald-900 shadow-sm">
+                <div className="text-xs text-slate-500 dark:text-slate-400">Customer Returns</div>
+                <div className="text-xl font-bold text-purple-600 dark:text-purple-400">
+                  +{result.customerReturnsCreated ?? 0}
                 </div>
               </div>
               <div className="bg-white dark:bg-slate-900 p-3 rounded-xl border border-emerald-100 dark:border-emerald-900 shadow-sm">
@@ -368,7 +379,7 @@ export const MeeshoImportModal: React.FC<MeeshoImportModalProps> = ({ isOpen, on
                   {result.ordersUpdated}
                 </div>
               </div>
-              <div className="bg-white dark:bg-slate-900 p-3 rounded-xl border border-emerald-100 dark:border-emerald-900 shadow-sm">
+              <div className="bg-white dark:bg-slate-900 p-3 rounded-xl border border-emerald-100 dark:border-emerald-900 shadow-sm col-span-2 sm:col-span-1">
                 <div className="text-xs text-slate-500 dark:text-slate-400">New SKUs Added</div>
                 <div className="text-xl font-bold text-indigo-600 dark:text-indigo-400">
                   {result.productsAutoCreated}
@@ -469,7 +480,7 @@ export const MeeshoImportModal: React.FC<MeeshoImportModalProps> = ({ isOpen, on
             {preview && (
               <div className="space-y-4">
                 {/* Stats Header */}
-                <div className="grid grid-cols-2 sm:grid-cols-4 gap-2.5">
+                <div className="grid grid-cols-2 sm:grid-cols-5 gap-2.5">
                   <div className="bg-slate-50 dark:bg-slate-800/60 p-3 rounded-xl border border-slate-200 dark:border-slate-700/60">
                     <div className="flex items-center gap-1.5 text-xs text-slate-500 dark:text-slate-400 font-medium">
                       <Package className="w-3.5 h-3.5 text-indigo-500" /> Total Rows
@@ -481,10 +492,28 @@ export const MeeshoImportModal: React.FC<MeeshoImportModalProps> = ({ isOpen, on
 
                   <div className="bg-slate-50 dark:bg-slate-800/60 p-3 rounded-xl border border-slate-200 dark:border-slate-700/60">
                     <div className="flex items-center gap-1.5 text-xs text-slate-500 dark:text-slate-400 font-medium">
-                      <RotateCcw className="w-3.5 h-3.5 text-orange-500" /> Returns Detected
+                      <FileText className="w-3.5 h-3.5 text-blue-500" /> Orders Ready
                     </div>
-                    <div className="text-lg font-bold text-orange-600 dark:text-orange-400 mt-0.5">
-                      {preview.returnsCount}
+                    <div className="text-lg font-bold text-slate-900 dark:text-slate-100 mt-0.5">
+                      {preview.ordersCount}
+                    </div>
+                  </div>
+
+                  <div className="bg-slate-50 dark:bg-slate-800/60 p-3 rounded-xl border border-slate-200 dark:border-slate-700/60">
+                    <div className="flex items-center gap-1.5 text-xs text-slate-500 dark:text-slate-400 font-medium">
+                      <Truck className="w-3.5 h-3.5 text-purple-500" /> RTO Returns
+                    </div>
+                    <div className="text-lg font-bold text-purple-600 dark:text-purple-400 mt-0.5">
+                      {preview.rtoCount ?? 0}
+                    </div>
+                  </div>
+
+                  <div className="bg-slate-50 dark:bg-slate-800/60 p-3 rounded-xl border border-slate-200 dark:border-slate-700/60">
+                    <div className="flex items-center gap-1.5 text-xs text-slate-500 dark:text-slate-400 font-medium">
+                      <RotateCcw className="w-3.5 h-3.5 text-rose-500" /> Customer Ret.
+                    </div>
+                    <div className="text-lg font-bold text-rose-600 dark:text-rose-400 mt-0.5">
+                      {preview.customerReturnsCount ?? 0}
                     </div>
                   </div>
 
@@ -494,15 +523,6 @@ export const MeeshoImportModal: React.FC<MeeshoImportModalProps> = ({ isOpen, on
                     </div>
                     <div className="text-lg font-bold text-slate-900 dark:text-slate-100 mt-0.5">
                       {preview.uniqueSkusCount}
-                    </div>
-                  </div>
-
-                  <div className="bg-slate-50 dark:bg-slate-800/60 p-3 rounded-xl border border-slate-200 dark:border-slate-700/60">
-                    <div className="flex items-center gap-1.5 text-xs text-slate-500 dark:text-slate-400 font-medium">
-                      <FileText className="w-3.5 h-3.5 text-blue-500" /> Orders Ready
-                    </div>
-                    <div className="text-lg font-bold text-slate-900 dark:text-slate-100 mt-0.5">
-                      {preview.ordersCount}
                     </div>
                   </div>
                 </div>
