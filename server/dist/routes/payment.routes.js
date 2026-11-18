@@ -4,6 +4,7 @@ var __importDefault = (this && this.__importDefault) || function (mod) {
 };
 Object.defineProperty(exports, "__esModule", { value: true });
 const express_1 = require("express");
+const mongoose_1 = __importDefault(require("mongoose"));
 const multer_1 = __importDefault(require("multer"));
 const Payment_1 = require("../models/Payment");
 const auth_1 = require("../middleware/auth");
@@ -122,7 +123,10 @@ router.put('/:id', auth_1.requireManagerOrAdmin, async (req, res) => {
             res.status(404).json({ success: false, message: 'Payment record not found' });
             return;
         }
-        const { paymentDate, status, neftId, bankName, bankAccountNumber, ordersAmount, salesAmount, returnsDeduction, adsCost, programCost, otherRecovery, programBenefits, referralEarnings, otherCompensation, netAmount, notes, } = req.body;
+        const { businessAccount, paymentDate, status, neftId, bankName, bankAccountNumber, ordersAmount, salesAmount, returnsDeduction, adsCost, programCost, otherRecovery, programBenefits, referralEarnings, otherCompensation, netAmount, notes, } = req.body;
+        if (businessAccount && mongoose_1.default.Types.ObjectId.isValid(businessAccount)) {
+            payment.businessAccount = new mongoose_1.default.Types.ObjectId(businessAccount);
+        }
         if (paymentDate)
             payment.paymentDate = new Date(paymentDate);
         if (status)
@@ -163,6 +167,7 @@ router.put('/:id', auth_1.requireManagerOrAdmin, async (req, res) => {
         if (notes !== undefined)
             payment.notes = notes.trim();
         await payment.save();
+        await payment.populate('businessAccount', 'name tradeName gstin');
         if (req.user?._id) {
             await (0, audit_service_1.createAuditLog)({
                 action: 'UPDATE',

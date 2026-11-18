@@ -48,11 +48,14 @@ export const RecordPaymentModal: React.FC<RecordPaymentModalProps> = ({
 
   useEffect(() => {
     if (editingPayment) {
-      setAccountId(
-        typeof editingPayment.businessAccount === 'string'
-          ? editingPayment.businessAccount
-          : editingPayment.businessAccount._id
-      );
+      const rawAcc = editingPayment.businessAccount;
+      if (typeof rawAcc === 'string') {
+        setAccountId(rawAcc);
+      } else if (rawAcc && typeof rawAcc === 'object' && '_id' in rawAcc) {
+        setAccountId(String((rawAcc as any)._id));
+      } else if (rawAcc) {
+        setAccountId(String(rawAcc));
+      }
       setStatus(editingPayment.status);
       setPaymentDate(new Date(editingPayment.paymentDate).toISOString().slice(0, 10));
       setNeftId(editingPayment.neftId || '');

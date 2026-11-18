@@ -166,6 +166,7 @@ router.put(
       }
 
       const {
+        businessAccount,
         paymentDate,
         status,
         neftId,
@@ -184,6 +185,9 @@ router.put(
         notes,
       } = req.body;
 
+      if (businessAccount && mongoose.Types.ObjectId.isValid(businessAccount)) {
+        payment.businessAccount = new mongoose.Types.ObjectId(businessAccount);
+      }
       if (paymentDate) payment.paymentDate = new Date(paymentDate);
       if (status) payment.status = status;
       if (neftId !== undefined) payment.neftId = neftId.trim();
@@ -211,6 +215,7 @@ router.put(
       if (notes !== undefined) payment.notes = notes.trim();
 
       await payment.save();
+      await payment.populate('businessAccount', 'name tradeName gstin');
 
       if (req.user?._id) {
         await createAuditLog({
