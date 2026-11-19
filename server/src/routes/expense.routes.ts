@@ -8,14 +8,21 @@ import { createAuditLog } from '../services/audit.service';
 const router = Router();
 router.use(authenticate);
 
-const accountFilter = (accountId?: string): Record<string, unknown> =>
-  accountId && accountId !== 'all' ? { businessAccount: new mongoose.Types.ObjectId(accountId) } : {};
+const accountFilter = (accountId?: string, allowedAccounts?: string[]): Record<string, unknown> => {
+  if (accountId && accountId !== 'all') {
+    return { businessAccount: new mongoose.Types.ObjectId(accountId) };
+  }
+  if (allowedAccounts && allowedAccounts.length > 0) {
+    return { businessAccount: { $in: allowedAccounts.map(id => new mongoose.Types.ObjectId(id)) } };
+  }
+  return {};
+};
 
 // GET /api/expenses
 router.get('/', enforceAccountAccess, async (req: AuthRequest, res: Response): Promise<void> => {
   try {
     const { accountId, startDate, endDate, page = '1', limit = '100' } = req.query as Record<string, string>;
-    const filter: Record<string, unknown> = { isDeleted: false, ...accountFilter(accountId) };
+    const filter: Record<string, unknown> = { isDeleted: false, ...accountFilter(accountId, req.allowedAccountIds) };
     if (startDate || endDate) {
       filter.expenseDate = {};
       if (startDate) (filter.expenseDate as Record<string, unknown>)['$gte'] = new Date(startDate);
@@ -121,6 +128,17 @@ router.post('/', requireManagerOrAdmin, enforceAccountAccess, async (req: AuthRe
 router.put('/:id', requireManagerOrAdmin, enforceAccountAccess, async (req: AuthRequest, res: Response): Promise<void> => {
   try {
     const id = req.params.id as string;
+    const existing = await Expense.findById(id);
+    if (!existing || existing.isDeleted) { res.status(404).json({ success: false, message: 'Expense not found' }); return; }
+
+    if (req.user?.role !== 'admin') {
+      const expAccId = (existing.businessAccount as any)?._id?.toString() || existing.businessAccount?.toString();
+      if (expAccId && !req.user?.allowedAccounts?.includes(expAccId)) {
+        res.status(403).json({ success: false, message: 'Access to this account is not permitted' });
+        return;
+      }
+    }
+
     const { paidBy, paidByPartner } = req.body;
     let resolvedPartnerId = paidByPartner;
     if (!resolvedPartnerId && paidBy && paidBy !== 'business') {
@@ -152,6 +170,17 @@ router.put('/:id', requireManagerOrAdmin, enforceAccountAccess, async (req: Auth
 router.delete('/:id', requireManagerOrAdmin, async (req: AuthRequest, res: Response): Promise<void> => {
   try {
     const id = req.params.id as string;
+    const existing = await Expense.findById(id);
+    if (!existing || existing.isDeleted) { res.status(404).json({ success: false, message: 'Expense not found' }); return; }
+
+    if (req.user?.role !== 'admin') {
+      const expAccId = (existing.businessAccount as any)?._id?.toString() || existing.businessAccount?.toString();
+      if (expAccId && !req.user?.allowedAccounts?.includes(expAccId)) {
+        res.status(403).json({ success: false, message: 'Access to this account is not permitted' });
+        return;
+      }
+    }
+
     await Expense.findByIdAndUpdate(id, { isDeleted: true });
     await createAuditLog({ action: 'DELETE', resource: 'Expense', resourceId: id, userId: req.user?._id });
     res.json({ success: true, message: 'Expense deleted' });
@@ -164,7 +193,7 @@ router.delete('/:id', requireManagerOrAdmin, async (req: AuthRequest, res: Respo
 router.get('/summary/partner', enforceAccountAccess, async (req: AuthRequest, res: Response): Promise<void> => {
   try {
     const { accountId, startDate, endDate } = req.query as Record<string, string>;
-    const filter: Record<string, unknown> = { isDeleted: false, ...accountFilter(accountId) };
+    const filter: Record<string, unknown> = { isDeleted: false, ...accountFilter(accountId, req.allowedAccountIds) };
     if (startDate || endDate) {
       filter.expenseDate = {};
       if (startDate) (filter.expenseDate as Record<string, unknown>)['$gte'] = new Date(startDate);
@@ -198,6 +227,33 @@ router.get('/summary/partner', enforceAccountAccess, async (req: AuthRequest, re
     });
 
     res.json({ success: true, data: summary });
+  } catch (err) {
+    res.status(500).json({ success: false, message: (err as Error).message });
+  }
+});
+
+// GET /api/expenses/:id (MUST be placed below /summary/partner)
+router.get('/:id', async (req: AuthRequest, res: Response): Promise<void> => {
+  try {
+    const expense = await Expense.findById(req.params.id)
+      .populate('paidByPartner', 'name')
+      .populate('allocations.partner', 'name')
+      .populate('businessAccount', 'name gstin');
+
+    if (!expense || expense.isDeleted) {
+      res.status(404).json({ success: false, message: 'Expense not found' });
+      return;
+    }
+
+    if (req.user?.role !== 'admin') {
+      const expAccId = (expense.businessAccount as any)?._id?.toString() || expense.businessAccount?.toString();
+      if (expAccId && !req.user?.allowedAccounts?.includes(expAccId)) {
+        res.status(403).json({ success: false, message: 'Access to this account is not permitted' });
+        return;
+      }
+    }
+
+    res.json({ success: true, data: expense });
   } catch (err) {
     res.status(500).json({ success: false, message: (err as Error).message });
   }

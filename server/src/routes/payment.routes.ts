@@ -129,7 +129,11 @@ router.post(
         message: `Payment receive of ${formatRupees(payment.netAmount)} recorded successfully.`,
         data: payment,
       });
-    } catch (err) {
+    } catch (err: any) {
+      if (err.code === 11000 || (err.message && err.message.includes('11000'))) {
+        res.status(400).json({ success: false, message: 'A payment with this NEFT ID already exists for this business account.' });
+        return;
+      }
       res.status(500).json({ success: false, message: (err as Error).message });
     }
   }
@@ -145,6 +149,14 @@ router.get('/:id', async (req: AuthRequest, res: Response): Promise<void> => {
     if (!payment || payment.isDeleted) {
       res.status(404).json({ success: false, message: 'Payment record not found' });
       return;
+    }
+
+    if (req.user?.role !== 'admin') {
+      const payAccId = (payment.businessAccount as any)?._id?.toString() || payment.businessAccount?.toString();
+      if (payAccId && !req.user?.allowedAccounts?.includes(payAccId)) {
+        res.status(403).json({ success: false, message: 'Access to this account is not permitted' });
+        return;
+      }
     }
 
     res.json({ success: true, data: payment });
@@ -163,6 +175,14 @@ router.put(
       if (!payment || payment.isDeleted) {
         res.status(404).json({ success: false, message: 'Payment record not found' });
         return;
+      }
+
+      if (req.user?.role !== 'admin') {
+        const payAccId = (payment.businessAccount as any)?._id?.toString() || payment.businessAccount?.toString();
+        if (payAccId && !req.user?.allowedAccounts?.includes(payAccId)) {
+          res.status(403).json({ success: false, message: 'Access to this account is not permitted' });
+          return;
+        }
       }
 
       const {
@@ -244,6 +264,14 @@ router.delete(
       if (!payment || payment.isDeleted) {
         res.status(404).json({ success: false, message: 'Payment record not found' });
         return;
+      }
+
+      if (req.user?.role !== 'admin') {
+        const payAccId = (payment.businessAccount as any)?._id?.toString() || payment.businessAccount?.toString();
+        if (payAccId && !req.user?.allowedAccounts?.includes(payAccId)) {
+          res.status(403).json({ success: false, message: 'Access to this account is not permitted' });
+          return;
+        }
       }
 
       payment.isDeleted = true;

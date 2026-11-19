@@ -21,7 +21,15 @@ const generateReturnTransactionId = () => {
     const rand = Math.random().toString(36).substring(2, 7).toUpperCase();
     return `RET-${dateStr}-${rand}`;
 };
-const accountFilter = (accountId) => accountId && accountId !== 'all' ? { businessAccount: new mongoose_1.default.Types.ObjectId(accountId) } : {};
+const accountFilter = (accountId, allowedAccounts) => {
+    if (accountId && accountId !== 'all') {
+        return { businessAccount: new mongoose_1.default.Types.ObjectId(accountId) };
+    }
+    if (allowedAccounts && allowedAccounts.length > 0) {
+        return { businessAccount: { $in: allowedAccounts.map(id => new mongoose_1.default.Types.ObjectId(id)) } };
+    }
+    return {};
+};
 // POST /api/returns/lookup — Scan barcode / QR and fetch order with prior returns and eligible quantity
 router.post('/lookup', auth_1.enforceAccountAccess, async (req, res) => {
     try {
@@ -487,7 +495,7 @@ router.post('/damaged-action', auth_1.requireManagerOrAdmin, auth_1.enforceAccou
 router.get('/registers', auth_1.enforceAccountAccess, async (req, res) => {
     try {
         const { accountId, returnType, condition, startDate, endDate, search, page = '1', limit = '50', operatorId, productId, } = req.query;
-        const filter = { isDeleted: false, ...accountFilter(accountId) };
+        const filter = { isDeleted: false, ...accountFilter(accountId, req.allowedAccountIds) };
         if (returnType)
             filter.returnType = returnType;
         if (productId)
@@ -540,7 +548,7 @@ router.get('/registers', auth_1.enforceAccountAccess, async (req, res) => {
 router.get('/exceptions', auth_1.enforceAccountAccess, async (req, res) => {
     try {
         const { accountId, module, exceptionType, startDate, endDate, page = '1', limit = '50' } = req.query;
-        const filter = { ...accountFilter(accountId) };
+        const filter = { ...accountFilter(accountId, req.allowedAccountIds) };
         if (module)
             filter.module = module;
         if (exceptionType)
@@ -572,7 +580,7 @@ router.get('/exceptions', auth_1.enforceAccountAccess, async (req, res) => {
 router.get('/', auth_1.enforceAccountAccess, async (req, res) => {
     try {
         const { accountId, startDate, endDate, search, returnType, page = '1', limit = '100' } = req.query;
-        const filter = { isDeleted: false, ...accountFilter(accountId) };
+        const filter = { isDeleted: false, ...accountFilter(accountId, req.allowedAccountIds) };
         if (returnType)
             filter.returnType = returnType;
         if (startDate || endDate) {
@@ -606,6 +614,43 @@ router.get('/', auth_1.enforceAccountAccess, async (req, res) => {
         res.status(500).json({ success: false, message: err.message });
     }
 });
+// GET /api/returns/summary/category (MUST be placed before /:id)
+router.get('/summary/category', auth_1.enforceAccountAccess, async (req, res) => {
+    try {
+        const { accountId, startDate, endDate } = req.query;
+        const filter = { isDeleted: false, ...accountFilter(accountId, req.allowedAccountIds) };
+        if (startDate || endDate) {
+            filter.returnDate = {};
+            if (startDate)
+                filter.returnDate['$gte'] = new Date(startDate);
+            if (endDate)
+                filter.returnDate['$lte'] = new Date(endDate + 'T23:59:59.999Z');
+        }
+        const result = await ReturnOrder_1.ReturnOrder.aggregate([
+            { $match: filter },
+            { $lookup: { from: 'products', localField: 'product', foreignField: '_id', as: 'productDoc' } },
+            { $unwind: '$productDoc' },
+            { $lookup: { from: 'categories', localField: 'productDoc.category', foreignField: '_id', as: 'categoryDoc' } },
+            { $unwind: { path: '$categoryDoc', preserveNullAndEmptyArrays: true } },
+            {
+                $group: {
+                    _id: '$categoryDoc._id',
+                    category: { $first: '$categoryDoc.name' },
+                    totalReturns: { $sum: 1 },
+                    returnedQty: { $sum: '$returnedQuantity' },
+                    returnAmount: { $sum: '$returnAmount' },
+                    goodQty: { $sum: '$goodQuantity' },
+                    damagedQty: { $sum: '$damagedQuantity' },
+                }
+            },
+            { $sort: { totalReturns: -1 } }
+        ]);
+        res.json({ success: true, data: result });
+    }
+    catch (err) {
+        res.status(500).json({ success: false, message: err.message });
+    }
+});
 // GET /api/returns/:id
 router.get('/:id', async (req, res) => {
     try {
@@ -617,10 +662,63 @@ router.get('/:id', async (req, res) => {
             res.status(404).json({ success: false, message: 'Return not found' });
             return;
         }
+        if (req.user?.role !== 'admin') {
+            const retAccId = r.businessAccount?._id?.toString() || r.businessAccount?.toString();
+            if (retAccId && !req.user?.allowedAccounts?.includes(retAccId)) {
+                res.status(403).json({ success: false, message: 'Access to this account is not permitted' });
+                return;
+            }
+        }
         res.json({ success: true, data: r });
     }
     catch (err) {
         res.status(500).json({ success: false, message: err.message });
+    }
+});
+// PUT /api/returns/:id — update notes, reason, condition, disposition
+router.put('/:id', auth_1.requireManagerOrAdmin, auth_1.enforceAccountAccess, async (req, res) => {
+    try {
+        const existing = await ReturnOrder_1.ReturnOrder.findById(req.params.id);
+        if (!existing || existing.isDeleted) {
+            res.status(404).json({ success: false, message: 'Return not found' });
+            return;
+        }
+        if (req.user?.role !== 'admin') {
+            const retAccId = existing.businessAccount?._id?.toString() || existing.businessAccount?.toString();
+            if (retAccId && !req.user?.allowedAccounts?.includes(retAccId)) {
+                res.status(403).json({ success: false, message: 'Access to this account is not permitted' });
+                return;
+            }
+        }
+        const { notes, returnReason, damageReason, itemCondition, damageResolution, dispositionNotes } = req.body;
+        const updateData = {};
+        if (notes !== undefined)
+            updateData.notes = notes;
+        if (returnReason !== undefined)
+            updateData.returnReason = returnReason;
+        if (damageReason !== undefined)
+            updateData.damageReason = damageReason;
+        if (itemCondition !== undefined)
+            updateData.itemCondition = itemCondition;
+        if (damageResolution !== undefined)
+            updateData.damageResolution = damageResolution;
+        if (dispositionNotes !== undefined)
+            updateData.dispositionNotes = dispositionNotes;
+        const updated = await ReturnOrder_1.ReturnOrder.findByIdAndUpdate(req.params.id, updateData, { new: true })
+            .populate('product')
+            .populate('businessAccount')
+            .populate('operator', 'name email');
+        await (0, audit_service_1.createAuditLog)({
+            action: 'UPDATE',
+            resource: 'ReturnOrder',
+            resourceId: req.params.id,
+            userId: req.user?._id,
+            details: `Updated return record ${existing.returnTransactionId || existing._id}`,
+        });
+        res.json({ success: true, data: updated });
+    }
+    catch (err) {
+        res.status(400).json({ success: false, message: err.message });
     }
 });
 // POST /api/returns (legacy standard create)
@@ -714,6 +812,13 @@ router.delete('/:id', auth_1.requireManagerOrAdmin, async (req, res) => {
         if (!ret || ret.isDeleted) {
             res.status(404).json({ success: false, message: 'Return not found' });
             return;
+        }
+        if (req.user?.role !== 'admin') {
+            const retAccId = ret.businessAccount?._id?.toString() || ret.businessAccount?.toString();
+            if (retAccId && !req.user?.allowedAccounts?.includes(retAccId)) {
+                res.status(403).json({ success: false, message: 'Access to this account is not permitted' });
+                return;
+            }
         }
         // Reverse stock restoration if it happened
         if (ret.stockRestored && ret.goodQuantity > 0) {

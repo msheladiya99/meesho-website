@@ -22,7 +22,11 @@ router.post('/login', authLimiter, async (req: Request, res: Response): Promise<
       return;
     }
 
-    const secret = process.env.JWT_SECRET || 'fallback_secret';
+    const secret = process.env.JWT_SECRET;
+    if (!secret) {
+      res.status(500).json({ success: false, message: 'Server configuration error: JWT_SECRET missing' });
+      return;
+    }
     const token = jwt.sign({ id: user._id }, secret, {
       expiresIn: (process.env.JWT_EXPIRES_IN as jwt.SignOptions['expiresIn']) || '7d',
     });

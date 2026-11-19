@@ -19,8 +19,15 @@ const generateReturnTransactionId = (): string => {
   return `RET-${dateStr}-${rand}`;
 };
 
-const accountFilter = (accountId?: string): Record<string, unknown> =>
-  accountId && accountId !== 'all' ? { businessAccount: new mongoose.Types.ObjectId(accountId) } : {};
+const accountFilter = (accountId?: string, allowedAccounts?: string[]): Record<string, unknown> => {
+  if (accountId && accountId !== 'all') {
+    return { businessAccount: new mongoose.Types.ObjectId(accountId) };
+  }
+  if (allowedAccounts && allowedAccounts.length > 0) {
+    return { businessAccount: { $in: allowedAccounts.map(id => new mongoose.Types.ObjectId(id)) } };
+  }
+  return {};
+};
 
 // POST /api/returns/lookup — Scan barcode / QR and fetch order with prior returns and eligible quantity
 router.post('/lookup', enforceAccountAccess, async (req: AuthRequest, res: Response): Promise<void> => {
@@ -557,7 +564,7 @@ router.get('/registers', enforceAccountAccess, async (req: AuthRequest, res: Res
       productId,
     } = req.query as Record<string, string>;
 
-    const filter: Record<string, unknown> = { isDeleted: false, ...accountFilter(accountId) };
+    const filter: Record<string, unknown> = { isDeleted: false, ...accountFilter(accountId, req.allowedAccountIds) };
 
     if (returnType) filter.returnType = returnType;
     if (productId) filter.product = productId;
@@ -609,7 +616,7 @@ router.get('/registers', enforceAccountAccess, async (req: AuthRequest, res: Res
 router.get('/exceptions', enforceAccountAccess, async (req: AuthRequest, res: Response): Promise<void> => {
   try {
     const { accountId, module, exceptionType, startDate, endDate, page = '1', limit = '50' } = req.query as Record<string, string>;
-    const filter: Record<string, unknown> = { ...accountFilter(accountId) };
+    const filter: Record<string, unknown> = { ...accountFilter(accountId, req.allowedAccountIds) };
 
     if (module) filter.module = module;
     if (exceptionType) filter.exceptionType = exceptionType;
@@ -640,7 +647,7 @@ router.get('/exceptions', enforceAccountAccess, async (req: AuthRequest, res: Re
 router.get('/', enforceAccountAccess, async (req: AuthRequest, res: Response): Promise<void> => {
   try {
     const { accountId, startDate, endDate, search, returnType, page = '1', limit = '100' } = req.query as Record<string, string>;
-    const filter: Record<string, unknown> = { isDeleted: false, ...accountFilter(accountId) };
+    const filter: Record<string, unknown> = { isDeleted: false, ...accountFilter(accountId, req.allowedAccountIds) };
     if (returnType) filter.returnType = returnType;
     if (startDate || endDate) {
       filter.returnDate = {};
@@ -672,8 +679,45 @@ router.get('/', enforceAccountAccess, async (req: AuthRequest, res: Response): P
   }
 });
 
+// GET /api/returns/summary/category (MUST be placed before /:id)
+router.get('/summary/category', enforceAccountAccess, async (req: AuthRequest, res: Response): Promise<void> => {
+  try {
+    const { accountId, startDate, endDate } = req.query as Record<string, string>;
+    const filter: Record<string, unknown> = { isDeleted: false, ...accountFilter(accountId, req.allowedAccountIds) };
+    if (startDate || endDate) {
+      filter.returnDate = {};
+      if (startDate) (filter.returnDate as Record<string, unknown>)['$gte'] = new Date(startDate);
+      if (endDate) (filter.returnDate as Record<string, unknown>)['$lte'] = new Date(endDate + 'T23:59:59.999Z');
+    }
+
+    const result = await ReturnOrder.aggregate([
+      { $match: filter },
+      { $lookup: { from: 'products', localField: 'product', foreignField: '_id', as: 'productDoc' } },
+      { $unwind: '$productDoc' },
+      { $lookup: { from: 'categories', localField: 'productDoc.category', foreignField: '_id', as: 'categoryDoc' } },
+      { $unwind: { path: '$categoryDoc', preserveNullAndEmptyArrays: true } },
+      {
+        $group: {
+          _id: '$categoryDoc._id',
+          category: { $first: '$categoryDoc.name' },
+          totalReturns: { $sum: 1 },
+          returnedQty: { $sum: '$returnedQuantity' },
+          returnAmount: { $sum: '$returnAmount' },
+          goodQty: { $sum: '$goodQuantity' },
+          damagedQty: { $sum: '$damagedQuantity' },
+        }
+      },
+      { $sort: { totalReturns: -1 } }
+    ]);
+
+    res.json({ success: true, data: result });
+  } catch (err) {
+    res.status(500).json({ success: false, message: (err as Error).message });
+  }
+});
+
 // GET /api/returns/:id
-router.get('/:id', async (req, res: Response): Promise<void> => {
+router.get('/:id', async (req: AuthRequest, res: Response): Promise<void> => {
   try {
     const r = await ReturnOrder.findById(req.params.id)
       .populate('product')
@@ -683,9 +727,63 @@ router.get('/:id', async (req, res: Response): Promise<void> => {
       res.status(404).json({ success: false, message: 'Return not found' });
       return;
     }
+
+    if (req.user?.role !== 'admin') {
+      const retAccId = (r.businessAccount as any)?._id?.toString() || r.businessAccount?.toString();
+      if (retAccId && !req.user?.allowedAccounts?.includes(retAccId)) {
+        res.status(403).json({ success: false, message: 'Access to this account is not permitted' });
+        return;
+      }
+    }
+
     res.json({ success: true, data: r });
   } catch (err) {
     res.status(500).json({ success: false, message: (err as Error).message });
+  }
+});
+
+// PUT /api/returns/:id — update notes, reason, condition, disposition
+router.put('/:id', requireManagerOrAdmin, enforceAccountAccess, async (req: AuthRequest, res: Response): Promise<void> => {
+  try {
+    const existing = await ReturnOrder.findById(req.params.id);
+    if (!existing || existing.isDeleted) {
+      res.status(404).json({ success: false, message: 'Return not found' });
+      return;
+    }
+
+    if (req.user?.role !== 'admin') {
+      const retAccId = (existing.businessAccount as any)?._id?.toString() || existing.businessAccount?.toString();
+      if (retAccId && !req.user?.allowedAccounts?.includes(retAccId)) {
+        res.status(403).json({ success: false, message: 'Access to this account is not permitted' });
+        return;
+      }
+    }
+
+    const { notes, returnReason, damageReason, itemCondition, damageResolution, dispositionNotes } = req.body;
+    const updateData: Record<string, unknown> = {};
+    if (notes !== undefined) updateData.notes = notes;
+    if (returnReason !== undefined) updateData.returnReason = returnReason;
+    if (damageReason !== undefined) updateData.damageReason = damageReason;
+    if (itemCondition !== undefined) updateData.itemCondition = itemCondition;
+    if (damageResolution !== undefined) updateData.damageResolution = damageResolution;
+    if (dispositionNotes !== undefined) updateData.dispositionNotes = dispositionNotes;
+
+    const updated = await ReturnOrder.findByIdAndUpdate(req.params.id, updateData, { new: true })
+      .populate('product')
+      .populate('businessAccount')
+      .populate('operator', 'name email');
+
+    await createAuditLog({
+      action: 'UPDATE',
+      resource: 'ReturnOrder',
+      resourceId: req.params.id as string,
+      userId: req.user?._id,
+      details: `Updated return record ${existing.returnTransactionId || existing._id}`,
+    });
+
+    res.json({ success: true, data: updated });
+  } catch (err) {
+    res.status(400).json({ success: false, message: (err as Error).message });
   }
 });
 
@@ -784,6 +882,14 @@ router.delete('/:id', requireManagerOrAdmin, async (req: AuthRequest, res: Respo
   try {
     const ret = await ReturnOrder.findById(req.params.id);
     if (!ret || ret.isDeleted) { res.status(404).json({ success: false, message: 'Return not found' }); return; }
+
+    if (req.user?.role !== 'admin') {
+      const retAccId = (ret.businessAccount as any)?._id?.toString() || ret.businessAccount?.toString();
+      if (retAccId && !req.user?.allowedAccounts?.includes(retAccId)) {
+        res.status(403).json({ success: false, message: 'Access to this account is not permitted' });
+        return;
+      }
+    }
 
     // Reverse stock restoration if it happened
     if (ret.stockRestored && ret.goodQuantity > 0) {

@@ -758,6 +758,19 @@ const importMeeshoOrdersAndReturns = async (params) => {
                             createdBy: userId,
                         });
                     }
+                    // If awaiting inspection, record to pending stock bucket so subsequent inspection does not crash
+                    if (pendQty > 0) {
+                        await (0, inventory_service_1.recordStockMovement)({
+                            businessAccount,
+                            productId: product._id.toString(),
+                            movementType: 'return_in',
+                            stockBucket: 'pending',
+                            quantity: pendQty,
+                            referenceType: 'ReturnOrder',
+                            reason: `Meesho Excel Import RTO Awaiting Inspection: ${row.subOrderId} (${product.sku} x${pendQty})`,
+                            createdBy: userId,
+                        });
+                    }
                     // Ensure order status reflects return state
                     if (row.returnType === 'rto_return') {
                         orderDoc.status = isCompleted ? 'rto_received' : 'rto_in_transit';

@@ -11,62 +11,8 @@ router.get('/', async (_req, res) => {
     const partners = await Partner_1.Partner.find({ isActive: true }).sort({ name: 1 });
     res.json({ success: true, data: partners });
 });
-router.get('/:id', async (req, res) => {
-    try {
-        const p = await Partner_1.Partner.findById(req.params.id);
-        if (!p) {
-            res.status(404).json({ success: false, message: 'Partner not found' });
-            return;
-        }
-        res.json({ success: true, data: p });
-    }
-    catch (err) {
-        res.status(500).json({ success: false, message: err.message });
-    }
-});
-router.post('/', auth_1.requireManagerOrAdmin, async (req, res) => {
-    try {
-        const p = await Partner_1.Partner.create(req.body);
-        await (0, audit_service_1.createAuditLog)({ action: 'CREATE', resource: 'Partner', resourceId: p._id.toString(), userId: req.user?._id });
-        res.status(201).json({ success: true, data: p });
-    }
-    catch (err) {
-        res.status(400).json({ success: false, message: err.message });
-    }
-});
-router.put('/:id', auth_1.requireManagerOrAdmin, async (req, res) => {
-    try {
-        const id = req.params.id;
-        const p = await Partner_1.Partner.findByIdAndUpdate(id, req.body, { new: true });
-        if (!p) {
-            res.status(404).json({ success: false, message: 'Partner not found' });
-            return;
-        }
-        await (0, audit_service_1.createAuditLog)({ action: 'UPDATE', resource: 'Partner', resourceId: id, userId: req.user?._id });
-        res.json({ success: true, data: p });
-    }
-    catch (err) {
-        res.status(400).json({ success: false, message: err.message });
-    }
-});
-// DELETE /api/partners/:id — soft-delete or remove partner
-router.delete('/:id', auth_1.requireManagerOrAdmin, async (req, res) => {
-    try {
-        const id = req.params.id;
-        const p = await Partner_1.Partner.findByIdAndUpdate(id, { isActive: false }, { new: true });
-        if (!p) {
-            res.status(404).json({ success: false, message: 'Partner not found' });
-            return;
-        }
-        await (0, audit_service_1.createAuditLog)({ action: 'DELETE', resource: 'Partner', resourceId: id, userId: req.user?._id });
-        res.json({ success: true, message: 'Partner removed successfully' });
-    }
-    catch (err) {
-        res.status(400).json({ success: false, message: err.message });
-    }
-});
-// GET /api/partners/balance — partner expense balance summary
-router.get('/balance', auth_1.authenticate, async (req, res) => {
+// GET /api/partners/balance — partner expense balance summary (MUST be defined before /:id)
+router.get('/balance', async (req, res) => {
     try {
         const { accountId, startDate, endDate } = req.query;
         const filter = { isDeleted: false };
@@ -143,6 +89,60 @@ router.get('/balance', auth_1.authenticate, async (req, res) => {
     }
     catch (err) {
         res.status(500).json({ success: false, message: err.message });
+    }
+});
+router.get('/:id', async (req, res) => {
+    try {
+        const p = await Partner_1.Partner.findById(req.params.id);
+        if (!p) {
+            res.status(404).json({ success: false, message: 'Partner not found' });
+            return;
+        }
+        res.json({ success: true, data: p });
+    }
+    catch (err) {
+        res.status(500).json({ success: false, message: err.message });
+    }
+});
+router.post('/', auth_1.requireManagerOrAdmin, async (req, res) => {
+    try {
+        const p = await Partner_1.Partner.create(req.body);
+        await (0, audit_service_1.createAuditLog)({ action: 'CREATE', resource: 'Partner', resourceId: p._id.toString(), userId: req.user?._id });
+        res.status(201).json({ success: true, data: p });
+    }
+    catch (err) {
+        res.status(400).json({ success: false, message: err.message });
+    }
+});
+router.put('/:id', auth_1.requireManagerOrAdmin, async (req, res) => {
+    try {
+        const id = req.params.id;
+        const p = await Partner_1.Partner.findByIdAndUpdate(id, req.body, { new: true });
+        if (!p) {
+            res.status(404).json({ success: false, message: 'Partner not found' });
+            return;
+        }
+        await (0, audit_service_1.createAuditLog)({ action: 'UPDATE', resource: 'Partner', resourceId: id, userId: req.user?._id });
+        res.json({ success: true, data: p });
+    }
+    catch (err) {
+        res.status(400).json({ success: false, message: err.message });
+    }
+});
+// DELETE /api/partners/:id — soft-delete or remove partner
+router.delete('/:id', auth_1.requireManagerOrAdmin, async (req, res) => {
+    try {
+        const id = req.params.id;
+        const p = await Partner_1.Partner.findByIdAndUpdate(id, { isActive: false }, { new: true });
+        if (!p) {
+            res.status(404).json({ success: false, message: 'Partner not found' });
+            return;
+        }
+        await (0, audit_service_1.createAuditLog)({ action: 'DELETE', resource: 'Partner', resourceId: id, userId: req.user?._id });
+        res.json({ success: true, message: 'Partner removed successfully' });
+    }
+    catch (err) {
+        res.status(400).json({ success: false, message: err.message });
     }
 });
 exports.default = router;

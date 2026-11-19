@@ -23,7 +23,11 @@ router.post('/login', rateLimiter_1.authLimiter, async (req, res) => {
             res.status(401).json({ success: false, message: 'Invalid email or password' });
             return;
         }
-        const secret = process.env.JWT_SECRET || 'fallback_secret';
+        const secret = process.env.JWT_SECRET;
+        if (!secret) {
+            res.status(500).json({ success: false, message: 'Server configuration error: JWT_SECRET missing' });
+            return;
+        }
         const token = jsonwebtoken_1.default.sign({ id: user._id }, secret, {
             expiresIn: process.env.JWT_EXPIRES_IN || '7d',
         });

@@ -14,7 +14,10 @@ const authenticate = async (req, res, next) => {
             return;
         }
         const token = authHeader.split(' ')[1];
-        const secret = process.env.JWT_SECRET || 'fallback_secret';
+        const secret = process.env.JWT_SECRET;
+        if (!secret) {
+            throw new Error('FATAL: JWT_SECRET environment variable is missing.');
+        }
         const decoded = jsonwebtoken_1.default.verify(token, secret);
         const user = await User_1.User.findById(decoded.id).select('-password').lean();
         if (!user) {
@@ -30,7 +33,11 @@ const authenticate = async (req, res, next) => {
         };
         next();
     }
-    catch {
+    catch (err) {
+        if (err.message?.includes('JWT_SECRET')) {
+            res.status(500).json({ success: false, message: 'Server configuration error: JWT_SECRET missing' });
+            return;
+        }
         res.status(401).json({ success: false, message: 'Invalid or expired token' });
     }
 };
@@ -60,12 +67,33 @@ const enforceAccountAccess = (req, res, next) => {
         next();
         return;
     }
-    const accountId = req.query.accountId || req.body.businessAccount;
-    if (accountId && accountId !== 'all') {
-        const allowed = req.user?.allowedAccounts || [];
-        if (!allowed.includes(accountId)) {
+    const allowed = req.user?.allowedAccounts || [];
+    if (allowed.length === 0) {
+        res.status(403).json({ success: false, message: 'No business accounts assigned to this user' });
+        return;
+    }
+    // Validate request body businessAccount if supplied
+    const bodyAccount = req.body?.businessAccount;
+    if (bodyAccount) {
+        const accStr = bodyAccount.toString();
+        if (!allowed.includes(accStr)) {
             res.status(403).json({ success: false, message: 'Access to this account is not permitted' });
             return;
+        }
+    }
+    // Validate query accountId
+    const queryAccount = req.query.accountId;
+    if (queryAccount && queryAccount !== 'all') {
+        if (!allowed.includes(queryAccount)) {
+            res.status(403).json({ success: false, message: 'Access to this account is not permitted' });
+            return;
+        }
+    }
+    else {
+        // When query accountId is 'all' or omitted, attach permitted accounts so queries are scoped
+        req.allowedAccountIds = allowed;
+        if (allowed.length === 1) {
+            req.query.accountId = allowed[0];
         }
     }
     next();

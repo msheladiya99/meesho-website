@@ -20,7 +20,15 @@ router.use(auth_1.authenticate);
 // Concurrency locks to prevent duplicate submissions from rapid clicks
 const activePurchaseLocks = new Set();
 const recentPurchaseCreations = new Map();
-const accountFilter = (accountId) => accountId && accountId !== 'all' ? { businessAccount: new mongoose_1.default.Types.ObjectId(accountId) } : {};
+const accountFilter = (accountId, allowedAccounts) => {
+    if (accountId && accountId !== 'all') {
+        return { businessAccount: new mongoose_1.default.Types.ObjectId(accountId) };
+    }
+    if (allowedAccounts && allowedAccounts.length > 0) {
+        return { businessAccount: { $in: allowedAccounts.map(id => new mongoose_1.default.Types.ObjectId(id)) } };
+    }
+    return {};
+};
 function calculateNextInvoiceNumber(invoices) {
     const cleanList = invoices
         .map(inv => (typeof inv === 'string' ? inv.trim() : ''))
@@ -69,7 +77,7 @@ function calculateNextInvoiceNumber(invoices) {
 router.get('/', auth_1.enforceAccountAccess, async (req, res) => {
     try {
         const { accountId, startDate, endDate, page = '1', limit = '100' } = req.query;
-        const filter = { isDeleted: false, ...accountFilter(accountId) };
+        const filter = { isDeleted: false, ...accountFilter(accountId, req.allowedAccountIds) };
         if (startDate || endDate) {
             filter.purchaseDate = {};
             if (startDate)
@@ -102,7 +110,7 @@ router.get('/', auth_1.enforceAccountAccess, async (req, res) => {
 router.get('/accounting-summary', auth_1.enforceAccountAccess, async (req, res) => {
     try {
         const { accountId, startDate, endDate } = req.query;
-        const filter = { isDeleted: false, ...accountFilter(accountId) };
+        const filter = { isDeleted: false, ...accountFilter(accountId, req.allowedAccountIds) };
         if (startDate || endDate) {
             filter.purchaseDate = {};
             if (startDate)
@@ -181,7 +189,7 @@ router.get('/next-invoice-number', auth_1.enforceAccountAccess, async (req, res)
         const { accountId } = req.query;
         const filter = {
             isDeleted: false,
-            ...accountFilter(accountId),
+            ...accountFilter(accountId, req.allowedAccountIds),
         };
         const purchases = await StockPurchase_1.StockPurchase.find(filter)
             .select('vendorInvoiceNumber')
@@ -217,7 +225,7 @@ router.get('/vendor/:vendorId/ledger', auth_1.enforceAccountAccess, async (req, 
         const filter = {
             isDeleted: false,
             vendor: new mongoose_1.default.Types.ObjectId(vendorId),
-            ...accountFilter(accountId),
+            ...accountFilter(accountId, req.allowedAccountIds),
         };
         if (startDate || endDate) {
             filter.purchaseDate = {};
@@ -449,6 +457,13 @@ router.get('/:id', async (req, res) => {
             res.status(404).json({ success: false, message: 'Purchase not found' });
             return;
         }
+        if (req.user?.role !== 'admin') {
+            const purAccId = p.businessAccount?._id?.toString() || p.businessAccount?.toString();
+            if (purAccId && !req.user?.allowedAccounts?.includes(purAccId)) {
+                res.status(403).json({ success: false, message: 'Access to this account is not permitted' });
+                return;
+            }
+        }
         res.json({ success: true, data: p });
     }
     catch (err) {
@@ -467,6 +482,13 @@ router.post('/:id/payments', auth_1.requireManagerOrAdmin, async (req, res) => {
         if (!purchase || purchase.isDeleted) {
             res.status(404).json({ success: false, message: 'Purchase not found' });
             return;
+        }
+        if (req.user?.role !== 'admin') {
+            const purAccId = purchase.businessAccount?._id?.toString() || purchase.businessAccount?.toString();
+            if (purAccId && !req.user?.allowedAccounts?.includes(purAccId)) {
+                res.status(403).json({ success: false, message: 'Access to this account is not permitted' });
+                return;
+            }
         }
         const { amount, paymentDate, paymentMode, paidBy, paidByPartner, referenceNumber, notes } = req.body;
         const numAmount = Math.round(Number(amount));
@@ -744,6 +766,13 @@ router.put('/:id', auth_1.requireManagerOrAdmin, auth_1.enforceAccountAccess, as
             res.status(404).json({ success: false, message: 'Purchase not found' });
             return;
         }
+        if (req.user?.role !== 'admin') {
+            const purAccId = existing.businessAccount?._id?.toString() || existing.businessAccount?.toString();
+            if (purAccId && !req.user?.allowedAccounts?.includes(purAccId)) {
+                res.status(403).json({ success: false, message: 'Access to this account is not permitted' });
+                return;
+            }
+        }
         const { items, totalQuantity, purchasePricePerUnit, purchaseDate, vendor, vendorInvoiceNumber, discount, additionalCosts, taxAmount, totalAmount, paymentStatus, notes } = req.body;
         const parsedQty = Number(totalQuantity) || (Array.isArray(items) ? items.reduce((sum, it) => sum + (Number(it.quantityPurchased) || 0), 0) : existing.totalQuantity || 0);
         if (!parsedQty || parsedQty <= 0) {
@@ -844,7 +873,6 @@ router.put('/:id', auth_1.requireManagerOrAdmin, auth_1.enforceAccountAccess, as
             .populate('payments.paidByPartner', 'name upiId')
             .populate('payments.recordedBy', 'name email');
         res.json({ success: true, data: populated });
-        res.json({ success: true, data: populated });
     }
     catch (err) {
         console.error('Update error:', err);
@@ -867,6 +895,13 @@ router.delete('/:id', auth_1.requireManagerOrAdmin, async (req, res) => {
         if (!purchase || purchase.isDeleted) {
             res.status(404).json({ success: false, message: 'Purchase not found' });
             return;
+        }
+        if (req.user?.role !== 'admin') {
+            const purAccId = purchase.businessAccount?._id?.toString() || purchase.businessAccount?.toString();
+            if (purAccId && !req.user?.allowedAccounts?.includes(purAccId)) {
+                res.status(403).json({ success: false, message: 'Access to this account is not permitted' });
+                return;
+            }
         }
         await (0, inventory_service_1.reverseMovementsByReference)(purchaseId, req.user?._id?.toString());
         await StockMovement_1.StockMovement.deleteMany({

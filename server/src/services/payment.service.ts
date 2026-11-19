@@ -447,7 +447,8 @@ export const importMeeshoPaymentSheet = async (params: {
       }
     }
 
-    const neftId = sample['neftid'] || sample['neft'] || sample['utr'] || (key.startsWith('ROW_') ? undefined : key);
+    const rawNeft = sample['neftid'] || sample['neft'] || sample['utr'] || (key.startsWith('ROW_') ? undefined : key);
+    const neftId = rawNeft ? String(rawNeft).trim() : undefined;
     const bankName = sample['bankname'] || sample['bank'] || 'Axis Bank';
 
     // Sum amounts
@@ -495,21 +496,46 @@ export const importMeeshoPaymentSheet = async (params: {
       await existing.save();
       updatedCount++;
     } else {
-      await Payment.create({
-        businessAccount: new mongoose.Types.ObjectId(businessAccount),
-        paymentDate,
-        status: 'completed',
-        neftId,
-        bankName,
-        ordersAmount: totalOrdersAmountPaise,
-        adsCost: totalAdsCostPaise,
-        netAmount: totalNetAmountPaise,
-        ordersCount: subOrderIds.length,
-        subOrderIds,
-        rawSource: 'sheet_import',
-        createdBy: userId ? new mongoose.Types.ObjectId(userId) : undefined,
-      });
-      createdCount++;
+      try {
+        await Payment.create({
+          businessAccount: new mongoose.Types.ObjectId(businessAccount),
+          paymentDate,
+          status: 'completed',
+          neftId,
+          bankName,
+          ordersAmount: totalOrdersAmountPaise,
+          adsCost: totalAdsCostPaise,
+          netAmount: totalNetAmountPaise,
+          ordersCount: subOrderIds.length,
+          subOrderIds,
+          rawSource: 'sheet_import',
+          createdBy: userId ? new mongoose.Types.ObjectId(userId) : undefined,
+        });
+        createdCount++;
+      } catch (createErr: any) {
+        if (createErr.code === 11000 && neftId) {
+          // Fallback in case of race condition: update existing
+          const duplicate = await Payment.findOne({
+            businessAccount: new mongoose.Types.ObjectId(businessAccount),
+            neftId,
+            isDeleted: false,
+          });
+          if (duplicate) {
+            duplicate.paymentDate = paymentDate;
+            duplicate.netAmount = totalNetAmountPaise;
+            duplicate.ordersAmount = totalOrdersAmountPaise;
+            duplicate.adsCost = totalAdsCostPaise;
+            duplicate.ordersCount = subOrderIds.length || duplicate.ordersCount;
+            if (subOrderIds.length > 0) {
+              duplicate.subOrderIds = Array.from(new Set([...(duplicate.subOrderIds || []), ...subOrderIds]));
+            }
+            await duplicate.save();
+            updatedCount++;
+          }
+        } else {
+          throw createErr;
+        }
+      }
     }
   }
 

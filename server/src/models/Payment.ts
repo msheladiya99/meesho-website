@@ -73,7 +73,7 @@ const paymentSchema = new Schema<IPayment>(
       default: 'completed',
       index: true,
     },
-    neftId: { type: String, trim: true, index: true },
+    neftId: { type: String, trim: true },
     bankName: { type: String, trim: true, default: 'Axis Bank' },
     bankAccountNumber: { type: String, trim: true },
 
@@ -110,5 +110,15 @@ const paymentSchema = new Schema<IPayment>(
 
 paymentSchema.index({ businessAccount: 1, paymentDate: -1 });
 paymentSchema.index({ businessAccount: 1, status: 1, paymentDate: -1 });
+paymentSchema.index(
+  { businessAccount: 1, neftId: 1 },
+  {
+    unique: true,
+    partialFilterExpression: {
+      neftId: { $type: 'string', $gt: '' },
+      isDeleted: false,
+    },
+  }
+);
 
 export const Payment = mongoose.model<IPayment>('Payment', paymentSchema);

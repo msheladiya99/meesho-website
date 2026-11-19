@@ -96,6 +96,10 @@ router.post('/', auth_1.requireManagerOrAdmin, auth_1.enforceAccountAccess, asyn
         });
     }
     catch (err) {
+        if (err.code === 11000 || (err.message && err.message.includes('11000'))) {
+            res.status(400).json({ success: false, message: 'A payment with this NEFT ID already exists for this business account.' });
+            return;
+        }
         res.status(500).json({ success: false, message: err.message });
     }
 });
@@ -108,6 +112,13 @@ router.get('/:id', async (req, res) => {
         if (!payment || payment.isDeleted) {
             res.status(404).json({ success: false, message: 'Payment record not found' });
             return;
+        }
+        if (req.user?.role !== 'admin') {
+            const payAccId = payment.businessAccount?._id?.toString() || payment.businessAccount?.toString();
+            if (payAccId && !req.user?.allowedAccounts?.includes(payAccId)) {
+                res.status(403).json({ success: false, message: 'Access to this account is not permitted' });
+                return;
+            }
         }
         res.json({ success: true, data: payment });
     }
@@ -122,6 +133,13 @@ router.put('/:id', auth_1.requireManagerOrAdmin, async (req, res) => {
         if (!payment || payment.isDeleted) {
             res.status(404).json({ success: false, message: 'Payment record not found' });
             return;
+        }
+        if (req.user?.role !== 'admin') {
+            const payAccId = payment.businessAccount?._id?.toString() || payment.businessAccount?.toString();
+            if (payAccId && !req.user?.allowedAccounts?.includes(payAccId)) {
+                res.status(403).json({ success: false, message: 'Access to this account is not permitted' });
+                return;
+            }
         }
         const { businessAccount, paymentDate, status, neftId, bankName, bankAccountNumber, ordersAmount, salesAmount, returnsDeduction, adsCost, programCost, otherRecovery, programBenefits, referralEarnings, otherCompensation, netAmount, notes, } = req.body;
         if (businessAccount && mongoose_1.default.Types.ObjectId.isValid(businessAccount)) {
@@ -190,6 +208,13 @@ router.delete('/:id', auth_1.requireManagerOrAdmin, async (req, res) => {
         if (!payment || payment.isDeleted) {
             res.status(404).json({ success: false, message: 'Payment record not found' });
             return;
+        }
+        if (req.user?.role !== 'admin') {
+            const payAccId = payment.businessAccount?._id?.toString() || payment.businessAccount?.toString();
+            if (payAccId && !req.user?.allowedAccounts?.includes(payAccId)) {
+                res.status(403).json({ success: false, message: 'Access to this account is not permitted' });
+                return;
+            }
         }
         payment.isDeleted = true;
         await payment.save();

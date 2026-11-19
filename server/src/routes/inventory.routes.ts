@@ -90,8 +90,8 @@ router.get('/', async (req: AuthRequest, res: Response): Promise<void> => {
         const pObj: any = p.toObject();
         const ownStock = ownStockMap.get(p._id.toString()) ?? 0;
         
-        // Products draw from the shared total quantity pool
-        pObj.currentStock = totalAvailableStock;
+        // Products draw from their respective aggregated SKU stock
+        pObj.currentStock = Math.max(0, targetStockMap.get(p._id.toString()) ?? 0);
         pObj.ownStock = Math.max(0, ownStock);
         pObj.totalAvailableStock = totalAvailableStock;
         pObj.isSharedStock = isSharedStock;
@@ -102,24 +102,45 @@ router.get('/', async (req: AuthRequest, res: Response): Promise<void> => {
       return;
     }
 
-    const totalAgg = await StockMovement.aggregate([
-      {
-        $match: {
-          stockBucket: 'saleable',
+    const productIds = products.map(p => p._id);
+    const [allProductMovements, totalAgg] = await Promise.all([
+      StockMovement.aggregate([
+        {
+          $match: {
+            product: { $in: productIds },
+            stockBucket: 'saleable',
+          }
+        },
+        {
+          $group: {
+            _id: '$product',
+            qty: { $sum: '$quantity' }
+          }
         }
-      },
-      {
-        $group: {
-          _id: null,
-          totalStock: { $sum: '$quantity' }
+      ]),
+      StockMovement.aggregate([
+        {
+          $match: {
+            stockBucket: 'saleable',
+          }
+        },
+        {
+          $group: {
+            _id: null,
+            totalStock: { $sum: '$quantity' }
+          }
         }
-      }
+      ])
     ]);
     const totalAvailableStock = totalAgg.length > 0 ? Math.max(0, totalAgg[0].totalStock) : 0;
+    const stockMap = new Map<string, number>();
+    allProductMovements.forEach(item => {
+      stockMap.set(item._id.toString(), item.qty);
+    });
 
     const mappedProducts = products.map(p => {
       const pObj: any = p.toObject();
-      pObj.currentStock = totalAvailableStock;
+      pObj.currentStock = Math.max(0, stockMap.get(p._id.toString()) ?? p.currentStock ?? 0);
       pObj.totalAvailableStock = totalAvailableStock;
       return pObj;
     });

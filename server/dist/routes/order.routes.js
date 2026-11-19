@@ -24,12 +24,20 @@ const upload = (0, multer_1.default)({
 const router = (0, express_1.Router)();
 router.use(auth_1.authenticate);
 // Helper: build account filter
-const accountFilter = (accountId) => accountId && accountId !== 'all' ? { businessAccount: new mongoose_1.default.Types.ObjectId(accountId) } : {};
+const accountFilter = (accountId, allowedAccounts) => {
+    if (accountId && accountId !== 'all') {
+        return { businessAccount: new mongoose_1.default.Types.ObjectId(accountId) };
+    }
+    if (allowedAccounts && allowedAccounts.length > 0) {
+        return { businessAccount: { $in: allowedAccounts.map(id => new mongoose_1.default.Types.ObjectId(id)) } };
+    }
+    return {};
+};
 // GET /api/orders
 router.get('/', auth_1.enforceAccountAccess, async (req, res) => {
     try {
         const { accountId, startDate, endDate, search, page = '1', limit = '100', productId } = req.query;
-        const filter = { isDeleted: false, ...accountFilter(accountId) };
+        const filter = { isDeleted: false, ...accountFilter(accountId, req.allowedAccountIds) };
         if (startDate || endDate) {
             filter.orderDate = {};
             if (startDate)
@@ -164,6 +172,59 @@ router.post('/import/execute', auth_1.requireManagerOrAdmin, auth_1.enforceAccou
         res.status(500).json({ success: false, message: err.message });
     }
 });
+// GET /api/orders/summary/daily (MUST be placed before /:id)
+router.get('/summary/daily', auth_1.enforceAccountAccess, async (req, res) => {
+    try {
+        const { accountId, date } = req.query;
+        const targetDate = date ? new Date(date) : new Date();
+        const start = new Date(targetDate.setHours(0, 0, 0, 0));
+        const end = new Date(targetDate.setHours(23, 59, 59, 999));
+        const filter = { isDeleted: false, orderDate: { $gte: start, $lte: end }, ...accountFilter(accountId, req.allowedAccountIds) };
+        const result = await Order_1.Order.aggregate([
+            { $match: filter },
+            { $group: { _id: null, totalOrders: { $sum: 1 }, totalQty: { $sum: '$quantity' }, totalAmount: { $sum: '$grossAmount' } } },
+        ]);
+        res.json({ success: true, data: result[0] || { totalOrders: 0, totalQty: 0, totalAmount: 0 } });
+    }
+    catch (err) {
+        res.status(500).json({ success: false, message: err.message });
+    }
+});
+// GET /api/orders/summary/category (MUST be placed before /:id)
+router.get('/summary/category', auth_1.enforceAccountAccess, async (req, res) => {
+    try {
+        const { accountId, startDate, endDate } = req.query;
+        const filter = { isDeleted: false, ...accountFilter(accountId, req.allowedAccountIds) };
+        if (startDate || endDate) {
+            filter.orderDate = {};
+            if (startDate)
+                filter.orderDate['$gte'] = new Date(startDate);
+            if (endDate)
+                filter.orderDate['$lte'] = new Date(endDate + 'T23:59:59.999Z');
+        }
+        const result = await Order_1.Order.aggregate([
+            { $match: filter },
+            { $lookup: { from: 'products', localField: 'product', foreignField: '_id', as: 'productDoc' } },
+            { $unwind: '$productDoc' },
+            { $lookup: { from: 'categories', localField: 'productDoc.category', foreignField: '_id', as: 'categoryDoc' } },
+            { $unwind: { path: '$categoryDoc', preserveNullAndEmptyArrays: true } },
+            {
+                $group: {
+                    _id: '$categoryDoc._id',
+                    category: { $first: '$categoryDoc.name' },
+                    orders: { $sum: 1 },
+                    qty: { $sum: '$quantity' },
+                    sales: { $sum: '$grossAmount' },
+                }
+            },
+            { $sort: { sales: -1 } }
+        ]);
+        res.json({ success: true, data: result });
+    }
+    catch (err) {
+        res.status(500).json({ success: false, message: err.message });
+    }
+});
 // GET /api/orders/:id
 router.get('/:id', async (req, res) => {
     try {
@@ -174,6 +235,13 @@ router.get('/:id', async (req, res) => {
         if (!order || order.isDeleted) {
             res.status(404).json({ success: false, message: 'Order not found' });
             return;
+        }
+        if (req.user?.role !== 'admin') {
+            const orderAccId = order.businessAccount?._id?.toString() || order.businessAccount?.toString();
+            if (orderAccId && !req.user?.allowedAccounts?.includes(orderAccId)) {
+                res.status(403).json({ success: false, message: 'Access to this account is not permitted' });
+                return;
+            }
         }
         res.json({ success: true, data: order });
     }
@@ -280,6 +348,7 @@ router.post('/', auth_1.requireManagerOrAdmin, auth_1.enforceAccountAccess, asyn
                 const totalStockAgg = await StockMovement_1.StockMovement.aggregate([
                     {
                         $match: {
+                            product: prod._id,
                             businessAccount: { $in: targetAccountIds },
                             stockBucket: 'saleable',
                         }
@@ -295,8 +364,8 @@ router.post('/', auth_1.requireManagerOrAdmin, auth_1.enforceAccountAccess, asyn
                 if (availableTotalStock < itemQty) {
                     const accLabel = account?.tradeName || account?.name || 'this account';
                     const msg = isSharedStock
-                        ? `Insufficient total stock across shared accounts. Available: ${availableTotalStock}, Requested: ${itemQty}`
-                        : `Insufficient total stock in account "${accLabel}". Available: ${availableTotalStock}, Requested: ${itemQty}. Please record a stock purchase first.`;
+                        ? `Insufficient stock for product "${prod.name}" (${prod.sku}) across shared accounts. Available: ${availableTotalStock}, Requested: ${itemQty}`
+                        : `Insufficient stock for product "${prod.name}" (${prod.sku}) in account "${accLabel}". Available: ${availableTotalStock}, Requested: ${itemQty}. Please record a stock purchase first.`;
                     res.status(400).json({ success: false, message: msg });
                     return;
                 }
@@ -416,6 +485,13 @@ router.put('/:id', auth_1.requireManagerOrAdmin, auth_1.enforceAccountAccess, as
         if (!existing || existing.isDeleted) {
             res.status(404).json({ success: false, message: 'Order not found' });
             return;
+        }
+        if (req.user?.role !== 'admin') {
+            const orderAccId = existing.businessAccount?._id?.toString() || existing.businessAccount?.toString();
+            if (orderAccId && !req.user?.allowedAccounts?.includes(orderAccId)) {
+                res.status(403).json({ success: false, message: 'Access to this account is not permitted' });
+                return;
+            }
         }
         const { sellingPrice, quantity, subOrderId, meeshoOrderId, shippingLabelId } = req.body;
         if (sellingPrice && quantity) {
@@ -583,6 +659,13 @@ router.delete('/:id', auth_1.requireManagerOrAdmin, async (req, res) => {
             res.status(404).json({ success: false, message: 'Order not found' });
             return;
         }
+        if (req.user?.role !== 'admin') {
+            const orderAccId = order.businessAccount?._id?.toString() || order.businessAccount?.toString();
+            if (orderAccId && !req.user?.allowedAccounts?.includes(orderAccId)) {
+                res.status(403).json({ success: false, message: 'Access to this account is not permitted' });
+                return;
+            }
+        }
         // Restore stock by reversing movement
         await (0, inventory_service_1.reverseMovementsByReference)(req.params.id, req.user?._id?.toString());
         await Order_1.Order.findByIdAndUpdate(req.params.id, { isDeleted: true, deletedAt: new Date() });
@@ -595,59 +678,6 @@ router.delete('/:id', auth_1.requireManagerOrAdmin, async (req, res) => {
         }
         await (0, audit_service_1.createAuditLog)({ action: 'DELETE', resource: 'Order', resourceId: req.params.id, userId: req.user?._id?.toString(), details: `Soft deleted order ${order.meeshoOrderId || order._id}` });
         res.json({ success: true, message: 'Order deleted and stock restored' });
-    }
-    catch (err) {
-        res.status(500).json({ success: false, message: err.message });
-    }
-});
-// GET /api/orders/summary/daily
-router.get('/summary/daily', auth_1.enforceAccountAccess, async (req, res) => {
-    try {
-        const { accountId, date } = req.query;
-        const targetDate = date ? new Date(date) : new Date();
-        const start = new Date(targetDate.setHours(0, 0, 0, 0));
-        const end = new Date(targetDate.setHours(23, 59, 59, 999));
-        const filter = { isDeleted: false, orderDate: { $gte: start, $lte: end }, ...accountFilter(accountId) };
-        const result = await Order_1.Order.aggregate([
-            { $match: filter },
-            { $group: { _id: null, totalOrders: { $sum: 1 }, totalQty: { $sum: '$quantity' }, totalAmount: { $sum: '$grossAmount' } } },
-        ]);
-        res.json({ success: true, data: result[0] || { totalOrders: 0, totalQty: 0, totalAmount: 0 } });
-    }
-    catch (err) {
-        res.status(500).json({ success: false, message: err.message });
-    }
-});
-// GET /api/orders/summary/category
-router.get('/summary/category', auth_1.enforceAccountAccess, async (req, res) => {
-    try {
-        const { accountId, startDate, endDate } = req.query;
-        const filter = { isDeleted: false, ...accountFilter(accountId) };
-        if (startDate || endDate) {
-            filter.orderDate = {};
-            if (startDate)
-                filter.orderDate['$gte'] = new Date(startDate);
-            if (endDate)
-                filter.orderDate['$lte'] = new Date(endDate + 'T23:59:59.999Z');
-        }
-        const result = await Order_1.Order.aggregate([
-            { $match: filter },
-            { $lookup: { from: 'products', localField: 'product', foreignField: '_id', as: 'productDoc' } },
-            { $unwind: '$productDoc' },
-            { $lookup: { from: 'categories', localField: 'productDoc.category', foreignField: '_id', as: 'categoryDoc' } },
-            { $unwind: { path: '$categoryDoc', preserveNullAndEmptyArrays: true } },
-            {
-                $group: {
-                    _id: '$categoryDoc._id',
-                    category: { $first: '$categoryDoc.name' },
-                    orders: { $sum: 1 },
-                    qty: { $sum: '$quantity' },
-                    sales: { $sum: '$grossAmount' },
-                }
-            },
-            { $sort: { sales: -1 } }
-        ]);
-        res.json({ success: true, data: result });
     }
     catch (err) {
         res.status(500).json({ success: false, message: err.message });
