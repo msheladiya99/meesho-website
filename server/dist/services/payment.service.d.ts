@@ -1,5 +1,5 @@
 import mongoose from 'mongoose';
-import { IPayment, PaymentStatus } from '../models/Payment';
+import { IPayment, PaymentStatus, IPaymentOrderRef, ReconciliationMatchStatus } from '../models/Payment';
 export interface PaymentDaySummary {
     _id: string;
     paymentDate: string;
@@ -119,4 +119,66 @@ export declare const importMeeshoPaymentSheet: (params: {
     paymentsCreated: number;
     paymentsUpdated: number;
 }>;
+/**
+ * Helper to reconcile order references against Order and ReturnOrder collections
+ */
+export declare const reconcilePaymentOrderRefs: (businessAccount: string, rawRefs: Array<{
+    subOrderId: string;
+    saleAmount?: number;
+    returnAmount?: number;
+    shippingOrWeightDeduction?: number;
+    netAmount?: number;
+}>) => Promise<IPaymentOrderRef[]>;
+export interface UnsettledOrderDTO {
+    orderId: string;
+    subOrderId: string;
+    orderDate: string;
+    sku: string;
+    productName?: string;
+    grossAmount: number;
+    sellingPrice: number;
+    quantity: number;
+    status: string;
+    carrierName?: string;
+    shippingLabelId?: string;
+    daysOverdue: number;
+}
+export interface PaymentDiscrepancyDTO {
+    subOrderId: string;
+    paymentId?: string;
+    neftId?: string;
+    paymentDate?: string;
+    orderId?: string;
+    matchStatus: ReconciliationMatchStatus;
+    weightDiscrepancy: boolean;
+    discrepancyReason: string;
+    saleAmount: number;
+    returnAmount: number;
+    shippingOrWeightDeduction: number;
+    netAmount: number;
+    expectedReceivable: number;
+    discrepancyAmount: number;
+}
+export interface PaymentReconciliationResult {
+    summary: {
+        totalExpectedReceivable: number;
+        totalSettledBankCash: number;
+        totalDiscrepancyAmount: number;
+        unsettledOrdersCount: number;
+        unsettledOrdersAmount: number;
+        wrongfulReturnsCount: number;
+        weightDiscrepanciesCount: number;
+    };
+    unsettledOrders: UnsettledOrderDTO[];
+    discrepancies: PaymentDiscrepancyDTO[];
+}
+/**
+ * Generate full Meesho bank settlement reconciliation report
+ */
+export declare const getPaymentReconciliation: (params: {
+    businessAccount?: string;
+    allowedAccounts?: string[];
+    startDate?: string;
+    endDate?: string;
+}) => Promise<PaymentReconciliationResult>;
 //# sourceMappingURL=payment.service.d.ts.map

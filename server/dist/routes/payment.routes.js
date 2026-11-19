@@ -103,6 +103,23 @@ router.post('/', auth_1.requireManagerOrAdmin, auth_1.enforceAccountAccess, asyn
         res.status(500).json({ success: false, message: err.message });
     }
 });
+// GET /api/payments/reconciliation
+// Returns unsettled dispatched orders (>15d), discrepancies, and reconciliation summary totals
+router.get('/reconciliation', auth_1.enforceAccountAccess, async (req, res) => {
+    try {
+        const { accountId, startDate, endDate } = req.query;
+        const reconciliationData = await (0, payment_service_1.getPaymentReconciliation)({
+            businessAccount: accountId,
+            allowedAccounts: req.allowedAccountIds,
+            startDate,
+            endDate,
+        });
+        res.json({ success: true, data: reconciliationData });
+    }
+    catch (err) {
+        res.status(500).json({ success: false, message: err.message });
+    }
+});
 // GET /api/payments/:id
 router.get('/:id', async (req, res) => {
     try {

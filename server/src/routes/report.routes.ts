@@ -11,6 +11,7 @@ import { BusinessAccount } from '../models/BusinessAccount';
 import { StockMovement } from '../models/StockMovement';
 import { CustomerReturnCharge } from '../models/CustomerReturnCharge';
 import { Partner } from '../models/Partner';
+import { Payment } from '../models/Payment';
 import { authenticate, enforceAccountAccess, AuthRequest } from '../middleware/auth';
 import { resolveStockAccountIds } from '../services/inventory.service';
 
@@ -209,12 +210,14 @@ router.get('/dashboard', enforceAccountAccess, async (req: AuthRequest, res: Res
 // GET /api/reports/pnl
 router.get('/pnl', enforceAccountAccess, async (req: AuthRequest, res: Response): Promise<void> => {
   try {
-    const { accountId, categoryId, startDate, endDate } = req.query as Record<string, string>;
+    const { accountId, categoryId, startDate, endDate, basis = 'accrual' } = req.query as Record<string, string>;
+    const isCashBasis = basis.toLowerCase() === 'cash';
     const af = acctFilter(accountId, req.allowedAccountIds);
     const df = dateFilter(startDate, endDate, 'orderDate');
     const rdf = dateFilter(startDate, endDate, 'returnDate');
     const pdf = dateFilter(startDate, endDate, 'purchaseDate');
     const edf = dateFilter(startDate, endDate, 'expenseDate');
+    const paydf = dateFilter(startDate, endDate, 'paymentDate');
 
     let prodFilter: Record<string, any> = {};
     let catChargeFilter: Record<string, any> = {};
@@ -248,6 +251,7 @@ router.get('/pnl', enforceAccountAccess, async (req: AuthRequest, res: Response)
       adSpendList,
       activePartners,
       periodExpenses,
+      paymentAgg,
     ] = await Promise.all([
       Order.aggregate([{ $match: { isDeleted: false, ...af, ...df, ...prodFilter } }, { $group: { _id: null, gross: { $sum: '$grossAmount' }, qty: { $sum: '$quantity' } } }]),
       Order.aggregate([{ $match: { isDeleted: false, status: 'cancelled', ...af, ...df, ...prodFilter } }, { $group: { _id: null, total: { $sum: '$grossAmount' } } }]),
@@ -388,12 +392,38 @@ router.get('/pnl', enforceAccountAccess, async (req: AuthRequest, res: Response)
         .populate('paidByPartner', 'name')
         .populate('allocations.partner', 'name')
         .lean(),
+      Payment.aggregate([
+        {
+          $match: {
+            isDeleted: false,
+            status: 'completed',
+            ...af,
+            ...paydf,
+          },
+        },
+        {
+          $group: {
+            _id: null,
+            totalOrdersAmount: { $sum: '$ordersAmount' },
+            totalSalesAmount: { $sum: { $ifNull: ['$salesAmount', '$ordersAmount'] } },
+            totalReturnsDeduction: { $sum: '$returnsDeduction' },
+            totalAdsCost: { $sum: '$adsCost' },
+            totalProgramCost: { $sum: '$programCost' },
+            totalOtherRecovery: { $sum: '$otherRecovery' },
+            totalProgramBenefits: { $sum: '$programBenefits' },
+            totalReferralEarnings: { $sum: '$referralEarnings' },
+            totalOtherCompensation: { $sum: '$otherCompensation' },
+            totalNetAmount: { $sum: '$netAmount' },
+            paymentsCount: { $sum: 1 },
+          },
+        },
+      ]),
     ]);
 
     const grossOrderValue = orderAgg[0]?.gross || 0;
     const salesCancellations = cancelAgg[0]?.total || 0;
     const returnsRefunds = returnAgg[0]?.total || 0;
-    const netSales = grossOrderValue - salesCancellations - returnsRefunds;
+    const accrualNetSales = grossOrderValue - salesCancellations - returnsRefunds;
 
     const singleRes = singleResList[0];
     const comboRes = comboResList[0];
@@ -426,7 +456,7 @@ router.get('/pnl', enforceAccountAccess, async (req: AuthRequest, res: Response)
     const totalPackingCharges = totalBoxCost + totalStickerCost + totalBagCardCost + totalPrintLabelCost;
     const totalPurchaseAndPackingCost = totalPurchaseCost + totalPackingCharges;
     const costOfGoodsSold = totalPurchaseCost;
-    const grossProfit = netSales - totalPurchaseAndPackingCost;
+    const accrualGrossProfit = accrualNetSales - totalPurchaseAndPackingCost;
 
     const isAdCategory = (cat: string) =>
       /adverti|ad spend|meesho ad|meta ad|facebook ad|google ad|^ads?$|marketing/i.test(cat || '');
@@ -459,8 +489,41 @@ router.get('/pnl', enforceAccountAccess, async (req: AuthRequest, res: Response)
     const totalCustomerReturnExpenses = returnChargeAgg[0]?.total || 0;
 
     const otherExpenses = Math.max(0, (expenseAgg[0]?.total || 0) - meeshoFees - shippingCosts - advertising);
-    const totalOperatingExpenses = meeshoFees + shippingCosts + advertising + totalCustomerReturnExpenses + otherExpenses;
-    const operatingProfit = grossProfit - totalOperatingExpenses;
+    const accrualOperatingExpenses = meeshoFees + shippingCosts + advertising + totalCustomerReturnExpenses + otherExpenses;
+    const accrualOperatingProfit = accrualGrossProfit - accrualOperatingExpenses;
+
+    // 2. Cash Basis Aggregations (from actual completed bank settlements)
+    const payAgg = paymentAgg[0] || {};
+    const bankSales = payAgg.totalSalesAmount || payAgg.totalOrdersAmount || 0;
+    const bankReturns = payAgg.totalReturnsDeduction || 0;
+    const bankAds = payAgg.totalAdsCost || 0;
+    const bankProgramCost = payAgg.totalProgramCost || 0;
+    const bankOtherRecovery = payAgg.totalOtherRecovery || 0;
+    const bankProgramBenefits = payAgg.totalProgramBenefits || 0;
+    const bankReferralEarnings = payAgg.totalReferralEarnings || 0;
+    const bankOtherCompensation = payAgg.totalOtherCompensation || 0;
+    const bankNetSettlement = payAgg.totalNetAmount || 0;
+
+    const externalAdSpend = Math.max(0, advertising - bankAds);
+    const cashOperatingExpenses = externalAdSpend + otherExpenses + bankProgramCost + bankOtherRecovery;
+    const cashGrossProfit = bankNetSettlement - totalPurchaseAndPackingCost;
+    const cashOperatingProfit = cashGrossProfit - (externalAdSpend + otherExpenses);
+
+    // Difference between Accrual Operating Profit and Realized Bank Cash Profit
+    const reconciliationGap = accrualOperatingProfit - cashOperatingProfit;
+
+    // Active metrics selected for current view mode
+    const displayGrossOrderValue = isCashBasis ? bankSales : grossOrderValue;
+    const displayTotalSales = displayGrossOrderValue;
+    const displaySalesCancellations = isCashBasis ? 0 : salesCancellations;
+    const displayReturnsRefunds = isCashBasis ? bankReturns : returnsRefunds;
+    const displaySalesReturns = displayReturnsRefunds;
+    const netSales = isCashBasis ? (bankSales - bankReturns) : accrualNetSales;
+    const grossProfit = isCashBasis ? cashGrossProfit : accrualGrossProfit;
+    const activeAdvertising = isCashBasis ? (bankAds + externalAdSpend) : advertising;
+    const activeCustomerReturns = isCashBasis ? bankReturns : totalCustomerReturnExpenses;
+    const totalOperatingExpenses = isCashBasis ? (bankAds + cashOperatingExpenses) : accrualOperatingExpenses;
+    const operatingProfit = isCashBasis ? cashOperatingProfit : accrualOperatingProfit;
 
     // Calculate Partner-Wise Profit & Loss Distribution
     const partnerExpenseStats: Record<string, { paid: number; allocated: number }> = {};
@@ -516,8 +579,8 @@ router.get('/pnl', enforceAccountAccess, async (req: AuthRequest, res: Response)
       const pNetSales = Math.round(netSales * ratio);
       const pPurchasePacking = Math.round(totalPurchaseAndPackingCost * ratio);
       const pGrossProfit = Math.round(grossProfit * ratio);
-      const pAdSpend = Math.round(advertising * ratio);
-      const pCustomerReturns = Math.round(totalCustomerReturnExpenses * ratio);
+      const pAdSpend = Math.round(activeAdvertising * ratio);
+      const pCustomerReturns = Math.round(activeCustomerReturns * ratio);
       const pOperatingExpenses = Math.round(totalOperatingExpenses * ratio);
       const pNetProfit = Math.round(operatingProfit * ratio);
 
@@ -550,11 +613,13 @@ router.get('/pnl', enforceAccountAccess, async (req: AuthRequest, res: Response)
     res.json({
       success: true,
       data: {
-        grossOrderValue,
-        totalSales: grossOrderValue,
-        salesCancellations,
-        returnsRefunds,
-        salesReturns: returnsRefunds,
+        basis: isCashBasis ? 'cash' : 'accrual',
+        reconciliationGap,
+        grossOrderValue: displayGrossOrderValue,
+        totalSales: displayTotalSales,
+        salesCancellations: displaySalesCancellations,
+        returnsRefunds: displayReturnsRefunds,
+        salesReturns: displaySalesReturns,
         netSales,
         totalOrdersCount,
         totalUnitsSold,
@@ -570,10 +635,10 @@ router.get('/pnl', enforceAccountAccess, async (req: AuthRequest, res: Response)
         grossProfit,
         meeshoFees,
         shippingCosts,
-        advertising,
+        advertising: activeAdvertising,
         totalCustomerReturnCharges,
         totalCustomerReturnHandlingCharges,
-        totalCustomerReturnExpenses,
+        totalCustomerReturnExpenses: activeCustomerReturns,
         totalRtoCharges,
         otherExpenses,
         totalOperatingExpenses,
@@ -582,6 +647,30 @@ router.get('/pnl', enforceAccountAccess, async (req: AuthRequest, res: Response)
         profitMargin: netSales > 0 ? (operatingProfit / netSales) * 100 : 0,
         adSpendList,
         partnerPnL,
+        cashBasisSummary: {
+          bankSales,
+          returnsDeductions: bankReturns,
+          adsRecovery: bankAds,
+          programCosts: bankProgramCost,
+          otherDeductions: bankOtherRecovery,
+          programBenefits: bankProgramBenefits,
+          referralEarnings: bankReferralEarnings,
+          otherCompensation: bankOtherCompensation,
+          netBankSettlement: bankNetSettlement,
+          costOfGoodsSold,
+          packingCharges: totalPackingCharges,
+          operatingExpenses: cashOperatingExpenses,
+          netBankProfit: cashOperatingProfit,
+          profitMargin: bankSales > 0 ? (cashOperatingProfit / bankSales) * 100 : 0,
+        },
+        accrualBasisSummary: {
+          grossOrderValue,
+          netSales: accrualNetSales,
+          cogs: costOfGoodsSold,
+          packing: totalPackingCharges,
+          operatingExpenses: accrualOperatingExpenses,
+          operatingProfit: accrualOperatingProfit,
+        },
       },
     });
   } catch (err) {

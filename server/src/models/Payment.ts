@@ -2,12 +2,23 @@ import mongoose, { Schema, Document } from 'mongoose';
 
 export type PaymentStatus = 'completed' | 'upcoming' | 'unscheduled';
 
+export type ReconciliationMatchStatus =
+  | 'matched'
+  | 'unmatched_order'
+  | 'underpaid'
+  | 'wrongful_return_deduction';
+
 export interface IPaymentOrderRef {
   subOrderId: string;
   orderId?: mongoose.Types.ObjectId;
   saleAmount?: number; // paise
   returnAmount?: number; // paise
+  shippingOrWeightDeduction?: number; // paise
   netAmount?: number; // paise
+  matchStatus?: ReconciliationMatchStatus;
+  weightDiscrepancy?: boolean;
+  discrepancyReason?: string;
+  expectedReceivable?: number; // paise
 }
 
 export interface IPayment extends Document {
@@ -53,7 +64,16 @@ const paymentOrderRefSchema = new Schema<IPaymentOrderRef>(
     orderId: { type: Schema.Types.ObjectId, ref: 'Order' },
     saleAmount: { type: Number, default: 0 },
     returnAmount: { type: Number, default: 0 },
+    shippingOrWeightDeduction: { type: Number, default: 0 },
     netAmount: { type: Number, default: 0 },
+    matchStatus: {
+      type: String,
+      enum: ['matched', 'unmatched_order', 'underpaid', 'wrongful_return_deduction'],
+      default: 'matched',
+    },
+    weightDiscrepancy: { type: Boolean, default: false },
+    discrepancyReason: { type: String },
+    expectedReceivable: { type: Number, default: 0 },
   },
   { _id: false }
 );

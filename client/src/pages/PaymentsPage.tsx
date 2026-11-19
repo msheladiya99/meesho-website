@@ -23,6 +23,10 @@ import {
   AlertCircle,
   HelpCircle,
   RotateCcw,
+  Scale,
+  ShieldAlert,
+  FileWarning,
+  AlertTriangle,
 } from 'lucide-react';
 import { paymentsApi } from '../services/payments.service';
 import { useAccountStore } from '../store/accountStore';
@@ -32,12 +36,15 @@ import { PaymentImportModal } from '../components/ui/PaymentImportModal';
 import { ConfirmDialog, LoadingSpinner, EmptyState } from '../components/ui/Feedback';
 import { Pagination } from '../components/ui/Pagination';
 import toast from 'react-hot-toast';
-import type { Payment, PaymentDaySummary } from '../types';
+import type { Payment, PaymentDaySummary, ReconciliationData, UnsettledOrder, PaymentDiscrepancy } from '../types';
 
 export const PaymentsPage: React.FC = () => {
   const qc = useQueryClient();
   const { activeAccountId, getActiveAccount } = useAccountStore();
   const activeAccount = getActiveAccount();
+
+  // Primary Tab Switcher
+  const [activeMainTab, setActiveMainTab] = useState<'payouts' | 'reconciliation'>('payouts');
 
   // Modals
   const [isRecordModalOpen, setIsRecordModalOpen] = useState(false);
@@ -58,6 +65,143 @@ export const PaymentsPage: React.FC = () => {
   const [page, setPage] = useState(1);
   const [pageSize, setPageSize] = useState(15);
   const [copiedNeft, setCopiedNeft] = useState<string | null>(null);
+
+  // Reconciliation filter & search
+  const [reconFilter, setReconFilter] = useState<
+    'all' | 'unsettled' | 'wrongful_return' | 'weight_discrepancy' | 'underpaid'
+  >('all');
+  const [reconSearch, setReconSearch] = useState('');
+  const [copiedDisputeId, setCopiedDisputeId] = useState<string | null>(null);
+
+  // Reconciliation Query
+  const { data: reconRes, isLoading: isReconLoading } = useQuery({
+    queryKey: ['payments-reconciliation', activeAccountId],
+    queryFn: () =>
+      paymentsApi.getReconciliation({
+        accountId: activeAccountId === 'all' ? undefined : activeAccountId,
+      }),
+  });
+
+  const reconData = reconRes?.data?.data;
+
+  // Filtered Unsettled Orders (>15d)
+  const filteredUnsettled = useMemo(() => {
+    if (!reconData?.unsettledOrders) return [];
+    let list = reconData.unsettledOrders;
+    if (reconFilter !== 'all' && reconFilter !== 'unsettled') return [];
+    if (reconSearch.trim()) {
+      const q = reconSearch.trim().toLowerCase();
+      list = list.filter(
+        (u) =>
+          u.subOrderId.toLowerCase().includes(q) ||
+          (u.sku && u.sku.toLowerCase().includes(q)) ||
+          (u.productName && u.productName.toLowerCase().includes(q)) ||
+          (u.carrierName && u.carrierName.toLowerCase().includes(q)) ||
+          (u.shippingLabelId && u.shippingLabelId.toLowerCase().includes(q))
+      );
+    }
+    return list;
+  }, [reconData?.unsettledOrders, reconFilter, reconSearch]);
+
+  // Filtered Discrepancies
+  const filteredDiscrepancies = useMemo(() => {
+    if (!reconData?.discrepancies) return [];
+    let list = reconData.discrepancies;
+    if (reconFilter === 'unsettled') return [];
+    if (reconFilter === 'wrongful_return') {
+      list = list.filter((d) => d.matchStatus === 'wrongful_return_deduction');
+    } else if (reconFilter === 'weight_discrepancy') {
+      list = list.filter((d) => d.weightDiscrepancy);
+    } else if (reconFilter === 'underpaid') {
+      list = list.filter((d) => d.matchStatus === 'underpaid');
+    }
+    if (reconSearch.trim()) {
+      const q = reconSearch.trim().toLowerCase();
+      list = list.filter(
+        (d) =>
+          d.subOrderId.toLowerCase().includes(q) ||
+          (d.neftId && d.neftId.toLowerCase().includes(q)) ||
+          (d.discrepancyReason && d.discrepancyReason.toLowerCase().includes(q))
+      );
+    }
+    return list;
+  }, [reconData?.discrepancies, reconFilter, reconSearch]);
+
+  const handleExportDisputeCsv = () => {
+    if (!reconData) {
+      toast.error('No reconciliation data available to export');
+      return;
+    }
+
+    const headers = [
+      'Ticket Category',
+      'Sub Order ID',
+      'Issue Type',
+      'Dispute Claim Amount (INR)',
+      'Order / Payment Date',
+      'Days Overdue / Reference',
+      'Details & Evidence',
+      'Recommended Action',
+    ];
+
+    const rows: string[] = [headers.map((h) => `"${h}"`).join(',')];
+
+    for (const u of reconData.unsettledOrders) {
+      rows.push(
+        [
+          'Payment Delay / Unsettled Order',
+          u.subOrderId,
+          'Unsettled Dispatched Order (>15 Days)',
+          (u.grossAmount / 100).toFixed(2),
+          u.orderDate ? u.orderDate.split('T')[0] : '',
+          `${u.daysOverdue} days overdue`,
+          `Order dispatched via ${u.carrierName || 'carrier'} (AWB: ${u.shippingLabelId || 'N/A'}) - pending payout beyond 15-day SLA`,
+          'Escalate to Meesho Seller Support for immediate payment release',
+        ]
+          .map((c) => `"${String(c).replace(/"/g, '""')}"`)
+          .join(',')
+      );
+    }
+
+    for (const d of reconData.discrepancies) {
+      let cat = 'Payment Deduction Dispute';
+      let action = 'Raise ticket for wrongful deduction reversal';
+      if (d.matchStatus === 'wrongful_return_deduction') {
+        cat = 'Wrongful RTO Return Deduction';
+        action = 'Demand 100% refund of return deduction on RTO parcel (RTO fee must be ₹0)';
+      } else if (d.weightDiscrepancy) {
+        cat = 'Weight Discrepancy Dispute';
+        action = 'Dispute excess shipping charge with packaging dimension proof';
+      } else if (d.matchStatus === 'underpaid') {
+        cat = 'Underpaid Payout';
+        action = 'Request payment audit for underpaid order reference';
+      }
+
+      rows.push(
+        [
+          cat,
+          d.subOrderId,
+          d.matchStatus,
+          (d.discrepancyAmount / 100).toFixed(2),
+          d.paymentDate ? d.paymentDate.split('T')[0] : '',
+          d.neftId || 'N/A',
+          d.discrepancyReason || '',
+          action,
+        ]
+          .map((c) => `"${String(c).replace(/"/g, '""')}"`)
+          .join(',')
+      );
+    }
+
+    const blob = new Blob([rows.join('\n')], { type: 'text/csv;charset=utf-8;' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = `meesho_disputes_${new Date().toISOString().split('T')[0]}.csv`;
+    a.click();
+    URL.revokeObjectURL(url);
+    toast.success('Meesho dispute CSV exported successfully');
+  };
 
   // 1. Fetch Dashboard Data
   const dashboardParams = useMemo(() => ({
@@ -226,8 +370,44 @@ export const PaymentsPage: React.FC = () => {
         </div>
       </div>
 
-      {/* Main Two Dashboard Cards (Upcoming & Completed Payments side-by-side) */}
-      <div className="grid grid-cols-1 lg:grid-cols-2 gap-5">
+      {/* Primary Tab Switcher */}
+      <div className="flex items-center gap-2 border-b border-gray-200">
+        <button
+          type="button"
+          onClick={() => setActiveMainTab('payouts')}
+          className={`flex items-center gap-2 px-4 py-2.5 text-xs font-bold border-b-2 transition cursor-pointer ${
+            activeMainTab === 'payouts'
+              ? 'border-primary-600 text-primary-600'
+              : 'border-transparent text-gray-500 hover:text-gray-800'
+          }`}
+        >
+          <Wallet className="w-4 h-4" />
+          <span>Payouts & Bank Settlements</span>
+        </button>
+
+        <button
+          type="button"
+          onClick={() => setActiveMainTab('reconciliation')}
+          className={`flex items-center gap-2 px-4 py-2.5 text-xs font-bold border-b-2 transition cursor-pointer relative ${
+            activeMainTab === 'reconciliation'
+              ? 'border-indigo-600 text-indigo-600'
+              : 'border-transparent text-gray-500 hover:text-gray-800'
+          }`}
+        >
+          <Scale className="w-4 h-4" />
+          <span>Settlement Reconciliation & Unsettled Orders</span>
+          {reconData && (reconData.summary.unsettledOrdersCount > 0 || reconData.summary.wrongfulReturnsCount > 0) && (
+            <span className="px-1.5 py-0.5 text-[10px] font-bold rounded-full bg-rose-100 text-rose-700 animate-pulse">
+              {reconData.summary.unsettledOrdersCount + reconData.summary.wrongfulReturnsCount}
+            </span>
+          )}
+        </button>
+      </div>
+
+      {activeMainTab === 'payouts' && (
+        <>
+          {/* Main Two Dashboard Cards (Upcoming & Completed Payments side-by-side) */}
+          <div className="grid grid-cols-1 lg:grid-cols-2 gap-5">
         {/* CARD 1: Upcoming Payments */}
         <div className="bg-white rounded-xl border border-gray-200 shadow-xs overflow-hidden flex flex-col justify-between">
           <div>
@@ -768,6 +948,436 @@ export const PaymentsPage: React.FC = () => {
           </div>
         )}
       </div>
+      </>
+      )}
+
+      {activeMainTab === 'reconciliation' && (
+        <div className="space-y-6">
+          {/* KPI Summary Cards */}
+          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
+            {/* Card 1: Expected Receivable */}
+            <div className="bg-white p-4 rounded-xl border border-gray-200 shadow-xs flex items-center justify-between">
+              <div>
+                <p className="text-[11px] font-bold uppercase tracking-wider text-gray-500">Total Expected</p>
+                <h3 className="text-xl font-extrabold text-gray-900 mt-0.5">
+                  {formatCurrency(reconData?.summary?.totalExpectedReceivable || 0)}
+                </h3>
+                <p className="text-[11px] text-gray-400 mt-0.5">Settled cash + unsettled orders</p>
+              </div>
+              <div className="p-3 bg-blue-50 text-blue-600 rounded-xl">
+                <Wallet className="w-6 h-6" />
+              </div>
+            </div>
+
+            {/* Card 2: Settled Bank Cash */}
+            <div className="bg-white p-4 rounded-xl border border-gray-200 shadow-xs flex items-center justify-between">
+              <div>
+                <p className="text-[11px] font-bold uppercase tracking-wider text-gray-500">Settled in Bank</p>
+                <h3 className="text-xl font-extrabold text-emerald-600 mt-0.5">
+                  {formatCurrency(reconData?.summary?.totalSettledBankCash || 0)}
+                </h3>
+                <p className="text-[11px] text-gray-400 mt-0.5">Credited Meesho payouts</p>
+              </div>
+              <div className="p-3 bg-emerald-50 text-emerald-600 rounded-xl">
+                <CheckCircle2 className="w-6 h-6" />
+              </div>
+            </div>
+
+            {/* Card 3: Unsettled Dispatched Orders (>15d) */}
+            <div className="bg-white p-4 rounded-xl border border-gray-200 shadow-xs flex items-center justify-between">
+              <div>
+                <p className="text-[11px] font-bold uppercase tracking-wider text-gray-500">Unsettled Orders (&gt;15d)</p>
+                <h3 className="text-xl font-extrabold text-amber-600 mt-0.5">
+                  {reconData?.summary?.unsettledOrdersCount || 0}{' '}
+                  <span className="text-xs font-semibold text-gray-500">
+                    ({formatCurrency(reconData?.summary?.unsettledOrdersAmount || 0)})
+                  </span>
+                </h3>
+                <p className="text-[11px] text-amber-700 font-medium mt-0.5">Dispatched but payment overdue</p>
+              </div>
+              <div className="p-3 bg-amber-50 text-amber-600 rounded-xl">
+                <Clock className="w-6 h-6" />
+              </div>
+            </div>
+
+            {/* Card 4: Total Discrepancy Amount */}
+            <div className="bg-white p-4 rounded-xl border border-gray-200 shadow-xs flex items-center justify-between">
+              <div>
+                <p className="text-[11px] font-bold uppercase tracking-wider text-gray-500">Total Discrepancies</p>
+                <h3 className="text-xl font-extrabold text-rose-600 mt-0.5">
+                  {formatCurrency(reconData?.summary?.totalDiscrepancyAmount || 0)}
+                </h3>
+                <p className="text-[11px] text-rose-700 font-medium mt-0.5">
+                  {reconData?.summary?.wrongfulReturnsCount || 0} Wrongful RTO •{' '}
+                  {reconData?.summary?.weightDiscrepanciesCount || 0} Weight Flags
+                </p>
+              </div>
+              <div className="p-3 bg-rose-50 text-rose-600 rounded-xl">
+                <ShieldAlert className="w-6 h-6" />
+              </div>
+            </div>
+          </div>
+
+          {/* Action & Filter Toolbar */}
+          <div className="bg-white p-4 rounded-xl border border-gray-200 shadow-xs flex flex-col md:flex-row md:items-center justify-between gap-3">
+            {/* Filter Pills */}
+            <div className="flex flex-wrap items-center gap-1.5">
+              <button
+                type="button"
+                onClick={() => setReconFilter('all')}
+                className={`px-3 py-1.5 text-xs font-semibold rounded-lg transition cursor-pointer ${
+                  reconFilter === 'all'
+                    ? 'bg-indigo-600 text-white shadow-xs'
+                    : 'bg-gray-100 text-gray-600 hover:bg-gray-200'
+                }`}
+              >
+                All Issues (
+                {(reconData?.unsettledOrders?.length || 0) + (reconData?.discrepancies?.length || 0)})
+              </button>
+              <button
+                type="button"
+                onClick={() => setReconFilter('unsettled')}
+                className={`px-3 py-1.5 text-xs font-semibold rounded-lg transition cursor-pointer flex items-center gap-1.5 ${
+                  reconFilter === 'unsettled'
+                    ? 'bg-amber-600 text-white shadow-xs'
+                    : 'bg-amber-50 text-amber-700 hover:bg-amber-100'
+                }`}
+              >
+                <span>Unsettled (&gt;15 Days)</span>
+                <span className="text-[10px] px-1.5 py-0.2 bg-white/20 rounded-full font-bold">
+                  {reconData?.summary?.unsettledOrdersCount || 0}
+                </span>
+              </button>
+              <button
+                type="button"
+                onClick={() => setReconFilter('wrongful_return')}
+                className={`px-3 py-1.5 text-xs font-semibold rounded-lg transition cursor-pointer flex items-center gap-1.5 ${
+                  reconFilter === 'wrongful_return'
+                    ? 'bg-rose-600 text-white shadow-xs'
+                    : 'bg-rose-50 text-rose-700 hover:bg-rose-100'
+                }`}
+              >
+                <span>Wrongful RTO Deductions</span>
+                <span className="text-[10px] px-1.5 py-0.2 bg-white/20 rounded-full font-bold">
+                  {reconData?.summary?.wrongfulReturnsCount || 0}
+                </span>
+              </button>
+              <button
+                type="button"
+                onClick={() => setReconFilter('weight_discrepancy')}
+                className={`px-3 py-1.5 text-xs font-semibold rounded-lg transition cursor-pointer flex items-center gap-1.5 ${
+                  reconFilter === 'weight_discrepancy'
+                    ? 'bg-purple-600 text-white shadow-xs'
+                    : 'bg-purple-50 text-purple-700 hover:bg-purple-100'
+                }`}
+              >
+                <span>Weight Discrepancies</span>
+                <span className="text-[10px] px-1.5 py-0.2 bg-white/20 rounded-full font-bold">
+                  {reconData?.summary?.weightDiscrepanciesCount || 0}
+                </span>
+              </button>
+              <button
+                type="button"
+                onClick={() => setReconFilter('underpaid')}
+                className={`px-3 py-1.5 text-xs font-semibold rounded-lg transition cursor-pointer ${
+                  reconFilter === 'underpaid'
+                    ? 'bg-gray-800 text-white shadow-xs'
+                    : 'bg-gray-100 text-gray-700 hover:bg-gray-200'
+                }`}
+              >
+                Underpaid Payouts
+              </button>
+            </div>
+
+            {/* Right side: Search & Export CSV */}
+            <div className="flex items-center gap-2">
+              <div className="relative w-48 sm:w-56">
+                <Search className="w-3.5 h-3.5 absolute left-3 top-1/2 -translate-y-1/2 text-gray-400" />
+                <input
+                  type="text"
+                  placeholder="Search Sub Order / SKU / Reason"
+                  value={reconSearch}
+                  onChange={(e) => setReconSearch(e.target.value)}
+                  className="w-full text-xs pl-8 pr-3 py-2 rounded-lg border border-gray-200 bg-white text-gray-800 placeholder:text-gray-400 focus:outline-none focus:ring-2 focus:ring-indigo-500"
+                />
+              </div>
+
+              <button
+                type="button"
+                onClick={handleExportDisputeCsv}
+                className="flex items-center gap-1.5 px-3 py-2 text-xs font-bold rounded-lg bg-indigo-600 hover:bg-indigo-700 text-white shadow-xs transition cursor-pointer shrink-0"
+              >
+                <Download className="w-3.5 h-3.5" />
+                <span>Export Dispute CSV</span>
+              </button>
+            </div>
+          </div>
+
+          {isReconLoading ? (
+            <LoadingSpinner />
+          ) : (
+            <div className="space-y-6">
+              {/* TABLE 1: Unsettled Dispatched Orders (>15 Days) */}
+              {(reconFilter === 'all' || reconFilter === 'unsettled') && (
+                <div className="bg-white rounded-xl border border-gray-200 shadow-xs overflow-hidden">
+                  <div className="p-4 border-b border-gray-200 bg-amber-50/50 flex flex-col sm:flex-row sm:items-center justify-between gap-2">
+                    <div className="flex items-center gap-2">
+                      <Clock className="w-4 h-4 text-amber-600" />
+                      <h3 className="text-sm font-bold text-gray-900">
+                        Unsettled Dispatched Orders (&gt;15 Days Overdue)
+                      </h3>
+                      <span className="text-xs px-2 py-0.5 rounded-full bg-amber-100 text-amber-800 font-bold">
+                        {filteredUnsettled.length} orders
+                      </span>
+                    </div>
+                    <p className="text-xs text-amber-800">
+                      Dispatched orders whose payment was not received within Meesho's standard 15-day settlement window.
+                    </p>
+                  </div>
+
+                  {filteredUnsettled.length === 0 ? (
+                    <div className="p-8 text-center text-gray-400 text-xs">
+                      No overdue unsettled orders found matching your filters. All dispatched orders older than 15 days have been settled!
+                    </div>
+                  ) : (
+                    <div className="overflow-x-auto">
+                      <table className="w-full text-xs text-left">
+                        <thead className="bg-gray-50 text-gray-500 font-semibold border-b border-gray-200">
+                          <tr>
+                            <th className="p-3">Sub Order ID</th>
+                            <th className="p-3">Order Date</th>
+                            <th className="p-3">Overdue SLA</th>
+                            <th className="p-3">Product / SKU</th>
+                            <th className="p-3">Carrier / AWB</th>
+                            <th className="p-3 text-right">Order Value</th>
+                            <th className="p-3">Status</th>
+                            <th className="p-3 text-center">Dispute Action</th>
+                          </tr>
+                        </thead>
+                        <tbody className="divide-y divide-gray-100">
+                          {filteredUnsettled.map((order) => {
+                            const isCopied = copiedDisputeId === order.subOrderId;
+                            return (
+                              <tr key={order.orderId} className="hover:bg-gray-50/80 transition">
+                                <td className="p-3 font-mono font-bold text-gray-900 flex items-center gap-1.5">
+                                  <span>{order.subOrderId}</span>
+                                  <button
+                                    type="button"
+                                    onClick={() => {
+                                      navigator.clipboard.writeText(order.subOrderId);
+                                      setCopiedDisputeId(order.subOrderId);
+                                      toast.success('Sub Order ID copied');
+                                      setTimeout(() => setCopiedDisputeId(null), 2000);
+                                    }}
+                                    className="p-1 text-gray-400 hover:text-gray-700 rounded transition cursor-pointer"
+                                    title="Copy Sub Order ID"
+                                  >
+                                    {isCopied ? (
+                                      <Check className="w-3 h-3 text-emerald-600" />
+                                    ) : (
+                                      <Copy className="w-3 h-3" />
+                                    )}
+                                  </button>
+                                </td>
+                                <td className="p-3 text-gray-600 whitespace-nowrap">
+                                  {formatDate(order.orderDate)}
+                                </td>
+                                <td className="p-3 whitespace-nowrap">
+                                  <span
+                                    className={`px-2 py-0.5 rounded-full text-[10px] font-bold ${
+                                      order.daysOverdue > 10
+                                        ? 'bg-rose-100 text-rose-700'
+                                        : 'bg-amber-100 text-amber-700'
+                                    }`}
+                                  >
+                                    {order.daysOverdue} days overdue
+                                  </span>
+                                </td>
+                                <td className="p-3 text-gray-800">
+                                  <div className="font-semibold">{order.productName || 'Perfume Item'}</div>
+                                  <div className="text-[11px] text-gray-400 font-mono">SKU: {order.sku}</div>
+                                </td>
+                                <td className="p-3 text-gray-600">
+                                  <div>{order.carrierName || 'Meesho Logistics'}</div>
+                                  {order.shippingLabelId && (
+                                    <div className="text-[10px] font-mono text-gray-400">
+                                      AWB: {order.shippingLabelId}
+                                    </div>
+                                  )}
+                                </td>
+                                <td className="p-3 text-right font-mono font-bold text-gray-900">
+                                  {formatCurrency(order.grossAmount)}
+                                </td>
+                                <td className="p-3">
+                                  <span className="capitalize px-2 py-0.5 rounded bg-blue-50 text-blue-700 font-semibold text-[10px]">
+                                    {order.status}
+                                  </span>
+                                </td>
+                                <td className="p-3 text-center">
+                                  <button
+                                    type="button"
+                                    onClick={() => {
+                                      const text = `Issue: Payment Delay Overdue (${order.daysOverdue} days)\nSub Order ID: ${order.subOrderId}\nOrder Date: ${order.orderDate.split('T')[0]}\nValue: ₹${(order.grossAmount / 100).toFixed(2)}\nCarrier: ${order.carrierName || 'N/A'} (AWB: ${order.shippingLabelId || 'N/A'})\nPlease credit payment immediately.`;
+                                      navigator.clipboard.writeText(text);
+                                      toast.success('Dispute details copied to clipboard');
+                                    }}
+                                    className="px-2.5 py-1 text-[11px] font-semibold rounded bg-amber-50 hover:bg-amber-100 text-amber-800 border border-amber-200 transition cursor-pointer"
+                                  >
+                                    Copy Support Text
+                                  </button>
+                                </td>
+                              </tr>
+                            );
+                          })}
+                        </tbody>
+                      </table>
+                    </div>
+                  )}
+                </div>
+              )}
+
+              {/* TABLE 2: Settlement Discrepancy Tracker */}
+              {reconFilter !== 'unsettled' && (
+                <div className="bg-white rounded-xl border border-gray-200 shadow-xs overflow-hidden">
+                  <div className="p-4 border-b border-gray-200 bg-rose-50/50 flex flex-col sm:flex-row sm:items-center justify-between gap-2">
+                    <div className="flex items-center gap-2">
+                      <ShieldAlert className="w-4 h-4 text-rose-600" />
+                      <h3 className="text-sm font-bold text-gray-900">
+                        Settlement Discrepancies & Wrongful Deduction Tracker
+                      </h3>
+                      <span className="text-xs px-2 py-0.5 rounded-full bg-rose-100 text-rose-800 font-bold">
+                        {filteredDiscrepancies.length} issues
+                      </span>
+                    </div>
+                    <p className="text-xs text-rose-800">
+                      Identifies wrongful return penalties charged on RTOs, weight discrepancies exceeding standard slabs, and underpaid orders.
+                    </p>
+                  </div>
+
+                  {filteredDiscrepancies.length === 0 ? (
+                    <div className="p-8 text-center text-gray-400 text-xs">
+                      No settlement discrepancies found matching your filters.
+                    </div>
+                  ) : (
+                    <div className="overflow-x-auto">
+                      <table className="w-full text-xs text-left">
+                        <thead className="bg-gray-50 text-gray-500 font-semibold border-b border-gray-200">
+                          <tr>
+                            <th className="p-3">Sub Order ID</th>
+                            <th className="p-3">Payout Ref / Date</th>
+                            <th className="p-3">Issue Classification</th>
+                            <th className="p-3 text-right">System Expected</th>
+                            <th className="p-3 text-right">Meesho Paid</th>
+                            <th className="p-3 text-right">Discrepancy</th>
+                            <th className="p-3">Evidence & Reason</th>
+                            <th className="p-3 text-center">Action</th>
+                          </tr>
+                        </thead>
+                        <tbody className="divide-y divide-gray-100">
+                          {filteredDiscrepancies.map((disc, idx) => {
+                            const isWrongful = disc.matchStatus === 'wrongful_return_deduction';
+                            const isWeight = disc.weightDiscrepancy;
+                            const isUnderpaid = disc.matchStatus === 'underpaid';
+
+                            return (
+                              <tr key={`${disc.subOrderId}-${idx}`} className="hover:bg-gray-50/80 transition">
+                                <td className="p-3 font-mono font-bold text-gray-900 flex items-center gap-1.5">
+                                  <span>{disc.subOrderId}</span>
+                                  <button
+                                    type="button"
+                                    onClick={() => {
+                                      navigator.clipboard.writeText(disc.subOrderId);
+                                      toast.success('Sub Order ID copied');
+                                    }}
+                                    className="p-1 text-gray-400 hover:text-gray-700 rounded transition cursor-pointer"
+                                    title="Copy Sub Order ID"
+                                  >
+                                    <Copy className="w-3 h-3" />
+                                  </button>
+                                </td>
+                                <td className="p-3 text-gray-600">
+                                  <div className="font-mono text-[11px] font-semibold text-gray-800">
+                                    {disc.neftId || 'N/A'}
+                                  </div>
+                                  <div className="text-[10px] text-gray-400">
+                                    {disc.paymentDate ? formatDate(disc.paymentDate) : 'Settlement'}
+                                  </div>
+                                </td>
+                                <td className="p-3">
+                                  {isWrongful && (
+                                    <span className="px-2 py-0.5 rounded-full text-[10px] font-bold bg-rose-100 text-rose-800 border border-rose-200">
+                                      Wrongful RTO Penalty
+                                    </span>
+                                  )}
+                                  {isWeight && (
+                                    <span className="px-2 py-0.5 rounded-full text-[10px] font-bold bg-purple-100 text-purple-800 border border-purple-200 ml-1">
+                                      Weight Discrepancy
+                                    </span>
+                                  )}
+                                  {isUnderpaid && !isWrongful && (
+                                    <span className="px-2 py-0.5 rounded-full text-[10px] font-bold bg-amber-100 text-amber-800 border border-amber-200">
+                                      Underpaid Payout
+                                    </span>
+                                  )}
+                                  {disc.matchStatus === 'unmatched_order' && (
+                                    <span className="px-2 py-0.5 rounded-full text-[10px] font-bold bg-gray-100 text-gray-700 border border-gray-200">
+                                      Unmatched Order ID
+                                    </span>
+                                  )}
+                                </td>
+                                <td className="p-3 text-right font-mono text-gray-700">
+                                  {formatCurrency(disc.expectedReceivable)}
+                                </td>
+                                <td className="p-3 text-right font-mono text-gray-900 font-semibold">
+                                  {formatCurrency(disc.netAmount)}
+                                </td>
+                                <td className="p-3 text-right font-mono font-bold text-rose-600">
+                                  -{formatCurrency(disc.discrepancyAmount)}
+                                </td>
+                                <td className="p-3 text-gray-700 max-w-xs">
+                                  <div className="text-[11px]">{disc.discrepancyReason}</div>
+                                  {isWrongful && (
+                                    <div className="text-[10px] text-rose-600 font-semibold mt-0.5">
+                                      RTO packages have ₹0 return shipping fee on Meesho.
+                                    </div>
+                                  )}
+                                </td>
+                                <td className="p-3 text-center">
+                                  <button
+                                    type="button"
+                                    onClick={() => {
+                                      const text = `Dispute Type: ${
+                                        isWrongful
+                                          ? 'Wrongful RTO Deduction'
+                                          : isWeight
+                                          ? 'Weight Discrepancy'
+                                          : 'Underpaid Payment'
+                                      }\nSub Order ID: ${disc.subOrderId}\nNEFT: ${
+                                        disc.neftId || 'N/A'
+                                      }\nDiscrepancy Claim: ₹${(disc.discrepancyAmount / 100).toFixed(
+                                        2
+                                      )}\nReason: ${disc.discrepancyReason}\nPlease reverse this wrongful deduction.`;
+                                      navigator.clipboard.writeText(text);
+                                      toast.success('Dispute claim text copied to clipboard');
+                                    }}
+                                    className="px-2.5 py-1 text-[11px] font-semibold rounded bg-rose-50 hover:bg-rose-100 text-rose-800 border border-rose-200 transition cursor-pointer"
+                                  >
+                                    Copy Dispute Text
+                                  </button>
+                                </td>
+                              </tr>
+                            );
+                          })}
+                        </tbody>
+                      </table>
+                    </div>
+                  )}
+                </div>
+              )}
+            </div>
+          )}
+        </div>
+      )}
 
       {/* Record / Edit Payment Modal */}
       {isRecordModalOpen && (

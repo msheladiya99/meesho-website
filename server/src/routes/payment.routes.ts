@@ -9,6 +9,7 @@ import {
   listPayments,
   recordPaymentReceive,
   importMeeshoPaymentSheet,
+  getPaymentReconciliation,
   formatRupees,
 } from '../services/payment.service';
 
@@ -138,6 +139,25 @@ router.post(
     }
   }
 );
+
+// GET /api/payments/reconciliation
+// Returns unsettled dispatched orders (>15d), discrepancies, and reconciliation summary totals
+router.get('/reconciliation', enforceAccountAccess, async (req: AuthRequest, res: Response): Promise<void> => {
+  try {
+    const { accountId, startDate, endDate } = req.query as Record<string, string>;
+
+    const reconciliationData = await getPaymentReconciliation({
+      businessAccount: accountId,
+      allowedAccounts: req.allowedAccountIds,
+      startDate,
+      endDate,
+    });
+
+    res.json({ success: true, data: reconciliationData });
+  } catch (err) {
+    res.status(500).json({ success: false, message: (err as Error).message });
+  }
+});
 
 // GET /api/payments/:id
 router.get('/:id', async (req: AuthRequest, res: Response): Promise<void> => {

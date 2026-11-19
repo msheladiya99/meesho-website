@@ -1,5 +1,5 @@
 import api from '../lib/axios';
-import type { ApiResponse, Payment, PaymentDashboardData } from '../types';
+import type { ApiResponse, Payment, PaymentDashboardData, ReconciliationData } from '../types';
 
 export interface PaymentListParams {
   accountId?: string;
@@ -45,4 +45,7 @@ export const paymentsApi = {
       formData,
       { headers: { 'Content-Type': 'multipart/form-data' } }
     ),
+
+  getReconciliation: (params?: { accountId?: string; startDate?: string; endDate?: string }) =>
+    api.get<ApiResponse<ReconciliationData>>('/payments/reconciliation', { params }),
 };

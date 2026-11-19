@@ -1,11 +1,17 @@
 import mongoose, { Document } from 'mongoose';
 export type PaymentStatus = 'completed' | 'upcoming' | 'unscheduled';
+export type ReconciliationMatchStatus = 'matched' | 'unmatched_order' | 'underpaid' | 'wrongful_return_deduction';
 export interface IPaymentOrderRef {
     subOrderId: string;
     orderId?: mongoose.Types.ObjectId;
     saleAmount?: number;
     returnAmount?: number;
+    shippingOrWeightDeduction?: number;
     netAmount?: number;
+    matchStatus?: ReconciliationMatchStatus;
+    weightDiscrepancy?: boolean;
+    discrepancyReason?: string;
+    expectedReceivable?: number;
 }
 export interface IPayment extends Document {
     businessAccount: mongoose.Types.ObjectId;

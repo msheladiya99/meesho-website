@@ -1,7 +1,8 @@
 import mongoose from 'mongoose';
 import * as XLSX from 'xlsx';
-import { Payment, IPayment, PaymentStatus } from '../models/Payment';
+import { Payment, IPayment, PaymentStatus, IPaymentOrderRef, ReconciliationMatchStatus } from '../models/Payment';
 import { Order } from '../models/Order';
+import { ReturnOrder } from '../models/ReturnOrder';
 import { createAuditLog } from './audit.service';
 
 export interface PaymentDaySummary {
@@ -331,6 +332,14 @@ export const recordPaymentReceive = async (
 
   const finalNetAmount = data.netAmount !== undefined ? data.netAmount : calculatedNet;
 
+  let orderRefs: IPaymentOrderRef[] = [];
+  if (subOrderIds && subOrderIds.length > 0) {
+    orderRefs = await reconcilePaymentOrderRefs(
+      businessAccount,
+      subOrderIds.map((s) => ({ subOrderId: s }))
+    );
+  }
+
   const payment = await Payment.create({
     businessAccount: new mongoose.Types.ObjectId(businessAccount),
     paymentDate: new Date(paymentDate),
@@ -350,6 +359,7 @@ export const recordPaymentReceive = async (
     netAmount: finalNetAmount,
     ordersCount: ordersCount || (subOrderIds ? subOrderIds.length : 0),
     subOrderIds,
+    orderRefs,
     notes: notes ? notes.trim() : undefined,
     rawSource: 'manual',
     createdBy: userId ? new mongoose.Types.ObjectId(userId) : undefined,
@@ -455,24 +465,53 @@ export const importMeeshoPaymentSheet = async (params: {
     let totalNetAmountPaise = 0;
     let totalOrdersAmountPaise = 0;
     let totalAdsCostPaise = 0;
+    let totalReturnsDeductionPaise = 0;
     const subOrderIds: string[] = [];
+    const rawRefs: Array<{
+      subOrderId: string;
+      saleAmount?: number;
+      returnAmount?: number;
+      shippingOrWeightDeduction?: number;
+      netAmount?: number;
+    }> = [];
 
     for (const r of rows) {
       const subId = String(r['suborderid'] || r['subordernumber'] || r['ordernumber'] || '').trim();
       if (subId) subOrderIds.push(subId);
 
       const netRupees = Number(r['finalsettlementamount'] || r['netamount'] || r['settlementamount'] || r['amount'] || 0);
-      const orderRupees = Number(r['supplierdiscountedprice'] || r['ordersamount'] || r['orderamount'] || r['grossamount'] || netRupees);
+      const orderRupees = Number(r['supplierdiscountedprice'] || r['ordersamount'] || r['orderamount'] || r['grossamount'] || (netRupees > 0 ? netRupees : 0));
       const adsRupees = Number(r['adscost'] || r['advertisementcost'] || r['recovery'] || 0);
+      const returnRupees = Number(r['returncompensation'] || r['returndeduction'] || r['returnamount'] || r['customerreturndeduction'] || 0);
+      const shippingRupees = Number(r['shippingcharge'] || r['shippingfee'] || r['weightdeduction'] || r['shippingandweight'] || 0);
 
-      totalNetAmountPaise += Math.round(netRupees * 100);
-      totalOrdersAmountPaise += Math.round(orderRupees * 100);
-      totalAdsCostPaise += Math.round(adsRupees * 100);
+      const netPaise = Math.round(netRupees * 100);
+      const orderPaise = Math.round(orderRupees * 100);
+      const adsPaise = Math.round(adsRupees * 100);
+      const returnPaise = Math.round(returnRupees * 100);
+      const shippingPaise = Math.round(shippingRupees * 100);
+
+      totalNetAmountPaise += netPaise;
+      totalOrdersAmountPaise += orderPaise;
+      totalAdsCostPaise += adsPaise;
+      totalReturnsDeductionPaise += returnPaise;
+
+      if (subId) {
+        rawRefs.push({
+          subOrderId: subId,
+          saleAmount: orderPaise,
+          returnAmount: returnPaise,
+          shippingOrWeightDeduction: shippingPaise,
+          netAmount: netPaise,
+        });
+      }
     }
 
     if (totalNetAmountPaise === 0 && totalOrdersAmountPaise > 0) {
-      totalNetAmountPaise = totalOrdersAmountPaise - totalAdsCostPaise;
+      totalNetAmountPaise = totalOrdersAmountPaise - totalAdsCostPaise - totalReturnsDeductionPaise;
     }
+
+    const reconciledRefs = await reconcilePaymentOrderRefs(businessAccount, rawRefs);
 
     // Check if payment already exists with this NEFT ID & businessAccount
     let existing = null;
@@ -488,10 +527,15 @@ export const importMeeshoPaymentSheet = async (params: {
       existing.paymentDate = paymentDate;
       existing.netAmount = totalNetAmountPaise;
       existing.ordersAmount = totalOrdersAmountPaise;
+      existing.salesAmount = totalOrdersAmountPaise;
+      existing.returnsDeduction = (existing.returnsDeduction || 0) + totalReturnsDeductionPaise;
       existing.adsCost = totalAdsCostPaise;
       existing.ordersCount = subOrderIds.length || existing.ordersCount;
       if (subOrderIds.length > 0) {
         existing.subOrderIds = Array.from(new Set([...(existing.subOrderIds || []), ...subOrderIds]));
+      }
+      if (reconciledRefs.length > 0) {
+        existing.orderRefs = reconciledRefs;
       }
       await existing.save();
       updatedCount++;
@@ -504,10 +548,13 @@ export const importMeeshoPaymentSheet = async (params: {
           neftId,
           bankName,
           ordersAmount: totalOrdersAmountPaise,
+          salesAmount: totalOrdersAmountPaise,
+          returnsDeduction: totalReturnsDeductionPaise,
           adsCost: totalAdsCostPaise,
           netAmount: totalNetAmountPaise,
           ordersCount: subOrderIds.length,
           subOrderIds,
+          orderRefs: reconciledRefs,
           rawSource: 'sheet_import',
           createdBy: userId ? new mongoose.Types.ObjectId(userId) : undefined,
         });
@@ -524,10 +571,15 @@ export const importMeeshoPaymentSheet = async (params: {
             duplicate.paymentDate = paymentDate;
             duplicate.netAmount = totalNetAmountPaise;
             duplicate.ordersAmount = totalOrdersAmountPaise;
+            duplicate.salesAmount = totalOrdersAmountPaise;
+            duplicate.returnsDeduction = (duplicate.returnsDeduction || 0) + totalReturnsDeductionPaise;
             duplicate.adsCost = totalAdsCostPaise;
             duplicate.ordersCount = subOrderIds.length || duplicate.ordersCount;
             if (subOrderIds.length > 0) {
               duplicate.subOrderIds = Array.from(new Set([...(duplicate.subOrderIds || []), ...subOrderIds]));
+            }
+            if (reconciledRefs.length > 0) {
+              duplicate.orderRefs = reconciledRefs;
             }
             await duplicate.save();
             updatedCount++;
@@ -543,5 +595,359 @@ export const importMeeshoPaymentSheet = async (params: {
     totalRows,
     paymentsCreated: createdCount,
     paymentsUpdated: updatedCount,
+  };
+};
+
+/**
+ * Helper to reconcile order references against Order and ReturnOrder collections
+ */
+export const reconcilePaymentOrderRefs = async (
+  businessAccount: string,
+  rawRefs: Array<{
+    subOrderId: string;
+    saleAmount?: number;
+    returnAmount?: number;
+    shippingOrWeightDeduction?: number;
+    netAmount?: number;
+  }>
+): Promise<IPaymentOrderRef[]> => {
+  if (!rawRefs || rawRefs.length === 0) return [];
+
+  const distinctSubOrderIds = Array.from(
+    new Set(rawRefs.map((r) => String(r.subOrderId || '').trim()).filter(Boolean))
+  );
+  if (distinctSubOrderIds.length === 0) return [];
+
+  const bId = new mongoose.Types.ObjectId(businessAccount);
+
+  // Find corresponding Orders
+  const orders = await Order.find({
+    businessAccount: bId,
+    isDeleted: false,
+    $or: [
+      { subOrderId: { $in: distinctSubOrderIds } },
+      { meeshoOrderId: { $in: distinctSubOrderIds } },
+    ],
+  }).lean();
+
+  const orderMap = new Map<string, any>();
+  const orderIds: mongoose.Types.ObjectId[] = [];
+  for (const o of orders) {
+    if (o.subOrderId) orderMap.set(o.subOrderId, o);
+    if (o.meeshoOrderId) orderMap.set(o.meeshoOrderId, o);
+    orderIds.push(o._id as mongoose.Types.ObjectId);
+  }
+
+  // Find corresponding ReturnOrders
+  const returnOrders = await ReturnOrder.find({
+    businessAccount: bId,
+    isDeleted: false,
+    $or: [
+      { meeshoOrderId: { $in: distinctSubOrderIds } },
+      { originalOrder: { $in: orderIds } },
+    ],
+  }).lean();
+
+  const returnMap = new Map<string, any>();
+  for (const ret of returnOrders) {
+    if (ret.meeshoOrderId) returnMap.set(ret.meeshoOrderId, ret);
+    if (ret.originalOrder) returnMap.set(ret.originalOrder.toString(), ret);
+  }
+
+  const reconciledRefs: IPaymentOrderRef[] = [];
+
+  for (const ref of rawRefs) {
+    const subId = String(ref.subOrderId || '').trim();
+    const order = orderMap.get(subId);
+    const returnDoc = order
+      ? returnMap.get(subId) || returnMap.get(order._id.toString())
+      : returnMap.get(subId);
+
+    const saleAmount = ref.saleAmount !== undefined ? ref.saleAmount : (order ? order.grossAmount : 0);
+    const returnAmount = ref.returnAmount !== undefined ? ref.returnAmount : (returnDoc ? returnDoc.returnAmount : 0);
+    const shippingOrWeightDeduction = ref.shippingOrWeightDeduction || 0;
+    const netAmount =
+      ref.netAmount !== undefined ? ref.netAmount : saleAmount - returnAmount - shippingOrWeightDeduction;
+    const expectedReceivable = order ? order.grossAmount : 0;
+
+    let matchStatus: ReconciliationMatchStatus = 'matched';
+    let weightDiscrepancy = false;
+    const reasons: string[] = [];
+
+    if (!order) {
+      matchStatus = 'unmatched_order';
+      reasons.push('Sub Order ID not found in system orders');
+    } else {
+      // 1. Wrongful Return Deduction Check:
+      // On Meesho, RTO parcels incur ₹0 return charges.
+      // If Meesho deducts a return charge on an order whose ReturnOrder.returnType is 'rto_return'
+      // or order status is 'rto_in_transit' / 'rto_received'
+      const isRtoOrder =
+        returnDoc?.returnType === 'rto_return' ||
+        order.status === 'rto_in_transit' ||
+        order.status === 'rto_received';
+
+      if (returnAmount > 0 && isRtoOrder) {
+        matchStatus = 'wrongful_return_deduction';
+        reasons.push(`Wrongful return penalty (₹${(returnAmount / 100).toFixed(2)}) charged on RTO package`);
+      }
+
+      // 2. Weight Discrepancy Check:
+      // Standard 500g shipping slab on Meesho is ₹50–₹90. If shipping/weight deduction > ₹140 (14000 paise):
+      if (shippingOrWeightDeduction > 14000) {
+        weightDiscrepancy = true;
+        reasons.push(`Shipping/Weight deduction (₹${(shippingOrWeightDeduction / 100).toFixed(2)}) exceeds standard slab limit`);
+      }
+
+      // 3. Underpaid Check:
+      if (matchStatus === 'matched') {
+        if (netAmount < 0 && returnAmount === 0) {
+          matchStatus = 'underpaid';
+          reasons.push('Negative payout received without return deduction');
+        } else if (order.grossAmount > 0 && returnAmount === 0 && netAmount < Math.round(order.grossAmount * 0.7)) {
+          matchStatus = 'underpaid';
+          reasons.push(
+            `Underpaid: Received ₹${(netAmount / 100).toFixed(2)} on gross order ₹${(order.grossAmount / 100).toFixed(2)}`
+          );
+        }
+      }
+    }
+
+    reconciledRefs.push({
+      subOrderId: subId,
+      orderId: order ? (order._id as mongoose.Types.ObjectId) : undefined,
+      saleAmount,
+      returnAmount,
+      shippingOrWeightDeduction,
+      netAmount,
+      matchStatus,
+      weightDiscrepancy,
+      discrepancyReason: reasons.join('; ') || undefined,
+      expectedReceivable,
+    });
+  }
+
+  return reconciledRefs;
+};
+
+export interface UnsettledOrderDTO {
+  orderId: string;
+  subOrderId: string;
+  orderDate: string;
+  sku: string;
+  productName?: string;
+  grossAmount: number; // paise
+  sellingPrice: number; // paise
+  quantity: number;
+  status: string;
+  carrierName?: string;
+  shippingLabelId?: string;
+  daysOverdue: number;
+}
+
+export interface PaymentDiscrepancyDTO {
+  subOrderId: string;
+  paymentId?: string;
+  neftId?: string;
+  paymentDate?: string;
+  orderId?: string;
+  matchStatus: ReconciliationMatchStatus;
+  weightDiscrepancy: boolean;
+  discrepancyReason: string;
+  saleAmount: number;
+  returnAmount: number;
+  shippingOrWeightDeduction: number;
+  netAmount: number;
+  expectedReceivable: number;
+  discrepancyAmount: number; // paise
+}
+
+export interface PaymentReconciliationResult {
+  summary: {
+    totalExpectedReceivable: number; // paise
+    totalSettledBankCash: number; // paise
+    totalDiscrepancyAmount: number; // paise
+    unsettledOrdersCount: number;
+    unsettledOrdersAmount: number; // paise
+    wrongfulReturnsCount: number;
+    weightDiscrepanciesCount: number;
+  };
+  unsettledOrders: UnsettledOrderDTO[];
+  discrepancies: PaymentDiscrepancyDTO[];
+}
+
+/**
+ * Generate full Meesho bank settlement reconciliation report
+ */
+export const getPaymentReconciliation = async (params: {
+  businessAccount?: string;
+  allowedAccounts?: string[];
+  startDate?: string;
+  endDate?: string;
+}): Promise<PaymentReconciliationResult> => {
+  const { businessAccount, allowedAccounts, startDate, endDate } = params;
+
+  const queryAcc: any = {};
+  if (businessAccount && businessAccount !== 'all' && mongoose.Types.ObjectId.isValid(businessAccount)) {
+    queryAcc.businessAccount = new mongoose.Types.ObjectId(businessAccount);
+  } else if (allowedAccounts && allowedAccounts.length > 0) {
+    queryAcc.businessAccount = { $in: allowedAccounts.map((id) => new mongoose.Types.ObjectId(id)) };
+  }
+
+  const paymentDateFilter: any = {};
+  if (startDate || endDate) {
+    paymentDateFilter.paymentDate = {};
+    if (startDate) paymentDateFilter.paymentDate.$gte = new Date(startDate);
+    if (endDate) {
+      const end = new Date(endDate);
+      end.setHours(23, 59, 59, 999);
+      paymentDateFilter.paymentDate.$lte = end;
+    }
+  }
+
+  // 1. Fetch completed payments
+  const payments = await Payment.find({
+    ...queryAcc,
+    ...paymentDateFilter,
+    status: 'completed',
+    isDeleted: false,
+  }).lean();
+
+  const settledSubOrderIds = new Set<string>();
+  let totalSettledBankCash = 0;
+
+  for (const p of payments) {
+    totalSettledBankCash += p.netAmount || 0;
+    if (p.subOrderIds) {
+      for (const s of p.subOrderIds) {
+        if (s) settledSubOrderIds.add(String(s).trim());
+      }
+    }
+    if (p.orderRefs) {
+      for (const ref of p.orderRefs) {
+        if (ref.subOrderId) settledSubOrderIds.add(String(ref.subOrderId).trim());
+      }
+    }
+  }
+
+  // 2. Unsettled Dispatched Orders (> 15 days threshold)
+  const fifteenDaysAgo = new Date();
+  fifteenDaysAgo.setDate(fifteenDaysAgo.getDate() - 15);
+  fifteenDaysAgo.setHours(23, 59, 59, 999);
+
+  const orderDateFilter: any = { $lte: fifteenDaysAgo };
+  if (startDate) {
+    orderDateFilter.$gte = new Date(startDate);
+  }
+
+  const dispatchedOrders = await Order.find({
+    ...queryAcc,
+    isDeleted: false,
+    status: { $in: ['dispatched', 'delivered'] },
+    orderDate: orderDateFilter,
+  })
+    .populate('product', 'name sku')
+    .sort({ orderDate: 1 })
+    .lean();
+
+  const unsettledOrders: UnsettledOrderDTO[] = [];
+  let unsettledOrdersAmount = 0;
+  const now = Date.now();
+
+  for (const o of dispatchedOrders) {
+    const subId = String(o.subOrderId || o.meeshoOrderId || '').trim();
+    if (subId && settledSubOrderIds.has(subId)) {
+      continue;
+    }
+
+    const orderTime = new Date(o.orderDate || (o as any).createdAt || Date.now()).getTime();
+    const daysSinceOrder = Math.max(0, Math.floor((now - orderTime) / (1000 * 60 * 60 * 24)));
+    const daysOverdue = Math.max(0, daysSinceOrder - 15);
+
+    unsettledOrdersAmount += o.grossAmount || 0;
+    unsettledOrders.push({
+      orderId: o._id.toString(),
+      subOrderId: subId || o._id.toString(),
+      orderDate: o.orderDate ? new Date(o.orderDate).toISOString() : new Date().toISOString(),
+      sku: o.sku || (o.product as any)?.sku || 'N/A',
+      productName: (o.product as any)?.name || 'Perfume Item',
+      grossAmount: o.grossAmount || 0,
+      sellingPrice: o.sellingPrice || 0,
+      quantity: o.quantity || 1,
+      status: o.status,
+      carrierName: o.carrierName || 'Meesho Logistics',
+      shippingLabelId: o.shippingLabelId || o.internalQrCode,
+      daysOverdue,
+    });
+  }
+
+  // 3. Discrepancies
+  const discrepancies: PaymentDiscrepancyDTO[] = [];
+  let totalDiscrepancyAmount = 0;
+  let wrongfulReturnsCount = 0;
+  let weightDiscrepanciesCount = 0;
+
+  for (const p of payments) {
+    if (p.orderRefs && p.orderRefs.length > 0) {
+      for (const ref of p.orderRefs) {
+        const isWrongfulReturn = ref.matchStatus === 'wrongful_return_deduction';
+        const isWeightDisc = Boolean(ref.weightDiscrepancy);
+        const isUnderpaid = ref.matchStatus === 'underpaid';
+        const isUnmatched = ref.matchStatus === 'unmatched_order';
+        const isNegative = (ref.netAmount || 0) < 0;
+
+        if (isWrongfulReturn || isWeightDisc || isUnderpaid || isUnmatched || isNegative) {
+          let discAmount = 0;
+          if (isWrongfulReturn) {
+            discAmount = ref.returnAmount || Math.abs(ref.netAmount || 0);
+            wrongfulReturnsCount++;
+          } else if (isWeightDisc) {
+            discAmount = Math.max(0, (ref.shippingOrWeightDeduction || 0) - 9000);
+            weightDiscrepanciesCount++;
+          } else if (isUnderpaid) {
+            discAmount = Math.max(0, (ref.expectedReceivable || 0) - (ref.netAmount || 0));
+          } else {
+            discAmount = Math.abs(ref.netAmount || 0);
+          }
+
+          totalDiscrepancyAmount += discAmount;
+
+          discrepancies.push({
+            subOrderId: ref.subOrderId,
+            paymentId: p._id.toString(),
+            neftId: p.neftId,
+            paymentDate: p.paymentDate ? new Date(p.paymentDate).toISOString() : undefined,
+            orderId: ref.orderId ? ref.orderId.toString() : undefined,
+            matchStatus: ref.matchStatus || 'matched',
+            weightDiscrepancy: isWeightDisc,
+            discrepancyReason:
+              ref.discrepancyReason ||
+              (isNegative ? 'Negative net payout amount' : 'Payment discrepancy flagged'),
+            saleAmount: ref.saleAmount || 0,
+            returnAmount: ref.returnAmount || 0,
+            shippingOrWeightDeduction: ref.shippingOrWeightDeduction || 0,
+            netAmount: ref.netAmount || 0,
+            expectedReceivable: ref.expectedReceivable || 0,
+            discrepancyAmount: discAmount,
+          });
+        }
+      }
+    }
+  }
+
+  const totalExpectedReceivable = unsettledOrdersAmount + totalSettledBankCash;
+
+  return {
+    summary: {
+      totalExpectedReceivable,
+      totalSettledBankCash,
+      totalDiscrepancyAmount,
+      unsettledOrdersCount: unsettledOrders.length,
+      unsettledOrdersAmount,
+      wrongfulReturnsCount,
+      weightDiscrepanciesCount,
+    },
+    unsettledOrders,
+    discrepancies,
   };
 };

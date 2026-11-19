@@ -32,6 +32,7 @@ const PnLPage: React.FC = () => {
   const { activeAccountId } = useAccountStore();
   const [dateRange, setDateRange] = useState<DateRange>(dateRangePresets().thisMonth);
   const [selectedCategory, setSelectedCategory] = useState<string>('all');
+  const [pnlBasis, setPnlBasis] = useState<'accrual' | 'cash'>('accrual');
 
   // Ad Spend Modal State
   const [isAdModalOpen, setIsAdModalOpen] = useState(false);
@@ -60,6 +61,7 @@ const PnLPage: React.FC = () => {
     categoryId: selectedCategory === 'all' ? undefined : selectedCategory,
     startDate: dateRange.startDate,
     endDate: dateRange.endDate,
+    basis: pnlBasis,
   };
 
   const { data, isLoading } = useQuery({
@@ -150,6 +152,39 @@ const PnLPage: React.FC = () => {
         </div>
 
         <div className="flex flex-wrap items-center gap-2">
+          {/* Dual Basis Switcher */}
+          <div className="flex items-center p-1 bg-gray-100 rounded-lg border border-gray-200">
+            <button
+              type="button"
+              onClick={() => setPnlBasis('accrual')}
+              className={`px-3 py-1 text-xs font-semibold rounded-md transition cursor-pointer ${
+                pnlBasis === 'accrual'
+                  ? 'bg-white text-gray-900 shadow-xs'
+                  : 'text-gray-500 hover:text-gray-800'
+              }`}
+            >
+              Estimated (Accrual)
+            </button>
+            <button
+              type="button"
+              onClick={() => setPnlBasis('cash')}
+              className={`px-3 py-1 text-xs font-semibold rounded-md transition flex items-center gap-1.5 cursor-pointer ${
+                pnlBasis === 'cash'
+                  ? 'bg-emerald-600 text-white shadow-xs'
+                  : 'text-gray-500 hover:text-gray-800'
+              }`}
+            >
+              <span>Actual (Bank Settlements)</span>
+              <span
+                className={`text-[10px] px-1.5 py-0.2 rounded-full font-bold ${
+                  pnlBasis === 'cash' ? 'bg-emerald-700 text-emerald-100' : 'bg-gray-200 text-gray-600'
+                }`}
+              >
+                Cash
+              </span>
+            </button>
+          </div>
+
           {/* Add Ad Spend button */}
           <button
             onClick={() => {
@@ -185,10 +220,82 @@ const PnLPage: React.FC = () => {
         </div>
       </div>
 
-      <div className="flex items-center gap-2 px-3 sm:px-4 py-2 sm:py-2.5 bg-amber-50 border border-amber-100 rounded-lg text-xs text-amber-700">
-        <AlertTriangle className="w-3.5 h-3.5 flex-shrink-0" />
-        These are <strong className="mx-1">estimated</strong> figures based on recorded sales, returns, ad spend, and operating expenses. Partner-wise distributions are computed in real time.
-      </div>
+      {pnlBasis === 'cash' ? (
+        <div className="p-4 bg-emerald-50 border border-emerald-200 rounded-xl space-y-3">
+          <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+            <div className="flex items-start gap-2.5">
+              <span className="p-1.5 rounded-lg bg-emerald-600 text-white mt-0.5">
+                <Wallet className="w-4 h-4" />
+              </span>
+              <div>
+                <h4 className="text-xs sm:text-sm font-bold text-emerald-950 flex items-center gap-2">
+                  <span>Actual Cash Accounting: Realized Meesho Bank Settlements</span>
+                  <span className="px-2 py-0.5 text-[10px] rounded-full bg-emerald-200 text-emerald-800 font-bold uppercase tracking-wider">
+                    Bank Cash Realized
+                  </span>
+                </h4>
+                <p className="text-xs text-emerald-800 mt-0.5">
+                  Reflects final bank payouts received from Meesho, deducting platform ad costs, program fees, and physical COGS.
+                </p>
+              </div>
+            </div>
+            <div className="flex items-center gap-4 bg-white/90 backdrop-blur-xs px-3.5 py-2 rounded-lg border border-emerald-200 shrink-0">
+              <div>
+                <div className="text-[10px] font-semibold text-gray-500 uppercase">Estimated Accrual Profit</div>
+                <div className="text-xs font-bold text-gray-800 font-mono">
+                  {formatCurrency(pnl?.accrualBasisSummary?.operatingProfit || 0)}
+                </div>
+              </div>
+              <div className="text-gray-300 font-light">vs</div>
+              <div>
+                <div className="text-[10px] font-semibold text-emerald-700 uppercase">Realized Bank Profit</div>
+                <div className="text-xs font-bold text-emerald-700 font-mono">
+                  {formatCurrency(pnl?.operatingProfit || 0)}
+                </div>
+              </div>
+            </div>
+          </div>
+
+          {pnl?.reconciliationGap !== undefined && Math.abs(pnl.reconciliationGap) > 0 && (
+            <div className="flex flex-col sm:flex-row sm:items-center justify-between text-xs pt-2 border-t border-emerald-200/60 text-emerald-900 gap-2">
+              <div className="flex items-center gap-1.5 flex-wrap">
+                <span className="font-semibold">Reconciliation Gap:</span>
+                <span className="font-mono font-bold text-emerald-950">{formatCurrency(pnl.reconciliationGap)}</span>
+                <span className="text-[11px] text-emerald-700">
+                  {pnl.reconciliationGap > 0
+                    ? '(Accrual estimates exceed bank payout: pending deliveries >15d, wrongful RTO deductions, or ad deductions)'
+                    : '(Bank settlement exceeds accrual estimates: delayed payouts from prior period cleared in this cycle)'}
+                </span>
+              </div>
+              <Link
+                to="/payments"
+                className="inline-flex items-center gap-1 text-[11px] font-bold text-indigo-700 hover:text-indigo-900 underline shrink-0"
+              >
+                Inspect Settlement Reconciliation
+                <ChevronRight className="w-3.5 h-3.5" />
+              </Link>
+            </div>
+          )}
+        </div>
+      ) : (
+        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 px-3 sm:px-4 py-2 sm:py-2.5 bg-amber-50 border border-amber-100 rounded-lg text-xs text-amber-700">
+          <div className="flex items-center gap-2">
+            <AlertTriangle className="w-3.5 h-3.5 flex-shrink-0" />
+            <span>
+              These are <strong className="mx-1">estimated accrual</strong> figures based on recorded sales, returns, and catalog costs. Switch to <strong className="mx-1">Actual Bank Settlements</strong> to view cash deposited into your bank.
+            </span>
+          </div>
+          {pnl?.reconciliationGap !== undefined && (
+            <button
+              type="button"
+              onClick={() => setPnlBasis('cash')}
+              className="text-[11px] font-bold text-emerald-700 hover:text-emerald-900 underline shrink-0 whitespace-nowrap cursor-pointer"
+            >
+              Compare with Realized Cash (Gap: {formatCurrency(pnl.reconciliationGap)})
+            </button>
+          )}
+        </div>
+      )}
 
       {isLoading ? (
         <LoadingSpinner />
@@ -201,17 +308,31 @@ const PnLPage: React.FC = () => {
             {/* P&L Statement */}
             <div className="card p-3.5 sm:p-6">
               <h2 className="text-sm font-bold text-gray-700 mb-4 uppercase tracking-wider flex items-center justify-between">
-                <span>Income Statement</span>
-                <span className="text-[11px] font-normal text-gray-500 lowercase bg-gray-100 px-2 py-0.5 rounded">
-                  purchase + packing + ads + customer returns
+                <span>Income Statement ({pnlBasis === 'cash' ? 'Bank Settlements' : 'Accrual Basis'})</span>
+                <span
+                  className={`text-[11px] font-semibold uppercase px-2 py-0.5 rounded ${
+                    pnlBasis === 'cash' ? 'bg-emerald-100 text-emerald-800' : 'bg-gray-100 text-gray-600'
+                  }`}
+                >
+                  {pnlBasis === 'cash' ? 'Cash Basis' : 'Accrual Basis'}
                 </span>
               </h2>
               <div className="space-y-0.5">
                 {/* 1. Revenue / Net Sales */}
-                <Row label="Gross Sales / Order Value" value={pnl.grossOrderValue} bold />
-                <Row label="Sales Cancellations" value={-pnl.salesCancellations} indent />
-                <Row label="Sales Returns / Refunds (Reversals)" value={-pnl.returnsRefunds} indent />
-                <Row label="Net Sales" value={pnl.netSales} bold subtotal />
+                {pnlBasis === 'cash' ? (
+                  <>
+                    <Row label="Gross Sales Credited by Bank" value={pnl.grossOrderValue} bold />
+                    <Row label="Less: Return Deductions by Meesho" value={-pnl.returnsRefunds} indent />
+                    <Row label="Net Bank Sales" value={pnl.netSales} bold subtotal />
+                  </>
+                ) : (
+                  <>
+                    <Row label="Gross Sales / Order Value" value={pnl.grossOrderValue} bold />
+                    <Row label="Sales Cancellations" value={-pnl.salesCancellations} indent />
+                    <Row label="Sales Returns / Refunds (Reversals)" value={-pnl.returnsRefunds} indent />
+                    <Row label="Net Sales" value={pnl.netSales} bold subtotal />
+                  </>
+                )}
 
                 <div className="h-2" />
 

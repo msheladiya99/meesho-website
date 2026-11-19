@@ -40,7 +40,16 @@ const paymentOrderRefSchema = new mongoose_1.Schema({
     orderId: { type: mongoose_1.Schema.Types.ObjectId, ref: 'Order' },
     saleAmount: { type: Number, default: 0 },
     returnAmount: { type: Number, default: 0 },
+    shippingOrWeightDeduction: { type: Number, default: 0 },
     netAmount: { type: Number, default: 0 },
+    matchStatus: {
+        type: String,
+        enum: ['matched', 'unmatched_order', 'underpaid', 'wrongful_return_deduction'],
+        default: 'matched',
+    },
+    weightDiscrepancy: { type: Boolean, default: false },
+    discrepancyReason: { type: String },
+    expectedReceivable: { type: Number, default: 0 },
 }, { _id: false });
 const paymentSchema = new mongoose_1.Schema({
     businessAccount: {

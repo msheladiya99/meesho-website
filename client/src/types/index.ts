@@ -525,6 +525,32 @@ export interface CustomerReturnCharge {
 }
 
 export interface PnLData {
+  basis?: 'accrual' | 'cash';
+  reconciliationGap?: number;
+  cashBasisSummary?: {
+    bankSales: number;
+    returnsDeductions: number;
+    adsRecovery: number;
+    programCosts: number;
+    otherDeductions: number;
+    programBenefits: number;
+    referralEarnings: number;
+    otherCompensation: number;
+    netBankSettlement: number;
+    costOfGoodsSold: number;
+    packingCharges: number;
+    operatingExpenses: number;
+    netBankProfit: number;
+    profitMargin: number;
+  };
+  accrualBasisSummary?: {
+    grossOrderValue: number;
+    netSales: number;
+    cogs: number;
+    packing: number;
+    operatingExpenses: number;
+    operatingProfit: number;
+  };
   grossOrderValue: number;
   totalSales: number;
   salesCancellations: number;
@@ -638,6 +664,73 @@ export interface PaymentDashboardData {
   }>;
 }
 
+export type ReconciliationMatchStatus =
+  | 'matched'
+  | 'unmatched_order'
+  | 'underpaid'
+  | 'wrongful_return_deduction';
+
+export interface PaymentOrderRef {
+  subOrderId: string;
+  orderId?: string;
+  saleAmount?: number;
+  returnAmount?: number;
+  shippingOrWeightDeduction?: number;
+  netAmount?: number;
+  matchStatus?: ReconciliationMatchStatus;
+  weightDiscrepancy?: boolean;
+  discrepancyReason?: string;
+  expectedReceivable?: number;
+}
+
+export interface UnsettledOrder {
+  orderId: string;
+  subOrderId: string;
+  orderDate: string;
+  sku: string;
+  productName?: string;
+  grossAmount: number; // paise
+  sellingPrice: number; // paise
+  quantity: number;
+  status: string;
+  carrierName?: string;
+  shippingLabelId?: string;
+  daysOverdue: number;
+}
+
+export interface PaymentDiscrepancy {
+  subOrderId: string;
+  paymentId?: string;
+  neftId?: string;
+  paymentDate?: string;
+  orderId?: string;
+  matchStatus: ReconciliationMatchStatus;
+  weightDiscrepancy: boolean;
+  discrepancyReason: string;
+  saleAmount: number;
+  returnAmount: number;
+  shippingOrWeightDeduction: number;
+  netAmount: number;
+  expectedReceivable: number;
+  discrepancyAmount: number; // paise
+}
+
+export interface ReconciliationSummary {
+  totalExpectedReceivable: number; // paise
+  totalSettledBankCash: number; // paise
+  totalDiscrepancyAmount: number; // paise
+  unsettledOrdersCount: number;
+  unsettledOrdersAmount: number; // paise
+  wrongfulReturnsCount: number;
+  weightDiscrepanciesCount: number;
+}
+
+export interface ReconciliationData {
+  summary: ReconciliationSummary;
+  unsettledOrders: UnsettledOrder[];
+  discrepancies: PaymentDiscrepancy[];
+}
+
 export interface Payment {
   _id: string;
   businessAccount: BusinessAccount | string;
@@ -658,6 +751,7 @@ export interface Payment {
   netAmount: number;
   ordersCount?: number;
   subOrderIds?: string[];
+  orderRefs?: PaymentOrderRef[];
   notes?: string;
   rawSource: 'manual' | 'sheet_import' | 'auto_calculated';
   createdAt: string;
