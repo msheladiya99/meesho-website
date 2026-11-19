@@ -257,7 +257,7 @@ router.post('/process', auth_1.requireManagerOrAdmin, auth_1.enforceAccountAcces
             returnAmount,
             returnReason: returnReason || (returnType === 'rto_return' ? 'Return to Origin' : 'Customer Return'),
             damageReason,
-            damagePhotos: Array.isArray(photos) ? photos : [],
+            damagePhotos: Array.isArray(photos) ? photos.slice(0, 4) : [],
             damageResolution: 'none',
             itemCondition,
             stockDisposition,
@@ -390,8 +390,10 @@ router.post('/:id/inspect', auth_1.requireManagerOrAdmin, auth_1.enforceAccountA
         returnOrder.inspectedBy = new mongoose_1.default.Types.ObjectId(req.user?._id);
         if (damageReason)
             returnOrder.damageReason = damageReason;
-        if (damagePhotos.length > 0)
-            returnOrder.damagePhotos.push(...damagePhotos);
+        if (Array.isArray(damagePhotos) && damagePhotos.length > 0) {
+            const combined = [...(returnOrder.damagePhotos || []), ...damagePhotos];
+            returnOrder.damagePhotos = combined.slice(0, 4);
+        }
         await returnOrder.save();
         await (0, audit_service_1.createAuditLog)({
             action: 'UPDATE',

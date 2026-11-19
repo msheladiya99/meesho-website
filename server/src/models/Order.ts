@@ -119,6 +119,7 @@ orderSchema.index({ internalQrCode: 1 }, {
 orderSchema.index({ businessAccount: 1, orderDate: -1 });
 orderSchema.index({ businessAccount: 1, status: 1 });
 orderSchema.index({ product: 1 });
+orderSchema.index({ 'items.product': 1 });
 orderSchema.index({ isDeleted: 1 });
 
 export const Order = mongoose.model<IOrder>('Order', orderSchema);

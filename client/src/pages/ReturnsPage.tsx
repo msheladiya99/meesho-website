@@ -17,6 +17,39 @@ import Modal from '../components/ui/Modal';
 import toast from 'react-hot-toast';
 import type { ReturnOrder, Product, ScanException } from '../types';
 
+// Client-side image compression helper to prevent 16MB BSON bloat
+const compressImage = (file: File, maxWidth = 1024, quality = 0.7): Promise<string> => {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.readAsDataURL(file);
+    reader.onload = (event) => {
+      const img = new window.Image();
+      img.src = event.target?.result as string;
+      img.onload = () => {
+        let width = img.width;
+        let height = img.height;
+        if (width > maxWidth) {
+          height = Math.round((height * maxWidth) / width);
+          width = maxWidth;
+        }
+        const canvas = document.createElement('canvas');
+        canvas.width = width;
+        canvas.height = height;
+        const ctx = canvas.getContext('2d');
+        if (!ctx) {
+          resolve(event.target?.result as string);
+          return;
+        }
+        ctx.drawImage(img, 0, 0, width, height);
+        const compressedDataUrl = canvas.toDataURL('image/jpeg', quality);
+        resolve(compressedDataUrl);
+      };
+      img.onerror = (err: any) => reject(err);
+    };
+    reader.onerror = (err: any) => reject(err);
+  });
+};
+
 export const ReturnsPage: React.FC = () => {
   const { activeAccountId, getActiveAccount } = useAccountStore();
   const qc = useQueryClient();
@@ -112,24 +145,38 @@ export const ReturnsPage: React.FC = () => {
     lookupMutation.mutate(clean);
   };
 
-  // Photo upload handling (convert to base64)
-  const handlePhotoUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
+  // Photo upload handling (resize to max 1024px width, compress to JPEG 0.7, cap at 4 photos)
+  const handlePhotoUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const files = e.target.files;
     if (!files || files.length === 0) return;
 
-    Array.from(files).forEach((file) => {
-      if (file.size > 2 * 1024 * 1024) {
-        toast.error('Image must be under 2MB');
-        return;
+    const currentCount = photoPreviews.length;
+    if (currentCount >= 4) {
+      toast.error('Maximum 4 damage photos allowed per return');
+      return;
+    }
+
+    const availableSlots = 4 - currentCount;
+    const selectedFiles = Array.from(files).slice(0, availableSlots);
+
+    if (files.length > availableSlots) {
+      toast.error('Maximum 4 photos allowed. Extra photos were ignored.');
+    }
+
+    for (const file of selectedFiles) {
+      try {
+        const compressedBase64 = await compressImage(file, 1024, 0.7);
+        setPhotoPreviews((prev) => {
+          if (prev.length >= 4) return prev;
+          return [...prev, compressedBase64];
+        });
+      } catch (err) {
+        console.error('Failed to compress image:', err);
+        toast.error('Failed to process image');
       }
-      const reader = new FileReader();
-      reader.onload = () => {
-        if (typeof reader.result === 'string') {
-          setPhotoPreviews((prev) => [...prev, reader.result as string]);
-        }
-      };
-      reader.readAsDataURL(file);
-    });
+    }
+
+    e.target.value = '';
   };
 
   // Process Return Mutation

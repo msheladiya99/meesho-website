@@ -19,9 +19,15 @@ const auth_1 = require("../middleware/auth");
 const inventory_service_1 = require("../services/inventory.service");
 const router = (0, express_1.Router)();
 router.use(auth_1.authenticate);
-const acctFilter = (accountId) => accountId && accountId !== 'all' && mongoose_1.default.Types.ObjectId.isValid(accountId)
-    ? { businessAccount: new mongoose_1.default.Types.ObjectId(accountId) }
-    : {};
+const acctFilter = (accountId, allowedAccounts) => {
+    if (accountId && accountId !== 'all' && mongoose_1.default.Types.ObjectId.isValid(accountId)) {
+        return { businessAccount: new mongoose_1.default.Types.ObjectId(accountId) };
+    }
+    if (allowedAccounts && allowedAccounts.length > 0) {
+        return { businessAccount: { $in: allowedAccounts.map(id => new mongoose_1.default.Types.ObjectId(id)) } };
+    }
+    return {};
+};
 const dateFilter = (startDate, endDate, field = 'orderDate') => {
     if (!startDate && !endDate)
         return {};
@@ -72,7 +78,7 @@ const getAccountInventoryStats = async (accountId, products = []) => {
 router.get('/dashboard', auth_1.enforceAccountAccess, async (req, res) => {
     try {
         const { accountId, startDate, endDate } = req.query;
-        const af = acctFilter(accountId);
+        const af = acctFilter(accountId, req.allowedAccountIds);
         const df = dateFilter(startDate, endDate, 'orderDate');
         const rdf = dateFilter(startDate, endDate, 'returnDate');
         const pdf = dateFilter(startDate, endDate, 'purchaseDate');
@@ -182,7 +188,7 @@ router.get('/dashboard', auth_1.enforceAccountAccess, async (req, res) => {
 router.get('/pnl', auth_1.enforceAccountAccess, async (req, res) => {
     try {
         const { accountId, categoryId, startDate, endDate } = req.query;
-        const af = acctFilter(accountId);
+        const af = acctFilter(accountId, req.allowedAccountIds);
         const df = dateFilter(startDate, endDate, 'orderDate');
         const rdf = dateFilter(startDate, endDate, 'returnDate');
         const pdf = dateFilter(startDate, endDate, 'purchaseDate');
@@ -196,7 +202,14 @@ router.get('/pnl', auth_1.enforceAccountAccess, async (req, res) => {
             prodFilter = { product: { $in: catProdIds } };
             catChargeFilter = { $or: [{ category: catObjId }, { product: { $in: catProdIds } }] };
         }
-        const [orderAgg, cancelAgg, returnAgg, purchaseAgg, expenseAgg, catExpenses, products, returnChargeAgg, eligibleOrders, adSpendList, activePartners, periodExpenses,] = await Promise.all([
+        const eligibleOrderFilter = {
+            isDeleted: false,
+            status: { $nin: ['cancelled'] },
+            ...af,
+            ...df,
+            ...prodFilter,
+        };
+        const [orderAgg, cancelAgg, returnAgg, purchaseAgg, expenseAgg, catExpenses, products, returnChargeAgg, singleResList, comboResList, adSpendList, activePartners, periodExpenses,] = await Promise.all([
             Order_1.Order.aggregate([{ $match: { isDeleted: false, ...af, ...df, ...prodFilter } }, { $group: { _id: null, gross: { $sum: '$grossAmount' }, qty: { $sum: '$quantity' } } }]),
             Order_1.Order.aggregate([{ $match: { isDeleted: false, status: 'cancelled', ...af, ...df, ...prodFilter } }, { $group: { _id: null, total: { $sum: '$grossAmount' } } }]),
             ReturnOrder_1.ReturnOrder.aggregate([{ $match: { isDeleted: false, ...af, ...rdf, ...prodFilter } }, { $group: { _id: null, total: { $sum: '$returnAmount' } } }]),
@@ -219,13 +232,105 @@ router.get('/pnl', auth_1.enforceAccountAccess, async (req, res) => {
                     },
                 },
             ]),
-            Order_1.Order.find({
-                isDeleted: false,
-                status: { $nin: ['cancelled'] },
-                ...af,
-                ...df,
-                ...prodFilter,
-            }).select('quantity grossAmount sellingPrice product isCombo items').lean(),
+            // 1. Single product orders pipeline
+            Order_1.Order.aggregate([
+                {
+                    $match: {
+                        ...eligibleOrderFilter,
+                        $or: [
+                            { isCombo: false },
+                            { isCombo: { $exists: false } },
+                            { items: { $size: 0 } },
+                            { items: { $exists: false } },
+                        ],
+                    },
+                },
+                {
+                    $lookup: {
+                        from: 'products',
+                        localField: 'product',
+                        foreignField: '_id',
+                        as: 'pDoc',
+                    },
+                },
+                { $unwind: { path: '$pDoc', preserveNullAndEmptyArrays: true } },
+                {
+                    $project: {
+                        qty: { $ifNull: ['$quantity', 1] },
+                        pCost: { $ifNull: ['$pDoc.defaultPurchaseCost', { $ifNull: ['$pDoc.weightedAvgCost', 5500] }] },
+                        bCost: { $ifNull: ['$pDoc.boxCost', 200] },
+                        sCost: { $ifNull: ['$pDoc.stickerCost', 100] },
+                        bcCost: { $ifNull: ['$pDoc.bagCardCost', 100] },
+                        plCost: { $ifNull: ['$pDoc.printLabelCost', 100] },
+                    },
+                },
+                {
+                    $group: {
+                        _id: null,
+                        ordersCount: { $sum: 1 },
+                        totalUnits: { $sum: '$qty' },
+                        totalPurchaseCost: { $sum: { $multiply: ['$pCost', '$qty'] } },
+                        totalBoxCost: { $sum: { $multiply: ['$bCost', '$qty'] } },
+                        totalStickerCost: { $sum: { $multiply: ['$sCost', '$qty'] } },
+                        totalBagCardCost: { $sum: { $multiply: ['$bcCost', '$qty'] } },
+                        totalPrintLabelCost: { $sum: '$plCost' },
+                    },
+                },
+            ]),
+            // 2. Combo orders pipeline
+            Order_1.Order.aggregate([
+                {
+                    $match: {
+                        ...eligibleOrderFilter,
+                        isCombo: true,
+                        'items.0': { $exists: true },
+                    },
+                },
+                {
+                    $facet: {
+                        orderSummary: [
+                            {
+                                $group: {
+                                    _id: null,
+                                    ordersCount: { $sum: 1 },
+                                    totalPrintLabelCost: { $sum: 100 },
+                                },
+                            },
+                        ],
+                        itemSummary: [
+                            { $unwind: '$items' },
+                            {
+                                $lookup: {
+                                    from: 'products',
+                                    localField: 'items.product',
+                                    foreignField: '_id',
+                                    as: 'pDoc',
+                                },
+                            },
+                            { $unwind: { path: '$pDoc', preserveNullAndEmptyArrays: true } },
+                            {
+                                $project: {
+                                    qty: { $ifNull: ['$items.quantity', 1] },
+                                    pCost: { $ifNull: ['$pDoc.defaultPurchaseCost', { $ifNull: ['$pDoc.weightedAvgCost', 5500] }] },
+                                    bCost: { $ifNull: ['$pDoc.boxCost', 200] },
+                                    sCost: { $ifNull: ['$pDoc.stickerCost', 100] },
+                                    bcCost: { $ifNull: ['$pDoc.bagCardCost', 100] },
+                                },
+                            },
+                            {
+                                $group: {
+                                    _id: null,
+                                    totalUnits: { $sum: '$qty' },
+                                    totalPurchaseCost: { $sum: { $multiply: ['$pCost', '$qty'] } },
+                                    totalBoxCost: { $sum: { $multiply: ['$bCost', '$qty'] } },
+                                    totalStickerCost: { $sum: { $multiply: ['$sCost', '$qty'] } },
+                                    totalBagCardCost: { $sum: { $multiply: ['$bcCost', '$qty'] } },
+                                },
+                            },
+                        ],
+                    },
+                },
+            ]),
             Expense_1.Expense.find({
                 isDeleted: false,
                 ...af,
@@ -249,53 +354,29 @@ router.get('/pnl', auth_1.enforceAccountAccess, async (req, res) => {
         const salesCancellations = cancelAgg[0]?.total || 0;
         const returnsRefunds = returnAgg[0]?.total || 0;
         const netSales = grossOrderValue - salesCancellations - returnsRefunds;
-        // Build product lookup map for accurate purchase and packaging calculations
-        const allProducts = await Product_1.Product.find().lean();
-        const productMap = new Map();
-        allProducts.forEach((p) => productMap.set(p._id.toString(), p));
-        let totalPurchaseCost = 0;
-        let totalBoxCost = 0;
-        let totalStickerCost = 0;
-        let totalBagCardCost = 0;
-        let totalPrintLabelCost = 0;
-        let totalUnitsSold = 0;
-        const totalOrdersCount = eligibleOrders.length;
-        for (const o of eligibleOrders) {
-            if (o.isCombo && Array.isArray(o.items) && o.items.length > 0) {
-                // 1 print label per parcel
-                totalPrintLabelCost += 100;
-                for (const it of o.items) {
-                    const pid = it.product ? it.product.toString() : '';
-                    const prod = productMap.get(pid);
-                    const qty = it.quantity || 1;
-                    totalUnitsSold += qty;
-                    const pCost = prod ? (prod.defaultPurchaseCost || prod.weightedAvgCost || 5500) : 5500;
-                    const bCost = prod?.boxCost ?? 200;
-                    const sCost = prod?.stickerCost ?? 100;
-                    const bcCost = prod?.bagCardCost ?? 100;
-                    totalPurchaseCost += pCost * qty;
-                    totalBoxCost += bCost * qty;
-                    totalStickerCost += sCost * qty;
-                    totalBagCardCost += bcCost * qty;
-                }
-            }
-            else {
-                const pid = o.product ? o.product.toString() : '';
-                const prod = productMap.get(pid);
-                const qty = o.quantity || 1;
-                totalUnitsSold += qty;
-                const pCost = prod ? (prod.defaultPurchaseCost || prod.weightedAvgCost || 5500) : 5500;
-                const bCost = prod?.boxCost ?? 200;
-                const sCost = prod?.stickerCost ?? 100;
-                const bcCost = prod?.bagCardCost ?? 100;
-                const plCost = prod?.printLabelCost ?? 100;
-                totalPurchaseCost += pCost * qty;
-                totalBoxCost += bCost * qty;
-                totalStickerCost += sCost * qty;
-                totalBagCardCost += bcCost * qty;
-                totalPrintLabelCost += plCost;
-            }
-        }
+        const singleRes = singleResList[0];
+        const comboRes = comboResList[0];
+        const singleOrdersCount = singleRes?.ordersCount || 0;
+        const singleUnits = singleRes?.totalUnits || 0;
+        const singlePurchaseCost = singleRes?.totalPurchaseCost || 0;
+        const singleBoxCost = singleRes?.totalBoxCost || 0;
+        const singleStickerCost = singleRes?.totalStickerCost || 0;
+        const singleBagCardCost = singleRes?.totalBagCardCost || 0;
+        const singlePrintLabelCost = singleRes?.totalPrintLabelCost || 0;
+        const comboOrdersCount = comboRes?.orderSummary?.[0]?.ordersCount || 0;
+        const comboPrintLabelCost = comboRes?.orderSummary?.[0]?.totalPrintLabelCost || 0;
+        const comboUnits = comboRes?.itemSummary?.[0]?.totalUnits || 0;
+        const comboPurchaseCost = comboRes?.itemSummary?.[0]?.totalPurchaseCost || 0;
+        const comboBoxCost = comboRes?.itemSummary?.[0]?.totalBoxCost || 0;
+        const comboStickerCost = comboRes?.itemSummary?.[0]?.totalStickerCost || 0;
+        const comboBagCardCost = comboRes?.itemSummary?.[0]?.totalBagCardCost || 0;
+        const totalOrdersCount = singleOrdersCount + comboOrdersCount;
+        const totalUnitsSold = singleUnits + comboUnits;
+        const totalPurchaseCost = singlePurchaseCost + comboPurchaseCost;
+        const totalBoxCost = singleBoxCost + comboBoxCost;
+        const totalStickerCost = singleStickerCost + comboStickerCost;
+        const totalBagCardCost = singleBagCardCost + comboBagCardCost;
+        const totalPrintLabelCost = singlePrintLabelCost + comboPrintLabelCost;
         // Packing charges = Box + Sticker + POP Bag & Review Card + Order Print Label
         const totalPackingCharges = totalBoxCost + totalStickerCost + totalBagCardCost + totalPrintLabelCost;
         const totalPurchaseAndPackingCost = totalPurchaseCost + totalPackingCharges;

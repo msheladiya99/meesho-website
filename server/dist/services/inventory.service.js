@@ -46,52 +46,59 @@ const recordStockMovement = async (params) => {
     const product = await Product_1.Product.findById(productId).session(session || null);
     if (!product)
         throw new Error(`Product ${productId} not found`);
-    let previousStock = 0;
-    let resultingStock = 0;
-    let newWeightedAvgCost = product.weightedAvgCost;
-    const productUpdate = {};
+    // Target bucket field mapping
+    let targetField = 'currentStock';
     if (stockBucket === 'damaged') {
-        previousStock = product.damagedStock || 0;
-        resultingStock = previousStock + quantity;
-        if (resultingStock < 0) {
-            throw new Error(`Insufficient damaged stock for "${product.name}". Available: ${previousStock}, Requested deduction: ${Math.abs(quantity)}`);
-        }
-        productUpdate.damagedStock = resultingStock;
+        targetField = 'damagedStock';
     }
     else if (stockBucket === 'pending') {
-        previousStock = product.pendingInspectionStock || 0;
-        resultingStock = previousStock + quantity;
-        if (resultingStock < 0) {
-            throw new Error(`Insufficient pending stock for "${product.name}". Available: ${previousStock}, Requested deduction: ${Math.abs(quantity)}`);
-        }
-        productUpdate.pendingInspectionStock = resultingStock;
+        targetField = 'pendingInspectionStock';
     }
-    else {
-        // Default: saleable stock
-        previousStock = product.currentStock;
-        resultingStock = previousStock + quantity;
-        if (resultingStock < 0 && movementType !== 'sale') {
-            throw new Error(`Insufficient saleable stock for product "${product.name}". Available: ${product.currentStock}, Requested: ${Math.abs(quantity)}`);
-        }
-        productUpdate.currentStock = Math.max(0, resultingStock);
-        // Update weighted average cost on saleable stock IN
-        if (quantity > 0 && unitCost > 0) {
-            const currentValue = product.currentStock * product.weightedAvgCost;
-            const incomingValue = quantity * unitCost;
-            newWeightedAvgCost = Math.round((currentValue + incomingValue) / (resultingStock > 0 ? resultingStock : 1));
-            productUpdate.weightedAvgCost = newWeightedAvgCost;
-        }
+    // Atomic conditional query guard for deductions to prevent negative stock and race conditions
+    const filter = { _id: productId };
+    if (quantity < 0) {
+        filter[targetField] = { $gte: Math.abs(quantity) };
     }
+    const update = {
+        $inc: { [targetField]: quantity },
+    };
+    // If purchase with unit cost, update default purchase cost
     if (movementType === 'purchase' && unitCost > 0) {
-        productUpdate.defaultPurchaseCost = unitCost;
+        update.$set = update.$set || {};
+        update.$set.defaultPurchaseCost = unitCost;
     }
+    // Calculate weighted average cost on saleable stock addition
+    if (stockBucket === 'saleable' && quantity > 0 && unitCost > 0) {
+        const curStock = product.currentStock || 0;
+        const curCost = product.weightedAvgCost || product.defaultPurchaseCost || 0;
+        const incomingVal = quantity * unitCost;
+        const newStock = curStock + quantity;
+        const newAvg = Math.round(((curStock * curCost) + incomingVal) / (newStock > 0 ? newStock : 1));
+        update.$set = update.$set || {};
+        update.$set.weightedAvgCost = newAvg;
+    }
+    // Execute atomic MongoDB update with conditional guard
+    const updatedProduct = await Product_1.Product.findOneAndUpdate(filter, update, {
+        new: true,
+        session: session || undefined,
+    });
+    if (!updatedProduct) {
+        const fresh = await Product_1.Product.findById(productId).session(session || null);
+        if (!fresh)
+            throw new Error(`Product ${productId} not found`);
+        const available = fresh[targetField] || 0;
+        throw new Error(`Insufficient ${stockBucket} stock for "${fresh.name}". Available: ${available}, Requested deduction: ${Math.abs(quantity)}`);
+    }
+    const resultingStock = updatedProduct[targetField] ?? 0;
+    const previousStock = resultingStock - quantity;
+    const newWeightedAvgCost = updatedProduct.weightedAvgCost || updatedProduct.defaultPurchaseCost || 0;
     const transactionId = (0, exports.generateStockTransactionId)();
     // Create immutable ledger entry
     await StockMovement_1.StockMovement.create([{
             transactionId,
             businessAccount: new mongoose_1.default.Types.ObjectId(businessAccount),
             product: new mongoose_1.default.Types.ObjectId(productId),
-            sku: product.sku,
+            sku: updatedProduct.sku,
             stockBucket,
             movementType,
             quantity,
@@ -104,8 +111,6 @@ const recordStockMovement = async (params) => {
             runningBalance: resultingStock,
             createdBy: createdBy ? new mongoose_1.default.Types.ObjectId(createdBy) : undefined,
         }], { session });
-    // Update product model
-    await Product_1.Product.findByIdAndUpdate(productId, productUpdate, { session });
 };
 exports.recordStockMovement = recordStockMovement;
 /**

@@ -74,7 +74,14 @@ const returnOrderSchema = new Schema<IReturnOrder>({
   returnAmount: { type: Number, required: true },         // paise
   returnReason: { type: String },
   damageReason: { type: String },
-  damagePhotos: [{ type: String }],
+  damagePhotos: {
+    type: [String],
+    validate: [
+      (val: string[]) => !val || val.length <= 4,
+      'A maximum of 4 damage photos can be attached per return',
+    ],
+    default: [],
+  },
   damageResolution: {
     type: String,
     enum: ['none', 'repaired', 'disposed', 'resale_approved'],
